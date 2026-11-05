@@ -192,7 +192,19 @@ svg { display: block; flex: none; width: 16px; height: 16px; }
 }
 .chat-head-main { flex: 1; min-width: 0; }
 .chat-title { font-weight: 600; font-size: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-sub { display: flex; align-items: center; gap: 8px; margin-top: 2px; font-size: 12.5px; color: var(--muted); min-height: 18px; }
+.chat-sub { display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 12px; color: var(--muted); min-height: 22px; flex-wrap: nowrap; overflow: hidden; }
+.hchip { display: inline-flex; align-items: center; gap: 5px; height: 24px; box-sizing: border-box; padding: 0 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel, transparent); color: var(--text-2, var(--muted)); font: inherit; white-space: nowrap; cursor: pointer; flex-shrink: 0; max-width: 220px; transition: background .12s, border-color .12s; }
+.hchip:hover { border-color: var(--line-2); background: var(--hover, rgba(0,0,0,.04)); }
+.hchip svg { width: 12px; height: 12px; flex-shrink: 0; opacity: .8; }
+.hchip .t { overflow: hidden; text-overflow: ellipsis; }
+.hchip .dim { color: var(--muted); opacity: .8; padding-left: 5px; border-left: 1px solid currentColor; border-left-color: rgba(127,127,127,.35); }
+.hchip .p-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.hchip.hc-proj { background: #fdf4e4; border-color: #f1dfbd; color: #9a6a12; font-weight: 500; }
+.hchip.hc-model { flex-shrink: 1; min-width: 90px; max-width: 280px; }
+.hchip.hc-skill { color: var(--skill); }
+.hchip.hc-mcp { color: var(--mcp); }
+.hdiv { width: 1px; height: 14px; background: var(--line-2); flex-shrink: 0; margin: 0 2px; }
+:root[data-theme="dark"] .hchip.hc-proj { background: #3a2e1e; border-color: #4d3d26; color: #e3a75a; }
 .chat-sub .sq { width: 8px; height: 8px; border-radius: 2px; background: var(--accent); }
 .chat-sub .model { display: inline-flex; align-items: center; gap: 6px; }
 .chat-sub .sep { width: 3px; height: 3px; border-radius: 50%; background: var(--line-2); }

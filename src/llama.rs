@@ -280,26 +280,44 @@ impl Llama {
 
     /// Acompanha a saúde do servidor: 1 s enquanto carrega, 5 s no resto do tempo.
     pub async fn monitor(app: Arc<App>) {
+        // Seguidas sem resposta. Durante uma geração pesada (MoE na CPU, prompt longo) o
+        // llama-server pode demorar para atender o /health: isso NÃO é "carregando".
+        let mut misses = 0u32;
         loop {
             let url = format!("{}/health", app.llama.cfg().base_url());
-            // 200 = pronto; qualquer outra resposta (503 enquanto carrega) = existe, mas carregando
-            let health = match app.http.get(&url).timeout(Duration::from_secs(3)).send().await {
+            // 200 = pronto; 503 = carregando; sem resposta = ocupado ou fora do ar
+            let health = match app.http.get(&url).timeout(Duration::from_secs(8)).send().await {
                 Ok(r) if r.status().is_success() => 2,
-                Ok(_) => 1,
+                Ok(r) if r.status().as_u16() == 503 => 1,
+                Ok(_) => 2, // respondeu algo: está de pé
                 Err(_) => 0,
             };
+            misses = if health == 0 { misses + 1 } else { 0 };
             let ours = app.llama.is_running();
+            let prev = app.llama.state();
             let s = match (ours, health) {
                 (true, 2) => "ready",
+                (true, 1) => "loading",
+                // processo nosso vivo e já estava pronto: só está ocupado
+                (true, _) if prev == "ready" => "ready",
                 (true, _) => "loading",
                 (false, 2) => "external",
                 (false, 1) => "external-loading",
+                // externo pronto que parou de responder: espera ~30 s antes de dar como parado
+                (false, _) if (prev == "external" || prev == "external-loading") && misses < 4 => sticky(prev),
                 (false, _) => "stopped",
             };
             app.llama.set_state(&app, s);
             let wait = if s.ends_with("loading") { 1 } else { 5 };
             tokio::time::sleep(Duration::from_secs(wait)).await;
         }
+    }
+}
+
+fn sticky(s: String) -> &'static str {
+    match s.as_str() {
+        "external" => "external",
+        _ => "external-loading",
     }
 }
 
