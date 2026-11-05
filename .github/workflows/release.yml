@@ -1,9 +1,10 @@
 name: Release
 
-# Publica uma versão quando um tag vX.Y.Z é enviado:
-#   git tag v2.1.1 && git push origin v2.1.1
+# Publica uma versão nova sempre que o "version" do Cargo.toml muda no main
+# (o tag vX.Y.Z é criado aqui). Também aceita um tag vX.Y.Z enviado à mão.
 on:
   push:
+    branches: [main]
     tags: ['v*']
   workflow_dispatch:
 
@@ -16,17 +17,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Versão a partir do Cargo.toml
+        id: ver
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          if ("${{ github.ref_type }}" -eq "tag") { $v = "${{ github.ref_name }}".TrimStart('v') }
+          "STUDIO_VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append
+          gh release view "v$v" --repo "${{ github.repository }}" *> $null
+          $novo = if ($LASTEXITCODE -eq 0) { "false" } else { "true" }
+          "publicar=$novo" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Versão $v; publicar: $novo"
+          $global:LASTEXITCODE = 0
+
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
-
-      - name: Versão a partir do tag
-        shell: pwsh
-        run: |
-          $v = "${{ github.ref_name }}".TrimStart('v')
-          if ($v -notmatch '^\d+\.\d+\.\d+') { $v = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value }
-          "STUDIO_VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "Versão: $v"
 
       - name: Conferir a interface
         run: node --check ui/app.js
@@ -49,17 +57,20 @@ jobs:
           Get-FileHash dist/llama-studio.exe, dist/ui.zip | ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } | Out-File dist/SHA256SUMS.txt -Encoding ascii
 
       - name: Publicar release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: steps.ver.outputs.publicar == 'true'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ env.STUDIO_VERSION }}
+          name: llama studio ${{ env.STUDIO_VERSION }}
+          target_commitish: ${{ github.sha }}
           files: |
             dist/llama-studio.exe
             dist/ui.zip
             dist/SHA256SUMS.txt
           generate_release_notes: true
 
-      - name: Guardar artefatos (execução manual)
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+      - name: Guardar artefatos (sem versão nova)
+        if: steps.ver.outputs.publicar != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: llama-studio

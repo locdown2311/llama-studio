@@ -25,12 +25,11 @@ uma rota nova do servidor, suba para a versão em que a rota apareceu.
 
 ### Lançar uma versão
 
-```
-git tag v2.1.1
-git push origin v2.1.1
-```
+Suba o `version` no `Cargo.toml` (ex.: `2.1.1`) e faça push no `main`. O workflow `Release`
+compila no Windows, cria o tag `v2.1.1`, gera os dois pacotes e publica a release. Pushes sem
+mudança de versão só compilam e guardam o resultado como artefato do workflow.
 
-O workflow `Release` compila no Windows, gera os dois pacotes e publica a release.
+(Enviar um tag `vX.Y.Z` à mão também publica.)
 
 ## Estrutura
 
