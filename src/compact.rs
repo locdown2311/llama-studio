@@ -6,8 +6,6 @@ use std::path::{Path, PathBuf};
 
 pub struct Compacted {
     pub text: String,
-    /// caracteres economizados
-    pub saved: usize,
 }
 
 pub fn saidas_dir(app: &crate::app::App) -> PathBuf {
@@ -91,10 +89,9 @@ pub fn clean(s: &str) -> String {
 
 /// Limpa e, se passar de `limit` caracteres, corta o meio e salva a saída inteira.
 pub fn compact(text: &str, save_dir: &Path, label: &str, limit: usize) -> Compacted {
-    let before = text.len();
     let c = clean(text);
     if c.len() <= limit {
-        return Compacted { saved: before.saturating_sub(c.len()), text: c };
+        return Compacted { text: c };
     }
     let lines: Vec<&str> = c.lines().collect();
     let head_budget = limit * 2 / 5;
@@ -123,7 +120,7 @@ pub fn compact(text: &str, save_dir: &Path, label: &str, limit: usize) -> Compac
         }
         let file = save(save_dir, label, &c);
         let text = format!("{}\n\n[... {} caracteres omitidos{}]\n\n{}", &c[..a], b - a, note(&file), &c[b..]);
-        return Compacted { saved: before.saturating_sub(text.len()), text };
+        return Compacted { text };
     }
     let file = save(save_dir, label, &c);
     let omitted = tail - head;
@@ -136,7 +133,7 @@ pub fn compact(text: &str, save_dir: &Path, label: &str, limit: usize) -> Compac
         note(&file),
         lines[tail..].join("\n")
     );
-    Compacted { saved: before.saturating_sub(text.len()), text }
+    Compacted { text }
 }
 
 fn note(file: &Option<PathBuf>) -> String {
