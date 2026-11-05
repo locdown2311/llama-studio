@@ -1,0 +1,66 @@
+name: Release
+
+# Publica uma versão quando um tag vX.Y.Z é enviado:
+#   git tag v2.1.1 && git push origin v2.1.1
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Versão a partir do tag
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}".TrimStart('v')
+          if ($v -notmatch '^\d+\.\d+\.\d+') { $v = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value }
+          "STUDIO_VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Versão: $v"
+
+      - name: Conferir a interface
+        run: node --check ui/app.js
+
+      - name: Compilar
+        run: cargo build --release --locked
+
+      - name: Empacotar
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item target/release/llama-studio.exe dist/
+          Copy-Item -Recurse ui dist/ui
+          $min = (Get-Content dist/ui/min-exe.txt -Raw).Trim()
+          Remove-Item dist/ui/min-exe.txt
+          @{ version = $env:STUDIO_VERSION; minExe = $min } | ConvertTo-Json | Out-File dist/ui/version.json -Encoding utf8NoBOM
+          Push-Location dist/ui
+          7z a -tzip ../ui.zip * | Out-Null
+          Pop-Location
+          Get-FileHash dist/llama-studio.exe, dist/ui.zip | ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } | Out-File dist/SHA256SUMS.txt -Encoding ascii
+
+      - name: Publicar release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/llama-studio.exe
+            dist/ui.zip
+            dist/SHA256SUMS.txt
+          generate_release_notes: true
+
+      - name: Guardar artefatos (execução manual)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-studio
+          path: dist/

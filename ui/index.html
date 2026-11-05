@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>llama studio</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%235b5bd6'/%3E%3Cpath d='M11 23V9h3v11h7v3z' fill='white'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<script src="/vendor/marked.js"></script>
+<script src="/vendor/purify.js"></script>
+<script src="/vendor/hljs.js"></script>
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <div class="side-top">
+      <div class="logo"><span class="logo-mark">L</span>llama studio</div>
+      <span class="ver" id="app-ver"></span>
+    </div>
+    <label class="search">
+      <span class="search-ico"></span>
+      <input id="search" placeholder="Pesquisar" autocomplete="off">
+      <kbd>Ctrl K</kbd>
+    </label>
+    <nav class="nav" aria-label="Menu">
+      <button class="nav-item" id="nav-new" data-view="chat"></button>
+      <button class="nav-item" data-view="skills"></button>
+      <button class="nav-item" data-view="mcp"></button>
+      <button class="nav-item" data-view="server"></button>
+      <button class="nav-item" data-view="settings"></button>
+    </nav>
+    <div class="side-sec">
+      <button class="sec-head" id="sec-recent" aria-expanded="true"></button>
+      <div class="conv-list" id="conv-list"></div>
+    </div>
+    <div class="server-status" id="server-status"></div>
+  </aside>
+
+  <!-- ===================== CHAT ===================== -->
+  <section class="view active" id="view-chat">
+    <main id="chat">
+      <header class="chat-head">
+        <div class="chat-head-main">
+          <div class="chat-title" id="chat-title">Nova conversa</div>
+          <div class="chat-sub" id="chat-sub"></div>
+        </div>
+        <div class="head-btns">
+          <div class="pick-wrap">
+            <button class="square-btn" id="conv-menu-btn" title="Mais opções" aria-label="Mais opções"></button>
+            <div class="popover down right" id="pop-conv"></div>
+          </div>
+          <button class="square-btn" id="toggle-ws" title="Mostrar ou ocultar o espaço de trabalho" aria-label="Espaço de trabalho"></button>
+        </div>
+      </header>
+      <div id="messages" class="messages"></div>
+
+      <div class="composer-wrap">
+        <div class="composer" id="composer">
+          <div id="input" class="editor" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true"
+               data-placeholder="Pergunte algo ou peça uma tarefa. Digite @ para inserir uma habilidade ou conector, ou arraste arquivos para cá."></div>
+          <div class="bar">
+            <div class="pick-wrap">
+              <button class="bar-btn round" id="plus-btn" title="Inserir" aria-label="Inserir"></button>
+              <div class="popover" id="pop-plus"></div>
+            </div>
+            <div class="pick-wrap">
+              <button class="bar-btn" id="pick-model"></button>
+              <div class="popover" id="pop-model"></div>
+            </div>
+            <div class="pick-wrap">
+              <button class="bar-btn" id="pick-skills"></button>
+              <div class="popover" id="pop-skills"></div>
+            </div>
+            <div class="pick-wrap">
+              <button class="bar-btn" id="pick-mcp"></button>
+              <div class="popover" id="pop-mcp"></div>
+            </div>
+            <div class="pick-wrap">
+              <button class="bar-btn" id="pick-ws"></button>
+              <div class="popover" id="pop-ws"></div>
+            </div>
+            <span class="spacer"></span>
+            <button class="send" id="send" aria-label="Enviar"></button>
+          </div>
+          <div class="popover mention" id="pop-mention"></div>
+          <div class="drop-overlay" aria-hidden="true">
+            <div class="drop-card">
+              <div class="drop-icon"></div>
+              <div class="drop-title">Solte para referenciar</div>
+              <div class="drop-sub">O arquivo não é enviado. Entra na mensagem como uma etiqueta com o caminho completo.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <aside id="ws">
+      <div class="ws-head">
+        <div class="ws-label">Espaço de trabalho</div>
+        <div class="ws-actions">
+          <button class="icon-btn sm" id="ws-refresh" title="Atualizar" aria-label="Atualizar"></button>
+          <button class="icon-btn sm" id="ws-open" title="Abrir no Explorer" aria-label="Abrir no Explorer"></button>
+        </div>
+      </div>
+      <button class="ws-path" id="ws-path" title="Trocar a pasta"></button>
+      <div class="ws-tree" id="ws-tree"></div>
+      <div class="ws-preview" id="ws-preview"></div>
+    </aside>
+  </section>
+
+  <!-- ===================== HABILIDADES ===================== -->
+  <section class="view" id="view-skills">
+    <div class="page">
+      <header class="page-head">
+        <div>
+          <h1>Habilidades</h1>
+          <p class="lead">Instruções que o modelo segue quando você as ativa. Cada habilidade é uma pasta com um <code>SKILL.md</code>.</p>
+        </div>
+        <div class="page-actions">
+          <button class="btn" id="skill-open-dir"></button>
+          <button class="btn primary" id="skill-new"></button>
+        </div>
+      </header>
+
+      <div class="import-zone" id="skill-drop">
+        <div class="iz-icon"></div>
+        <div class="iz-text">
+          <strong>Importar habilidades</strong>
+          <span>Arraste um .zip, um .skill, um SKILL.md ou uma pasta para cá.</span>
+        </div>
+        <div class="iz-actions">
+          <button class="btn" id="skill-import-path">Escolher no computador</button>
+          <label class="btn file-btn">Enviar arquivo<input type="file" id="skill-zip" accept=".zip,.skill,.md" hidden></label>
+        </div>
+      </div>
+
+      <div class="grid" id="skill-grid"></div>
+
+      <section class="subsection">
+        <h2>Outras pastas de habilidades</h2>
+        <p class="muted">Use habilidades que já estão em outro lugar, como <code>~/.claude/skills</code>, sem copiá-las.</p>
+        <div id="extra-dirs"></div>
+        <button class="btn" id="extra-add">Adicionar pasta</button>
+      </section>
+    </div>
+  </section>
+
+  <!-- ===================== CONECTORES ===================== -->
+  <section class="view" id="view-mcp">
+    <div class="page">
+      <header class="page-head">
+        <div>
+          <h1>Conectores</h1>
+          <p class="lead">Servidores MCP que dão ferramentas extras ao modelo: navegador, documentação, Git e o que mais você instalar.</p>
+        </div>
+        <div class="page-actions">
+          <button class="btn" id="mcp-json"></button>
+          <button class="btn" id="mcp-reconnect"></button>
+          <button class="btn primary" id="mcp-new"></button>
+        </div>
+      </header>
+
+      <h2 class="h-small">Adicionar rapidamente</h2>
+      <div class="presets" id="mcp-presets"></div>
+
+      <h2 class="h-small">Seus conectores</h2>
+      <div class="server-list" id="mcp-list"></div>
+    </div>
+  </section>
+
+  <!-- ===================== SERVIDOR ===================== -->
+  <section class="view" id="view-server">
+    <div class="page">
+      <header class="page-head">
+        <div>
+          <h1>Servidor</h1>
+          <p class="lead">O llama-server que roda o modelo. A configuração é a mesma do llama-gui (<code>llama-gui.json</code>).</p>
+        </div>
+      </header>
+      <div class="srv-card" id="srv-status"></div>
+      <div class="srv-grid">
+        <form id="srv-form" class="form card-form"></form>
+        <div class="log-card">
+          <div class="log-head"><span>Log</span><span class="muted" id="srv-log-count"></span><span class="spacer"></span>
+            <button class="btn sm ghost" type="button" onclick="navigator.clipboard.writeText(document.getElementById('srv-log').textContent)">Copiar</button>
+          </div>
+          <pre id="srv-log" class="log"></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== CONFIG ===================== -->
+  <section class="view" id="view-settings">
+    <div class="page narrow">
+      <header class="page-head"><div><h1>Configurações</h1></div></header>
+      <form id="settings-form" class="form card-form"></form>
+    </div>
+  </section>
+</div>
+
+<div id="modal-root"></div>
+<div id="toasts" aria-live="polite"></div>
+<script src="/app.js"></script>
+</body>
+</html>

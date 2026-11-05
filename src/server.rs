@@ -1,0 +1,764 @@
+//! Servidor HTTP local: API do studio, proxy para o llama-server e interface embutida.
+
+use axum::body::{Body, Bytes};
+use axum::extract::{DefaultBodyLimit, Query, Request, State};
+use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{any, get, post};
+use axum::{Json, Router};
+use rust_embed::RustEmbed;
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use crate::app::{self, file_name, is_inside, looks_binary, rel_to, resolve, App, UiMsg};
+use crate::{locate, skills, tools};
+
+#[derive(RustEmbed)]
+#[folder = "ui/"]
+struct Assets;
+
+type S = State<Arc<App>>;
+type Q = Query<HashMap<String, String>>;
+
+pub struct ApiErr(StatusCode, String);
+type Res = Result<Json<Value>, ApiErr>;
+
+impl IntoResponse for ApiErr {
+    fn into_response(self) -> Response {
+        (self.0, Json(json!({"error": self.1}))).into_response()
+    }
+}
+fn bad(m: impl Into<String>) -> ApiErr {
+    ApiErr(StatusCode::BAD_REQUEST, m.into())
+}
+fn ok(v: Value) -> Res {
+    Ok(Json(v))
+}
+fn body(b: &Bytes) -> Value {
+    serde_json::from_slice(b).unwrap_or_else(|_| json!({}))
+}
+fn st<'a>(v: &'a Value, k: &str) -> &'a str {
+    v.get(k).and_then(Value::as_str).unwrap_or("")
+}
+fn strs(v: &Value, k: &str) -> Vec<String> {
+    v.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default()
+}
+fn q<'a>(q: &'a HashMap<String, String>, k: &str) -> &'a str {
+    q.get(k).map(String::as_str).unwrap_or("")
+}
+
+pub fn router(app: Arc<App>) -> Router {
+    Router::new()
+        .route("/api/state", get(state))
+        .route("/api/config", post(set_config))
+        .route("/api/app", get(app_info))
+        .route("/api/app/show", post(app_show))
+        .route("/api/app/quit", post(app_quit))
+        .route("/api/workspace", post(set_workspace))
+        .route("/api/ws/list", get(ws_list))
+        .route("/api/ws/read", get(ws_read))
+        .route("/api/ws/upload", post(ws_upload))
+        .route("/api/reveal", post(reveal))
+        .route("/api/export", post(export_conv))
+        .route("/api/browse", get(browse))
+        .route("/api/locate", post(locate_h))
+        .route("/api/remember", post(remember))
+        .route("/api/stat", post(stat))
+        .route("/api/skills", get(skills_list))
+        .route("/api/skills/get", get(skills_get))
+        .route("/api/skills/save", post(skills_save))
+        .route("/api/skills/delete", post(skills_delete))
+        .route("/api/skills/import-path", post(skills_import_path))
+        .route("/api/skills/import-zip", post(skills_import_zip))
+        .route("/api/skills/open", post(skills_open))
+        .route("/api/mcp", get(mcp_list))
+        .route("/api/mcp/config", get(mcp_config_get).post(mcp_config_set))
+        .route("/api/mcp/upsert", post(mcp_upsert))
+        .route("/api/mcp/import", post(mcp_import))
+        .route("/api/mcp/delete", post(mcp_delete))
+        .route("/api/mcp/toggle", post(mcp_toggle))
+        .route("/api/mcp/reconnect", post(mcp_reconnect))
+        .route("/api/tools", post(tools_list))
+        .route("/api/context", post(context))
+        .route("/api/tools/call", post(tools_call))
+        .route("/api/tools/search", post(tools_search))
+        .route("/api/update", get(update_check))
+        .route("/api/update/ui", post(update_ui))
+        .route("/api/update/reset-ui", post(update_reset_ui))
+        .route("/api/update/exe", post(update_exe))
+        .route("/api/llama", get(llama_get))
+        .route("/api/llama/config", post(llama_config))
+        .route("/api/llama/start", post(llama_start))
+        .route("/api/llama/stop", post(llama_stop))
+        .route("/api/llama/restart", post(llama_restart))
+        .route("/api/llama/log", get(llama_log))
+        .route("/v1/{*rest}", any(proxy))
+        .route("/props", any(proxy))
+        .route("/health", any(proxy))
+        .route("/slots", any(proxy))
+        .route("/tokenize", any(proxy))
+        .route("/detokenize", any(proxy))
+        .route("/apply-template", any(proxy))
+        .route("/models", any(proxy))
+        .fallback(static_file)
+        .layer(DefaultBodyLimit::max(200 * 1024 * 1024))
+        .layer(middleware::from_fn(guard))
+        .with_state(app)
+}
+
+/// Só aceita o próprio computador e exige o cabeçalho X-Studio nas rotas que mudam algo.
+async fn guard(req: Request, next: Next) -> Response {
+    let host = req.headers().get(header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("");
+    let host = if host.starts_with('[') { host.split(']').next().map(|h| format!("{h}]")).unwrap_or_default() } else { host.split(':').next().unwrap_or("").to_string() };
+    if !matches!(host.as_str(), "127.0.0.1" | "localhost" | "[::1]") {
+        return (StatusCode::FORBIDDEN, "Host não permitido").into_response();
+    }
+    let path = req.uri().path();
+    let is_api = path.starts_with("/api/");
+    let is_proxy_write = req.method() != Method::GET && !is_api && path != "/" && !path.contains('.');
+    if (is_api || is_proxy_write) && req.headers().get("x-studio").map(|v| v.as_bytes()) != Some(b"1") {
+        return (StatusCode::FORBIDDEN, Json(json!({"error":"Cabeçalho ausente"}))).into_response();
+    }
+    next.run(req).await
+}
+
+// ---------------------------------------------------------------- estáticos
+
+async fn static_file(State(app): S, req: Request) -> Response {
+    if req.method() != Method::GET {
+        return StatusCode::METHOD_NOT_ALLOWED.into_response();
+    }
+    let path = req.uri().path().trim_start_matches('/');
+    let path = if path.is_empty() { "index.html" } else { path };
+    // interface atualizada (dados\ui) tem prioridade sobre a embutida
+    if crate::update::ui_override_version(&app).is_some() {
+        let dir = crate::update::ui_dir(&app);
+        let file = resolve(&dir, path);
+        if is_inside(&dir, &file) && file.is_file() {
+            if let Ok(data) = std::fs::read(&file) {
+                let mime = mime_guess::from_path(path).first_or_octet_stream();
+                let mut r = Response::new(Body::from(data));
+                r.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_str(mime.as_ref()).unwrap());
+                r.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+                return r;
+            }
+        }
+    }
+    match Assets::get(path) {
+        Some(f) => {
+            let mime = mime_guess::from_path(path).first_or_octet_stream();
+            let mut r = Response::new(Body::from(f.data.into_owned()));
+            r.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_str(mime.as_ref()).unwrap());
+            r.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+            r
+        }
+        None => (StatusCode::NOT_FOUND, "Não encontrado").into_response(),
+    }
+}
+
+// ---------------------------------------------------------------- proxy
+
+async fn proxy(State(app): S, req: Request) -> Response {
+    let (parts, b) = req.into_parts();
+    let base = app.cfg().llama_url;
+    let url = format!("{}{}", base.trim_end_matches('/'), parts.uri.path_and_query().map(|p| p.as_str()).unwrap_or("/"));
+    let bytes = match axum::body::to_bytes(b, 64 * 1024 * 1024).await {
+        Ok(b) => b,
+        Err(e) => return (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+    };
+    let mut rb = app.http.request(parts.method.clone(), &url);
+    for (k, v) in parts.headers.iter() {
+        let n = k.as_str();
+        if matches!(n, "host" | "x-studio" | "origin" | "referer" | "content-length" | "connection" | "accept-encoding") {
+            continue;
+        }
+        rb = rb.header(k, v);
+    }
+    match rb.body(bytes).send().await {
+        Ok(resp) => {
+            let mut out = Response::builder().status(resp.status().as_u16());
+            for (k, v) in resp.headers() {
+                if matches!(k.as_str(), "transfer-encoding" | "connection" | "keep-alive" | "content-length") {
+                    continue;
+                }
+                out = out.header(k, v);
+            }
+            out.body(Body::from_stream(resp.bytes_stream())).unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response())
+        }
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({"error":{"message": format!("llama-server indisponível em {base} ({}). Ele está rodando?", e.without_url())}})),
+        )
+            .into_response(),
+    }
+}
+
+// ---------------------------------------------------------------- estado e config
+
+async fn state(State(app): S) -> Res {
+    let c = app.cfg();
+    ok(json!({
+        "workspace": c.workspace,
+        "recentWorkspaces": c.recent_workspaces,
+        "llamaUrl": c.llama_url,
+        "extraSkillsDirs": c.extra_skills_dirs,
+        "skillsDir": app.skills_dir(),
+        "mcpFile": app.mcp_file(),
+        "platform": if app::IS_WIN { "win32" } else { std::env::consts::OS },
+        "home": app::home_dir(),
+        "sep": std::path::MAIN_SEPARATOR.to_string(),
+        "native": app.native_window.load(std::sync::atomic::Ordering::SeqCst),
+        "version": crate::update::exe_version(),
+        "uiVersion": crate::update::ui_version(&app),
+        "repo": crate::update::REPO,
+        "windowGpu": c.window_gpu,
+        "closeToTray": c.close_to_tray,
+    }))
+}
+
+async fn set_config(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    {
+        let mut c = app.config.write().unwrap();
+        if let Some(u) = v.get("llamaUrl").and_then(Value::as_str).filter(|s| !s.trim().is_empty()) {
+            c.llama_url = u.trim().trim_end_matches('/').to_string();
+        }
+        if v.get("extraSkillsDirs").is_some() {
+            c.extra_skills_dirs = strs(&v, "extraSkillsDirs");
+        }
+        if let Some(g) = v.get("windowGpu").and_then(Value::as_bool) {
+            c.window_gpu = g;
+        }
+        if let Some(g) = v.get("closeToTray").and_then(Value::as_bool) {
+            c.close_to_tray = g;
+        }
+    }
+    app.save_config();
+    ok(json!({"ok": true}))
+}
+
+async fn app_info(State(app): S) -> Res {
+    ok(json!({"native": app.native_window.load(std::sync::atomic::Ordering::SeqCst), "version": crate::update::exe_version(), "uiVersion": crate::update::ui_version(&app)}))
+}
+
+// ---------------------------------------------------------------- atualizações
+
+async fn update_check(State(app): S, Query(qs): Q) -> Res {
+    ok(crate::update::check(&app, q(&qs, "force") == "1").await)
+}
+
+async fn update_ui(State(app): S) -> Res {
+    let v = crate::update::apply_ui(&app).await.map_err(bad)?;
+    ok(json!({"version": v}))
+}
+
+async fn update_reset_ui(State(app): S) -> Res {
+    crate::update::reset_ui(&app);
+    ok(json!({"ok": true}))
+}
+
+async fn update_exe(State(app): S) -> Res {
+    crate::update::apply_exe(&app).await.map_err(bad)?;
+    // dá tempo da resposta chegar à interface; depois sai e a versão nova assume
+    let a = app.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        if a.native_window.load(std::sync::atomic::Ordering::SeqCst) {
+            a.ui(UiMsg::Quit);
+        } else {
+            let _ = tokio::task::spawn_blocking(move || {
+                a.shutdown();
+                std::process::exit(0);
+            });
+        }
+    });
+    ok(json!({"ok": true}))
+}
+
+async fn app_show(State(app): S, Query(qs): Q) -> Res {
+    if q(&qs, "start") == "1" && app.llama.state() == "stopped" {
+        let _ = app.llama.start(&app);
+    }
+    app.ui(UiMsg::Show);
+    ok(json!({"ok": true}))
+}
+
+async fn app_quit(State(app): S) -> Res {
+    app.ui(UiMsg::Quit);
+    ok(json!({"ok": true}))
+}
+
+// ---------------------------------------------------------------- pasta de trabalho
+
+async fn set_workspace(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let p = resolve(&app::home_dir(), st(&v, "path"));
+    if !p.is_dir() {
+        return Err(bad(format!("Pasta não encontrada: {}", p.display())));
+    }
+    let s = p.to_string_lossy().into_owned();
+    {
+        let mut c = app.config.write().unwrap();
+        c.workspace = s.clone();
+        c.recent_workspaces.retain(|x| !x.eq_ignore_ascii_case(&s));
+        c.recent_workspaces.insert(0, s.clone());
+        c.recent_workspaces.truncate(8);
+    }
+    app.save_config();
+    ok(json!({"workspace": s}))
+}
+
+fn list_dir(dir: &Path, dirs_only: bool) -> std::io::Result<Vec<Value>> {
+    let mut items = vec![];
+    for e in std::fs::read_dir(dir)?.flatten() {
+        let full = e.path();
+        let is_dir = full.is_dir();
+        if dirs_only && !is_dir {
+            continue;
+        }
+        let (size, mtime) = if is_dir {
+            (0, 0.0)
+        } else {
+            e.metadata()
+                .map(|m| (m.len(), m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as f64).unwrap_or(0.0)))
+                .unwrap_or((0, 0.0))
+        };
+        items.push(json!({"name": e.file_name().to_string_lossy(), "path": full, "dir": is_dir, "size": size, "mtime": mtime}));
+    }
+    items.sort_by(|a, b| {
+        let (da, db) = (a["dir"].as_bool().unwrap(), b["dir"].as_bool().unwrap());
+        db.cmp(&da).then_with(|| natural_cmp(a["name"].as_str().unwrap(), b["name"].as_str().unwrap()))
+    });
+    Ok(items)
+}
+
+fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    let (a, b) = (a.to_lowercase(), b.to_lowercase());
+    let (mut ai, mut bi) = (a.chars().peekable(), b.chars().peekable());
+    loop {
+        match (ai.peek().copied(), bi.peek().copied()) {
+            (None, None) => return std::cmp::Ordering::Equal,
+            (None, _) => return std::cmp::Ordering::Less,
+            (_, None) => return std::cmp::Ordering::Greater,
+            (Some(x), Some(y)) if x.is_ascii_digit() && y.is_ascii_digit() => {
+                let mut na = String::new();
+                while let Some(c) = ai.peek().copied().filter(char::is_ascii_digit) {
+                    na.push(c);
+                    ai.next();
+                }
+                let mut nb = String::new();
+                while let Some(c) = bi.peek().copied().filter(char::is_ascii_digit) {
+                    nb.push(c);
+                    bi.next();
+                }
+                let o = na.len().cmp(&nb.len()).then(na.cmp(&nb));
+                if o != std::cmp::Ordering::Equal {
+                    return o;
+                }
+            }
+            (Some(x), Some(y)) => {
+                if x != y {
+                    return x.cmp(&y);
+                }
+                ai.next();
+                bi.next();
+            }
+        }
+    }
+}
+
+async fn ws_list(State(app): S, Query(qs): Q) -> Res {
+    let ws = app.workspace();
+    let dir = resolve(&ws, q(&qs, "path"));
+    if !is_inside(&ws, &dir) {
+        return Err(ApiErr(StatusCode::FORBIDDEN, "Fora da pasta de trabalho".into()));
+    }
+    let items = tokio::task::spawn_blocking(move || list_dir(&dir, false)).await.unwrap().map_err(|e| bad(e.to_string()))?;
+    let more = items.len().saturating_sub(2000);
+    let items: Vec<Value> = items
+        .into_iter()
+        .take(2000)
+        .map(|mut i| {
+            let r = rel_to(&ws, Path::new(i["path"].as_str().unwrap_or("")));
+            i["rel"] = json!(r);
+            i
+        })
+        .collect();
+    ok(json!({"items": items, "more": more}))
+}
+
+async fn ws_read(State(app): S, Query(qs): Q) -> Res {
+    let ws = app.workspace();
+    let file = resolve(&ws, q(&qs, "path"));
+    if !is_inside(&ws, &file) {
+        return Err(ApiErr(StatusCode::FORBIDDEN, "Fora da pasta de trabalho".into()));
+    }
+    let md = std::fs::metadata(&file).map_err(|e| bad(e.to_string()))?;
+    if md.len() > 2 * 1024 * 1024 {
+        return ok(json!({"path": file, "tooBig": true, "size": md.len()}));
+    }
+    let buf = std::fs::read(&file).map_err(|e| bad(e.to_string()))?;
+    if looks_binary(&buf) {
+        return ok(json!({"path": file, "binary": true, "size": md.len()}));
+    }
+    ok(json!({"path": file, "text": String::from_utf8_lossy(&buf), "size": md.len()}))
+}
+
+async fn ws_upload(State(app): S, Query(qs): Q, b: Bytes) -> Res {
+    let name = file_name(Path::new(q(&qs, "name")));
+    let name = if name.is_empty() { "arquivo".into() } else { name };
+    let dir = app.workspace().join("anexos");
+    std::fs::create_dir_all(&dir).map_err(|e| bad(e.to_string()))?;
+    let p = Path::new(&name);
+    let (stem, ext) = (p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(), p.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default());
+    let mut target = dir.join(&name);
+    let mut i = 2;
+    while target.exists() {
+        target = dir.join(format!("{stem} ({i}){ext}"));
+        i += 1;
+    }
+    std::fs::write(&target, &b).map_err(|e| bad(e.to_string()))?;
+    ok(json!({"path": target}))
+}
+
+/// Salva a conversa em Markdown na pasta "conversas" do espaço de trabalho.
+async fn export_conv(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let mut name: String = st(&v, "name").chars().map(|c| if "\\/:*?\"<>|".contains(c) || c.is_control() { '_' } else { c }).collect();
+    name = name.trim().trim_end_matches('.').chars().take(80).collect();
+    if name.is_empty() {
+        name = "conversa".into();
+    }
+    let dir = app.workspace().join("conversas");
+    std::fs::create_dir_all(&dir).map_err(|e| bad(e.to_string()))?;
+    let mut target = dir.join(format!("{name}.md"));
+    let mut i = 2;
+    while target.exists() {
+        target = dir.join(format!("{name} ({i}).md"));
+        i += 1;
+    }
+    std::fs::write(&target, st(&v, "text")).map_err(|e| bad(e.to_string()))?;
+    ok(json!({"path": target}))
+}
+
+async fn reveal(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let p = resolve(&app.workspace(), st(&v, "path"));
+    if !p.exists() {
+        return Err(ApiErr(StatusCode::NOT_FOUND, format!("Não encontrado: {}", p.display())));
+    }
+    app::reveal(&p, !p.is_dir());
+    ok(json!({"ok": true}))
+}
+
+async fn browse(Query(qs): Q) -> Res {
+    let p = q(&qs, "path");
+    let files = q(&qs, "files") == "1";
+    if p.is_empty() {
+        let drives: Vec<Value> = if app::IS_WIN {
+            (b'A'..=b'Z').map(|c| format!("{}:\\", c as char)).filter(|d| Path::new(d).exists()).map(|d| json!({"name": d, "path": d, "dir": true})).collect()
+        } else {
+            vec![json!({"name":"/","path":"/","dir":true})]
+        };
+        return ok(json!({"path":"","parent":null,"items":drives,"home":app::home_dir()}));
+    }
+    let dir = app::normalize(&PathBuf::from(p));
+    let d2 = dir.clone();
+    let items = tokio::task::spawn_blocking(move || list_dir(&d2, !files)).await.unwrap().map_err(|e| bad(e.to_string()))?;
+    let items: Vec<Value> = items.into_iter().filter(|i| !i["name"].as_str().unwrap_or("").starts_with('$')).collect();
+    let parent = dir.parent().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+    ok(json!({"path": dir, "parent": parent, "items": items, "home": app::home_dir()}))
+}
+
+async fn locate_h(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    if st(&v, "name").is_empty() {
+        return Err(bad("Falta o nome do arquivo."));
+    }
+    ok(locate::locate(&app, st(&v, "name"), v.get("size").and_then(Value::as_u64), v.get("lastModified").and_then(Value::as_f64), v.get("isDir").and_then(Value::as_bool).unwrap_or(false)).await)
+}
+
+async fn remember(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    if !st(&v, "path").is_empty() {
+        locate::remember_dir(&app, Path::new(st(&v, "path")));
+    }
+    ok(json!({"ok": true}))
+}
+
+async fn stat(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let p = resolve(&app.workspace(), st(&v, "path"));
+    match std::fs::metadata(&p) {
+        Ok(m) => ok(json!({"exists": true, "path": p, "dir": m.is_dir(), "size": m.len()})),
+        Err(_) => ok(json!({"exists": false, "path": p})),
+    }
+}
+
+// ---------------------------------------------------------------- habilidades
+
+async fn skills_list(State(app): S) -> Res {
+    ok(json!({"skills": skills::list(&app), "dir": app.skills_dir()}))
+}
+
+async fn skills_get(State(app): S, Query(qs): Q) -> Res {
+    let s = skills::get(&app, q(&qs, "id")).ok_or_else(|| ApiErr(StatusCode::NOT_FOUND, "Skill não encontrada".into()))?;
+    let text = std::fs::read_to_string(s.dir.join("SKILL.md")).unwrap_or_default();
+    let (meta, b) = skills::parse_frontmatter(&text);
+    let mut v = serde_json::to_value(&s).unwrap();
+    v["body"] = json!(b);
+    v["meta"] = json!(meta);
+    ok(v)
+}
+
+async fn skills_save(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    if st(&v, "name").trim().is_empty() {
+        return Err(bad("Dê um nome à habilidade."));
+    }
+    let id = st(&v, "id");
+    if !id.is_empty() && !skills::get(&app, id).is_some_and(|s| s.editable) {
+        return Err(bad("Essa habilidade fica fora da pasta do studio; importe-a para editar."));
+    }
+    let id = skills::write(&app, (!id.is_empty()).then_some(id), st(&v, "name").trim(), st(&v, "description").trim(), st(&v, "body")).map_err(bad)?;
+    ok(json!({"id": id}))
+}
+
+async fn skills_delete(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let s = skills::get(&app, st(&v, "id")).ok_or_else(|| bad("Habilidade não encontrada"))?;
+    if !s.editable {
+        return Err(bad("Essa habilidade fica numa pasta externa; remova a pasta nas configurações."));
+    }
+    std::fs::remove_dir_all(&s.dir).map_err(|e| bad(e.to_string()))?;
+    ok(json!({"ok": true}))
+}
+
+async fn skills_import_path(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let p = resolve(&app::home_dir(), st(&v, "path"));
+    let app2 = app.clone();
+    let r = tokio::task::spawn_blocking(move || skills::import_path(&app2, &p)).await.unwrap().map_err(bad)?;
+    ok(json!({"imported": r}))
+}
+
+async fn skills_import_zip(State(app): S, Query(qs): Q, b: Bytes) -> Res {
+    let name = q(&qs, "name").to_string();
+    let app2 = app.clone();
+    let r = tokio::task::spawn_blocking(move || {
+        if name.to_lowercase().ends_with(".md") {
+            skills::import_md(&app2, &String::from_utf8_lossy(&b), &name)
+        } else {
+            skills::import_zip(&app2, &b, &name)
+        }
+    })
+    .await
+    .unwrap()
+    .map_err(bad)?;
+    ok(json!({"imported": r}))
+}
+
+async fn skills_open(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let dir = match st(&v, "id") {
+        "" => app.skills_dir(),
+        id => skills::get(&app, id).map(|s| s.dir).unwrap_or_else(|| app.skills_dir()),
+    };
+    app::reveal(&dir, false);
+    ok(json!({"ok": true}))
+}
+
+// ---------------------------------------------------------------- MCP
+
+fn write_mcp(app: &App, cfg: &Value) -> Result<(), ApiErr> {
+    std::fs::write(app.mcp_file(), serde_json::to_string_pretty(cfg).unwrap()).map_err(|e| bad(e.to_string()))
+}
+
+async fn mcp_list(State(app): S) -> Res {
+    ok(json!({"servers": app.mcp.status_json(), "file": app.mcp_file()}))
+}
+
+async fn mcp_config_get(State(app): S) -> Res {
+    ok(json!({"text": std::fs::read_to_string(app.mcp_file()).unwrap_or_else(|_| "{\"mcpServers\":{}}".into())}))
+}
+
+async fn mcp_config_set(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let mut cfg: Value = serde_json::from_str(st(&v, "text")).map_err(|e| bad(format!("JSON inválido: {e}")))?;
+    if cfg.get("mcpServers").is_none() {
+        cfg = json!({"mcpServers": cfg});
+    }
+    write_mcp(&app, &cfg)?;
+    app.mcp.sync(&app.http, &app.mcp_file()).await;
+    ok(json!({"servers": app.mcp.status_json()}))
+}
+
+async fn mcp_upsert(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let name = st(&v, "name").trim().to_string();
+    if name.is_empty() {
+        return Err(bad("Dê um nome ao servidor."));
+    }
+    let c = v.get("config").filter(|c| c.is_object()).cloned().ok_or_else(|| bad("Configuração ausente."))?;
+    let mut cfg = crate::mcp::Mcp::read_config(&app.mcp_file());
+    let old = st(&v, "oldName");
+    if !old.is_empty() && old != name {
+        cfg["mcpServers"].as_object_mut().unwrap().remove(old);
+    }
+    cfg["mcpServers"][&name] = c;
+    write_mcp(&app, &cfg)?;
+    app.mcp.sync(&app.http, &app.mcp_file()).await;
+    ok(json!({"servers": app.mcp.status_json()}))
+}
+
+async fn mcp_import(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let obj: Value = serde_json::from_str(st(&v, "text")).map_err(|e| bad(format!("JSON inválido: {e}")))?;
+    let servers = obj.get("mcpServers").or_else(|| obj.get("servers")).unwrap_or(&obj).clone();
+    let mut cfg = crate::mcp::Mcp::read_config(&app.mcp_file());
+    let mut added = vec![];
+    for (k, s) in servers.as_object().cloned().unwrap_or_default() {
+        if s.get("command").is_some() || s.get("url").is_some() {
+            cfg["mcpServers"][&k] = s;
+            added.push(k);
+        }
+    }
+    if added.is_empty() {
+        return Err(bad("Nenhum servidor encontrado no JSON (espera \"command\" ou \"url\")."));
+    }
+    write_mcp(&app, &cfg)?;
+    app.mcp.sync(&app.http, &app.mcp_file()).await;
+    ok(json!({"added": added, "servers": app.mcp.status_json()}))
+}
+
+async fn mcp_delete(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let mut cfg = crate::mcp::Mcp::read_config(&app.mcp_file());
+    cfg["mcpServers"].as_object_mut().unwrap().remove(st(&v, "name"));
+    write_mcp(&app, &cfg)?;
+    app.mcp.sync(&app.http, &app.mcp_file()).await;
+    ok(json!({"servers": app.mcp.status_json()}))
+}
+
+async fn mcp_toggle(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let mut cfg = crate::mcp::Mcp::read_config(&app.mcp_file());
+    let s = cfg["mcpServers"].get_mut(st(&v, "name")).filter(|s| s.is_object()).ok_or_else(|| bad("Servidor não encontrado"))?;
+    if v.get("disabled").and_then(Value::as_bool).unwrap_or(false) {
+        s["disabled"] = json!(true);
+    } else {
+        s.as_object_mut().unwrap().remove("disabled");
+    }
+    write_mcp(&app, &cfg)?;
+    app.mcp.sync(&app.http, &app.mcp_file()).await;
+    ok(json!({"servers": app.mcp.status_json()}))
+}
+
+async fn mcp_reconnect(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let only = v.get("name").and_then(Value::as_str);
+    app.mcp.reconnect(&app.http, &app.mcp_file(), only).await;
+    ok(json!({"servers": app.mcp.status_json()}))
+}
+
+// ---------------------------------------------------------------- ferramentas e contexto
+
+fn groups_of(v: &Value) -> Vec<String> {
+    match v.get("groups") {
+        Some(_) => strs(v, "groups"),
+        // compatibilidade: "builtin" = arquivos
+        None if v.get("builtin").and_then(Value::as_bool).unwrap_or(true) => vec!["read".into(), "write".into(), "edit".into()],
+        None => vec![],
+    }
+}
+
+async fn tools_list(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let only = v.get("only").map(|_| strs(&v, "only"));
+    ok(tools::build_tools(&app, &groups_of(&v), &strs(&v, "mcp"), !strs(&v, "skills").is_empty(), &strs(&v, "extra"), only.as_deref()))
+}
+
+async fn tools_search(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    ok(tools::search_tools(&app, st(&v, "query")))
+}
+
+async fn context(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    ok(json!({"text": tools::build_context(&app, &strs(&v, "skills"), &groups_of(&v), &strs(&v, "refs"), st(&v, "now"))}))
+}
+
+async fn tools_call(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let args = match v.get("arguments") {
+        Some(Value::String(s)) if s.trim().is_empty() => json!({}),
+        Some(Value::String(s)) => match serde_json::from_str::<Value>(s) {
+            Ok(a) => a,
+            Err(_) => return ok(json!({"content": format!("Erro: os argumentos não são um JSON válido: {}", s.chars().take(300).collect::<String>()), "isError": true})),
+        },
+        Some(a) => a.clone(),
+        None => json!({}),
+    };
+    let r = tools::call(&app, st(&v, "name"), args, &strs(&v, "allow")).await;
+    ok(json!({"content": r.content, "isError": r.is_error, "images": r.images}))
+}
+
+// ---------------------------------------------------------------- llama-server
+
+async fn llama_get(State(app): S) -> Res {
+    ok(app.llama.to_json())
+}
+
+async fn llama_config(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let cur = serde_json::to_value(app.llama.cfg()).unwrap();
+    let mut merged = cur.clone();
+    if let (Some(m), Some(o)) = (merged.as_object_mut(), v.get("config").and_then(Value::as_object)) {
+        for (k, val) in o {
+            if m.contains_key(k) {
+                m.insert(k.clone(), val.clone());
+            }
+        }
+    }
+    let c: crate::llama::LlamaCfg = serde_json::from_value(merged).map_err(|e| bad(format!("Configuração inválida: {e}")))?;
+    let url = c.base_url();
+    app.llama.save(c);
+    {
+        app.config.write().unwrap().llama_url = url;
+    }
+    app.save_config();
+    ok(app.llama.to_json())
+}
+
+async fn llama_start(State(app): S) -> Res {
+    app.llama.start(&app).map_err(bad)?;
+    ok(app.llama.to_json())
+}
+
+async fn llama_stop(State(app): S) -> Res {
+    app.llama.stop();
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    ok(app.llama.to_json())
+}
+
+async fn llama_restart(State(app): S) -> Res {
+    app.llama.stop();
+    for _ in 0..50 {
+        if !app.llama.is_running() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    app.llama.start(&app).map_err(bad)?;
+    ok(app.llama.to_json())
+}
+
+async fn llama_log(State(app): S, Query(qs): Q) -> Res {
+    ok(app.llama.log_since(q(&qs, "since").parse().unwrap_or(0)))
+}
+
+#[allow(dead_code)]
+fn _unused(_: HeaderMap) {}
