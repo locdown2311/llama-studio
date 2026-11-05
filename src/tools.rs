@@ -200,6 +200,16 @@ pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[Strin
             parts.push(format!("O usuário referenciou estes caminhos (você pode lê-los usando o caminho absoluto):\n{}", list.join("\n")));
         }
     }
+    if has("shell") {
+        let avail: Vec<&str> = [("rg", "rg (ripgrep, busca em texto)"), ("fd", "fd (acha arquivos por nome)"), ("uv", "uv/uvx (Python)"), ("bun", "bun/bunx (JavaScript)")]
+            .iter()
+            .filter(|(c, _)| crate::bins::which(c).is_some())
+            .map(|(_, d)| *d)
+            .collect();
+        if !avail.is_empty() {
+            parts.push(format!("Programas disponíveis no terminal: {}. Prefira-os a Get-ChildItem/Select-String por serem mais rápidos e com saída mais curta.", avail.join(", ")));
+        }
+    }
     if has("browser") {
         parts.push("Navegador: as ferramentas browser_* controlam uma janela própria do Edge que o usuário vê. Leia a página (browser_read) e use os números dos elementos para clicar e digitar.".into());
     }
@@ -251,9 +261,29 @@ pub async fn call(app: &Arc<App>, ws: PathBuf, name: &str, args: Value, allow: &
     if name.starts_with("computer_") && def(name).is_some() {
         return out(crate::computer::tool(&ws, name, &args).await);
     }
+    let (compact_on, rtk_on) = {
+        let c = app.config.read().unwrap();
+        (c.compact_output, c.use_rtk)
+    };
     if name == "run_command" {
         let timeout = args.get("timeout").and_then(Value::as_u64).unwrap_or(120);
-        return out(crate::shell::run(&ws, s(&args, "command"), s(&args, "cwd"), timeout).await.map(|t| (t, vec![])));
+        let command = s(&args, "command");
+        let rtk = if rtk_on { crate::compact::rtk_rewrite(command) } else { None };
+        let mut res = match &rtk {
+            Some(rc) => crate::shell::run(&ws, rc, s(&args, "cwd"), timeout).await,
+            None => crate::shell::run(&ws, command, s(&args, "cwd"), timeout).await,
+        };
+        if let (Some(rc), Ok(t)) = (&rtk, &res) {
+            // o RTK não conhece esse uso: roda o comando original
+            let low = t.to_lowercase();
+            if low.contains("unrecognized subcommand") || low.contains("unexpected argument") || low.contains("unknown command") {
+                res = crate::shell::run(&ws, command, s(&args, "cwd"), timeout).await;
+            } else {
+                res = Ok(format!("[resumido pelo RTK: {rc}]\n{t}"));
+            }
+        }
+        let res = res.map(|t| if compact_on { crate::compact::compact(&t, &crate::compact::saidas_dir(app), command, 12000).text } else { t });
+        return out(res.map(|t| (t, vec![])));
     }
     if def(name).is_some_and(|d| d.client) {
         return out(Err(format!("{name} é executada pela interface, não pelo servidor.")));
@@ -266,9 +296,45 @@ pub async fn call(app: &Arc<App>, ws: PathBuf, name: &str, args: Value, allow: &
         return out(r.map_err(|e| e.to_string()).and_then(|x| x).map(|t| (t, vec![])));
     }
     match app.mcp.call_by_tool(name, args).await {
-        Ok((text, is_err, images)) => ToolOut { content: app::truncate(text, 40000), is_error: is_err, images },
+        Ok((text, is_err, images)) => {
+            let content = if compact_on { crate::compact::compact(&text, &crate::compact::saidas_dir(app), name, 20000).text } else { app::truncate(text, 40000) };
+            ToolOut { content, is_error: is_err, images }
+        }
         Err(e) => ToolOut { content: format!("Erro: {e}"), is_error: true, images: vec![] },
     }
+}
+
+/// Busca por conteúdo com o ripgrep (respeita .gitignore e é bem mais rápida). None = usar a busca própria.
+fn search_rg(ws: &Path, start: &Path, name: &str, pattern: &str) -> Option<String> {
+    let rg = crate::bins::which("rg")?;
+    let mut c = std::process::Command::new(rg);
+    c.args(["-n", "-i", "--no-heading", "--color", "never", "--max-count", "30", "--max-columns", "220", "--max-columns-preview", "--max-filesize", "2M"]);
+    if !name.is_empty() {
+        c.args(["--iglob", name]);
+    }
+    c.args(["-e", pattern, "."]).current_dir(start).stdin(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        c.creation_flags(crate::CREATE_NO_WINDOW);
+    }
+    let o = c.output().ok()?;
+    let code = o.status.code()?;
+    if code == 1 {
+        return Some("Nada encontrado.".into());
+    }
+    if code != 0 {
+        return None; // regex que o rg não aceita etc.
+    }
+    let text = String::from_utf8_lossy(&o.stdout);
+    let mut lines: Vec<String> = vec![];
+    for l in text.lines().take(200) {
+        let l = l.strip_prefix("./").or_else(|| l.strip_prefix(".\\")).unwrap_or(l);
+        let (file, rest) = l.split_once(':').unwrap_or((l, ""));
+        lines.push(format!("{}:{}", rel_to(ws, &start.join(file)), rest));
+    }
+    let full = text.lines().count() > 200;
+    Some(lines.join("\n") + if full { "\n[limite de 200 resultados]" } else { "" })
 }
 
 fn s<'a>(a: &'a Value, k: &str) -> &'a str {
@@ -281,7 +347,11 @@ fn skill_roots(app: &App) -> Vec<PathBuf> {
 
 fn resolve_read(app: &App, ws: &Path, p: &str, allow: &[PathBuf]) -> Result<PathBuf, String> {
     let full = resolve(ws, p);
-    if is_inside(ws, &full) || allow.iter().any(|a| is_inside(a, &full)) || skill_roots(app).iter().any(|d| is_inside(d, &full)) {
+    if is_inside(ws, &full)
+        || allow.iter().any(|a| is_inside(a, &full))
+        || skill_roots(app).iter().any(|d| is_inside(d, &full))
+        || is_inside(&crate::compact::saidas_dir(app), &full)
+    {
         return Ok(full);
     }
     Err(format!("Acesso negado: \"{p}\" está fora da pasta de trabalho ({}).", ws.display()))
@@ -407,6 +477,11 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
             } else {
                 Some(regex_lite::Regex::new(&format!("(?i){}", s(a, "content"))).map_err(|x| format!("Regex inválida: {x}"))?)
             };
+            if content_re.is_some() {
+                if let Some(r) = search_rg(ws, &start, s(a, "name"), s(a, "content")) {
+                    return Ok(r);
+                }
+            }
             let deadline = Instant::now() + Duration::from_secs(15);
             let mut results: Vec<String> = vec![];
             let walker = walkdir::WalkDir::new(&start).min_depth(1).into_iter().filter_entry(|en| {

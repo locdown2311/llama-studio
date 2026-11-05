@@ -30,6 +30,7 @@
       <button class="nav-item" data-view="skills"></button>
       <button class="nav-item" data-view="mcp"></button>
       <button class="nav-item" data-view="personas"></button>
+      <button class="nav-item" data-view="tools"></button>
       <button class="nav-item" data-view="server"></button>
       <button class="nav-item" data-view="settings"></button>
     </nav>
@@ -85,6 +86,10 @@
               <div class="popover" id="pop-ws"></div>
             </div>
             <span class="spacer"></span>
+            <div class="pick-wrap">
+              <button class="ctx-meter" id="ctx-meter" hidden></button>
+              <div class="popover right" id="pop-ctx"></div>
+            </div>
             <button class="send" id="send" aria-label="Enviar"></button>
           </div>
           <div class="popover mention" id="pop-mention"></div>
@@ -184,6 +189,23 @@
         <div class="page-actions"><button class="btn primary" id="persona-new"></button></div>
       </header>
       <div class="grid" id="persona-grid"></div>
+    </div>
+  </section>
+
+  <!-- ===================== UTILITÁRIOS ===================== -->
+  <section class="view" id="view-tools">
+    <div class="page">
+      <header class="page-head">
+        <div>
+          <h1>Utilitários</h1>
+          <p class="lead">Programas de linha de comando que o studio baixa e mantém na pasta dele. Entram no PATH dos comandos do modelo e dos conectores, sem mexer no sistema.</p>
+        </div>
+        <div class="page-actions"><button class="btn" id="bins-check"></button></div>
+      </header>
+      <h2 class="sec-title">Economia de contexto</h2>
+      <div class="tgrid" id="ctx-opts"></div>
+      <h2 class="sec-title">Programas</h2>
+      <div class="grid bins" id="bins-grid"></div>
     </div>
   </section>
 

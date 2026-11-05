@@ -4,6 +4,8 @@
 #![cfg_attr(all(windows, feature = "desktop", not(debug_assertions)), windows_subsystem = "windows")]
 
 mod app;
+mod bins;
+mod compact;
 mod browser;
 mod computer;
 mod shell;
@@ -102,6 +104,8 @@ fn main() {
     let url = format!("http://127.0.0.1:{port}/");
 
     update::cleanup();
+    bins::init(&app);
+    bins::cleanup();
     // depois de uma atualização, espera a versão antiga liberar a porta
     let mut bound = std::net::TcpListener::bind(("127.0.0.1", port));
     if has("--apos-atualizar") {

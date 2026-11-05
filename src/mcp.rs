@@ -542,7 +542,7 @@ async fn connect_inner(e: Arc<Entry>, http: reqwest::Client) {
 }
 
 fn resolve_command(cmd: &str) -> std::path::PathBuf {
-    which::which(cmd).unwrap_or_else(|_| std::path::PathBuf::from(cmd))
+    crate::bins::which(cmd).unwrap_or_else(|| std::path::PathBuf::from(cmd))
 }
 
 async fn connect_stdio(e: &Arc<Entry>, http: reqwest::Client) -> Result<Arc<Conn>, String> {
@@ -551,6 +551,7 @@ async fn connect_stdio(e: &Arc<Entry>, http: reqwest::Client) -> Result<Arc<Conn
     if let Some(args) = e.cfg.get("args").and_then(Value::as_array) {
         c.args(args.iter().map(|a| a.as_str().map(str::to_string).unwrap_or_else(|| a.to_string())));
     }
+    c.env("PATH", crate::bins::path_env());
     if let Some(env) = e.cfg.get("env").and_then(Value::as_object) {
         for (k, v) in env {
             c.env(k, v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string()));

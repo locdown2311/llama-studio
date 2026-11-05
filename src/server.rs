@@ -65,6 +65,9 @@ pub fn router(app: Arc<App>) -> Router {
     Router::new()
         .route("/api/state", get(state))
         .route("/api/config", post(set_config))
+        .route("/api/bins", get(bins_list))
+        .route("/api/bins/install", post(bins_install))
+        .route("/api/bins/remove", post(bins_remove))
         .route("/api/app", get(app_info))
         .route("/api/app/show", post(app_show))
         .route("/api/app/quit", post(app_quit))
@@ -227,6 +230,8 @@ async fn state(State(app): S) -> Res {
         "repo": crate::update::REPO,
         "windowGpu": c.window_gpu,
         "closeToTray": c.close_to_tray,
+        "compactOutput": c.compact_output,
+        "useRtk": c.use_rtk,
     }))
 }
 
@@ -245,6 +250,12 @@ async fn set_config(State(app): S, b: Bytes) -> Res {
         }
         if let Some(g) = v.get("closeToTray").and_then(Value::as_bool) {
             c.close_to_tray = g;
+        }
+        if let Some(g) = v.get("compactOutput").and_then(Value::as_bool) {
+            c.compact_output = g;
+        }
+        if let Some(g) = v.get("useRtk").and_then(Value::as_bool) {
+            c.use_rtk = g;
         }
     }
     app.save_config();
@@ -773,3 +784,25 @@ async fn llama_log(State(app): S, Query(qs): Q) -> Res {
 
 #[allow(dead_code)]
 fn _unused(_: HeaderMap) {}
+
+// ---------------------------------------------------------------- ferramentas do sistema (uv, rg, fd, rtk...)
+
+async fn bins_list(State(app): S, Query(qs): Q) -> Res {
+    ok(crate::bins::list(&app, q(&qs, "latest") == "1").await)
+}
+
+async fn bins_install(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    match crate::bins::install(&app, v["id"].as_str().unwrap_or("")).await {
+        Ok(ver) => ok(json!({"ok": true, "version": ver})),
+        Err(e) => Err(bad(e)),
+    }
+}
+
+async fn bins_remove(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    match crate::bins::remove(&app, v["id"].as_str().unwrap_or("")) {
+        Ok(()) => ok(json!({"ok": true})),
+        Err(e) => Err(bad(e)),
+    }
+}

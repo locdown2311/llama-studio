@@ -309,6 +309,7 @@ function setView(v) {
   if (v === 'mcp') renderMcpPage();
   if (v === 'settings') renderSettings();
   if (v === 'personas') renderPersonasPage();
+  if (v === 'tools') renderToolsPage();
   if (v === 'server') renderServerPage();
   if (v === 'chat') { renderConvList(); setTimeout(() => focusEditor(), 20); }
 }
@@ -1108,6 +1109,7 @@ function renderComposer() {
   send.title = busy ? 'Parar (Esc)' : 'Enviar (Enter)';
   send.setAttribute('aria-label', send.title);
   updatePickers();
+  drawCtxMeter();
 }
 
 function activeSel(conv) {
@@ -1449,8 +1451,143 @@ function apiMessages(conv, system) {
 }
 
 async function streamCompletion(conv, system, tools, msg, signal) {
-  return streamRaw(apiMessages(conv, system), tools, msg, signal, scheduleRender);
+  const msgs = apiMessages(conv, system);
+  conv.ctxSys = Math.ceil(((system || '').length + JSON.stringify(tools || []).length) / 3.2);
+  const r = await streamRaw(msgs, tools, msg, signal, scheduleRender);
+  // medida real do servidor: prompt (com o que veio do cache) + resposta
+  if (msg.ctxTokens) { conv.ctx = { tokens: msg.ctxTokens, n: conv.messages.length, cut: conv.compactCut || 0 }; drawCtxMeter(); }
+  return r;
 }
+
+/* ============================================================ utilitários (uv, rg, fd, rtk...) */
+const BIN_ICONS = { rtk: 'archive', ripgrep: 'search', fd: 'file', uv: 'terminal', bun: 'braces' };
+S.bins = null; S.binsBusy = new Set();
+
+function fmtBytes(n) { return n >= 1048576 ? (n / 1048576).toFixed(1).replace('.', ',') + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'; }
+
+async function loadBins(latest = false, manual = false) {
+  try { S.bins = await api('/api/bins' + (latest ? '?latest=1' : '')); } catch (e) { if (manual) toast(e.message, 'err'); return; }
+  if (S.view === 'tools') drawBins();
+  if (manual) {
+    const errs = S.bins.items.filter((b) => b.latestError);
+    const ups = S.bins.items.filter((b) => b.update);
+    toast(errs.length === S.bins.items.length ? errs[0].latestError : ups.length ? `${ups.length} com versão nova` : 'Tudo em dia', errs.length === S.bins.items.length ? 'err' : undefined);
+  }
+}
+
+function renderToolsPage() {
+  const box = $('#ctx-opts'); box.innerHTML = '';
+  const opt = (key, title, desc) => {
+    const i = h('input', { type: 'checkbox', checked: S.info[key] !== false, onchange: async () => {
+      try { await api('/api/config', { [key]: i.checked }); S.info[key] = i.checked; } catch (e) { toast(e.message, 'err'); i.checked = !i.checked; }
+    } });
+    return h('label.tcard.wrap', null, h('span.tc-main', null, h('span.tc-title', null, title), h('span.tc-desc', null, desc)), h('span.switch', null, i, h('span')));
+  };
+  box.append(
+    opt('compactOutput', 'Enxugar saídas de ferramentas', 'Antes de ir para o modelo, tira cores e barras de progresso, junta linhas repetidas e, se passar de ~12 mil caracteres, mantém começo e fim. A saída inteira fica salva para o modelo consultar se precisar.'),
+    opt('useRtk', 'Passar comandos pelo RTK', 'Quando o RTK está instalado, git, cargo, pytest, docker, gh e outros rodam por ele, que devolve só o essencial (falhas, arquivos alterados).'));
+  drawBins();
+  loadBins(false).then(() => { if (!S.bins?.items.some((b) => 'latest' in b)) loadBins(true); });
+}
+
+function drawBins() {
+  const grid = $('#bins-grid'); if (!grid) return;
+  grid.innerHTML = '';
+  if (!S.bins) { grid.append(h('div.empty-card', null, 'Carregando...')); return; }
+  for (const b of S.bins.items) {
+    const busy = S.binsBusy.has(b.id);
+    const tags = [];
+    if (b.version) tags.push(h('span.tag', null, 'v' + b.version));
+    if (b.source === 'system') tags.push(h('span.tag', { title: 'Encontrado no PATH do Windows' }, 'do sistema'));
+    if (b.source === 'studio') tags.push(h('span.tag.ok', null, 'instalado'));
+    if (b.size) tags.push(h('span.tag', null, fmtBytes(b.size)));
+    if (b.update) tags.push(h('span.tag.new', null, 'v' + b.latest + ' disponível'));
+    const act = busy ? h('button.btn.sm', { disabled: true }, ic('loader'), b.source === 'studio' ? 'Atualizando...' : 'Baixando...')
+      : b.source === 'studio' ? h('div.bin-acts', null,
+          b.update ? h('button.btn.sm.primary', { onclick: () => binInstall(b) }, ic('download'), 'Atualizar') : null,
+          h('button.icon-btn.sm', { title: 'Reinstalar', 'aria-label': 'Reinstalar', html: svg('refresh'), onclick: () => binInstall(b) }),
+          h('button.icon-btn.sm', { title: 'Remover', 'aria-label': 'Remover', html: svg('trash'), onclick: () => binRemove(b) }))
+      : h('button.btn.sm' + (b.source ? '' : '.primary'), { onclick: () => binInstall(b), title: b.source === 'system' ? 'Baixa uma cópia própria do studio, que passa a ter preferência' : '' }, ic('download'), b.source === 'system' ? 'Instalar cópia' : 'Instalar' + (b.latest ? ' v' + b.latest : ''));
+    grid.append(h('div.skill.bin' + (b.source ? '.on' : ''), null,
+      h('div.skill-top', null, h('div.skill-ico.bin-ico', { html: svg(BIN_ICONS[b.id] || 'terminal') }),
+        h('div.skill-name', null, b.name, h('span.bin-cmd', null, b.cmd)), b.tag === 'contexto' ? h('span.tag.ctx', null, 'economiza contexto') : null),
+      h('div.bin-tags', null, tags.length ? tags : h('span.tag.off', null, 'não instalado')),
+      h('div.skill-desc', null, b.desc),
+      h('div.skill-foot', null,
+        h('a.bin-link', { href: 'https://github.com/' + b.repo, target: '_blank', rel: 'noopener', title: b.repo }, ic('external'), 'GitHub'),
+        b.site ? h('a.bin-link', { href: b.site, target: '_blank', rel: 'noopener' }, ic('globe'), 'site') : null,
+        h('span.spacer'), act)));
+  }
+  grid.append(h('div.bin-dir', null, ic('folder'), 'Pasta: ', h('code', null, S.bins.dir)));
+}
+
+async function binInstall(b) {
+  S.binsBusy.add(b.id); drawBins();
+  try { const r = await api('/api/bins/install', { id: b.id }); toast(`${b.name} ${r.version ? 'v' + r.version + ' ' : ''}instalado`); }
+  catch (e) { toast(`${b.name}: ${e.message}`, 'err'); }
+  S.binsBusy.delete(b.id); await loadBins(true);
+}
+
+async function binRemove(b) {
+  if (!(await confirmBox(`Remover ${b.name} da pasta do studio?`, 'Remover', true))) return;
+  try { await api('/api/bins/remove', { id: b.id }); toast(`${b.name} removido`); } catch (e) { toast(e.message, 'err'); }
+  await loadBins(true);
+}
+
+/* ============================================================ medidor de contexto */
+/** Tokens ocupados: a última medida do servidor + estimativa do que entrou depois. */
+function ctxUsage(conv) {
+  const nCtx = S.nCtx || 0;
+  if (!conv) return { used: 0, nCtx, exact: false };
+  const m = conv.ctx;
+  const est = (from) => Math.ceil(JSON.stringify(conv.messages.slice(from).map((x) => [x.content, x.tool_calls])).length / 3.2);
+  if (m && m.cut === (conv.compactCut || 0) && m.n <= conv.messages.length) {
+    const extra = m.n < conv.messages.length ? est(m.n) : 0;
+    return { used: m.tokens + extra, nCtx, exact: !extra };
+  }
+  if (!conv.messages.length) return { used: 0, nCtx, exact: false };
+  return { used: estimateTokens(conv, '', []) + (conv.ctxSys || 0), nCtx, exact: false };
+}
+
+function fmtK(n) { return n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace('.', ',') + 'k' : String(n); }
+
+function drawCtxMeter() {
+  const el = $('#ctx-meter'); if (!el) return;
+  const c = cur();
+  const { used, nCtx, exact } = ctxUsage(c);
+  const at = Number(S.settings.compactAt) || 75;
+  const pct = nCtx ? Math.min(100, used / nCtx * 100) : 0;
+  const lvl = pct >= at ? 'hi' : pct >= at * 0.75 ? 'mid' : 'lo';
+  const R = 7, C = 2 * Math.PI * R;
+  el.className = 'ctx-meter ' + lvl;
+  el.hidden = !nCtx;
+  el.innerHTML = `<svg viewBox="0 0 18 18" width="18" height="18"><circle cx="9" cy="9" r="${R}" class="trk"/><circle cx="9" cy="9" r="${R}" class="val" stroke-dasharray="${(pct / 100 * C).toFixed(2)} ${C.toFixed(2)}" transform="rotate(-90 9 9)"/></svg><span>${used ? (exact ? '' : '~') + Math.round(pct) + '%' : '0%'}</span>`;
+  el.title = `Contexto: ${used.toLocaleString('pt-BR')} de ${nCtx.toLocaleString('pt-BR')} tokens (${pct.toFixed(0)}%)${exact ? '' : ', estimado'}. Clique para detalhes.`;
+}
+
+function fillCtxPop() {
+  const pop = $('#pop-ctx'); pop.innerHTML = '';
+  const add = (...xs) => pop.append(...xs.filter(Boolean));
+  const c = cur();
+  const { used, nCtx, exact } = ctxUsage(c);
+  const at = Number(S.settings.compactAt) || 75;
+  const pct = nCtx ? used / nCtx * 100 : 0;
+  const sys = c?.ctxSys || 0;
+  const row = (k, v) => h('div.ctx-row', null, h('span', null, k), h('b', null, v));
+  const bar = h('div.ctx-bar', null, h('i', { style: { width: Math.min(100, pct) + '%' } }), h('em', { style: { left: at + '%' }, title: 'Compactação automática' }));
+  bar.classList.add(pct >= at ? 'hi' : pct >= at * 0.75 ? 'mid' : 'lo');
+  add(
+    h('div.pop-title', null, 'Contexto da conversa'),
+    bar,
+    row('Em uso', `${exact ? '' : '~'}${used.toLocaleString('pt-BR')} tokens (${pct.toFixed(0)}%)`),
+    row('Limite do modelo', nCtx.toLocaleString('pt-BR')),
+    sys ? row('Instruções e ferramentas', '~' + sys.toLocaleString('pt-BR')) : null,
+    row('Compacta sozinho em', S.settings.autoCompact ? `${at}% (${Math.round(nCtx * at / 100).toLocaleString('pt-BR')})` : 'desligado'),
+    c?.compactions ? row('Compactações feitas', String(c.compactions)) : null,
+    h('div.ctx-note', null, exact ? 'Medido pelo llama-server na última resposta.' : 'Estimativa: a medida exata chega com a próxima resposta.'),
+    h('button.btn.sm', { disabled: !c || !c.messages.length, onclick: () => { closePops(); compactNow(c); } }, ic('archive'), 'Compactar agora'));
+}
+
 
 async function streamRaw(messages, tools, msg, signal, onDelta) {
   const body = { messages, stream: true };
@@ -1497,7 +1634,7 @@ async function streamRaw(messages, tools, msg, signal, onDelta) {
           if (tc.function?.arguments) slot.function.arguments += tc.function.arguments;
         }
       }
-      if (j.timings) { msg.tps = j.timings.predicted_per_second; msg.tokens = j.timings.predicted_n; }
+      if (j.timings) { msg.tps = j.timings.predicted_per_second; msg.tokens = j.timings.predicted_n; msg.ctxTokens = (j.timings.prompt_n || 0) + (j.timings.cache_n || 0) + (j.timings.predicted_n || 0); }
       onDelta?.();
     }
   }
@@ -2796,7 +2933,7 @@ async function checkHealth() {
     try { const r = await fetch('/health'); status = r.ok ? 'ok' : r.status === 503 ? 'loading' : 'offline'; } catch { status = 'offline'; }
   }
   if (status === 'ok' && !S.model) {
-    try { const p = await (await fetch('/props')).json(); S.model = p.model_path || p.model_alias || ''; S.vision = !!(p.modalities?.vision); S.nCtx = p.default_generation_settings?.n_ctx || p.n_ctx || 0; } catch { /* ok */ }
+    try { const p = await (await fetch('/props')).json(); S.model = p.model_path || p.model_alias || ''; S.vision = !!(p.modalities?.vision); S.nCtx = p.default_generation_settings?.n_ctx || p.n_ctx || 0; drawCtxMeter(); } catch { /* ok */ }
     if (!S.model) { try { const m = await (await fetch('/v1/models')).json(); S.model = m.data?.[0]?.id || ''; } catch { /* ok */ } }
   }
   if (status !== 'ok') S.model = '';
@@ -2824,8 +2961,8 @@ function toggleWs() {
 
 async function init() {
   applyTheme();
-  const navIcons = { chat: 'chat', skills: 'sparkles', mcp: 'plug', personas: 'user', server: 'server', settings: 'gear' };
-  const navLabels = { chat: 'Nova conversa', skills: 'Habilidades', mcp: 'Conectores', personas: 'Personalidades', server: 'Servidor', settings: 'Configurações' };
+  const navIcons = { chat: 'chat', skills: 'sparkles', mcp: 'plug', personas: 'user', tools: 'wrench', server: 'server', settings: 'gear' };
+  const navLabels = { chat: 'Nova conversa', skills: 'Habilidades', mcp: 'Conectores', personas: 'Personalidades', tools: 'Utilitários', server: 'Servidor', settings: 'Configurações' };
   $$('.nav-item').forEach((b) => {
     b.innerHTML = svg(navIcons[b.dataset.view]) + `<span>${navLabels[b.dataset.view]}</span>`;
     b.addEventListener('click', () => {
@@ -2835,6 +2972,8 @@ async function init() {
   });
   $('.search-ico').innerHTML = svg('search');
   $('#search').addEventListener('input', () => { if (S.view !== 'chat') setView('chat'); renderConvList(); });
+  $('#bins-check').append(ic('refresh'), 'Procurar versões novas');
+  $('#bins-check').addEventListener('click', () => loadBins(true, true));
   $('#persona-new').append(ic('plus'), 'Nova personalidade');
   $('#persona-new').addEventListener('click', () => editPersona(null));
   $('#pick-persona').addEventListener('click', () => togglePop('#pop-persona', fillPersonaPop));
@@ -2885,6 +3024,7 @@ async function init() {
   $('#pick-skills').addEventListener('click', () => togglePop('#pop-skills', fillSkillsPop));
   $('#pick-mcp').addEventListener('click', () => togglePop('#pop-mcp', fillMcpPop));
   $('#pick-ws').addEventListener('click', () => togglePop('#pop-ws', fillWsPop));
+  $('#ctx-meter').addEventListener('click', () => togglePop('#pop-ctx', fillCtxPop));
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && running(cur()) && S.view === 'chat' && !$('#modal-root').childElementCount && !mention) stop();
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); $('#search').focus(); $('#search').select(); }

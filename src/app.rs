@@ -33,6 +33,10 @@ pub struct Config {
     pub window_gpu: bool,
     /// Fechar a janela mantém o programa na bandeja.
     pub close_to_tray: bool,
+    /// Enxuga saídas longas de comandos e conectores antes de irem para o modelo.
+    pub compact_output: bool,
+    /// Passa comandos conhecidos (git, cargo, pytest...) pelo RTK quando instalado.
+    pub use_rtk: bool,
 }
 
 impl Default for Config {
@@ -49,6 +53,8 @@ impl Default for Config {
             open_browser: true,
             window_gpu: false,
             close_to_tray: true,
+            compact_output: true,
+            use_rtk: true,
         }
     }
 }

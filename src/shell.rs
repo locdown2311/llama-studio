@@ -28,6 +28,7 @@ pub async fn run(ws: &Path, command: &str, cwd: &str, timeout_s: u64) -> Result<
         c.args(["-c", command]);
         c
     };
+    cmd.env("PATH", crate::bins::path_env());
     cmd.current_dir(&dir)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())

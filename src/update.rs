@@ -65,7 +65,7 @@ fn chain(e: &dyn std::error::Error) -> String {
 
 /// Baixa uma URL. Se a conexão própria falhar no Windows (certificado, proxy, antivírus),
 /// usa o PowerShell, que segue o proxy e os certificados do sistema.
-async fn fetch(app: &App, url: &str, json: bool, timeout: Duration) -> Result<(u16, Vec<u8>), String> {
+pub async fn fetch(app: &App, url: &str, json: bool, timeout: Duration) -> Result<(u16, Vec<u8>), String> {
     let mut rb = app.web.get(url).header("User-Agent", "llama-studio").timeout(timeout);
     if json {
         rb = rb.header("Accept", "application/vnd.github+json");
