@@ -2054,7 +2054,7 @@ function drawMcpList() {
         h('div.srv-main', null,
           h('div.srv-name', null, s.name, h('span.tag', null, s.kind === 'stdio' ? 'local' : s.kind === 'sse' ? 'SSE' : 'HTTP')),
           h('div.srv-cmd', { title: cmdLine(s.config || {}) }, cmdLine(s.config || {}))),
-        h('div.srv-status', null, h('span.dot.' + st.dot), s.status === 'connected' ? `${s.tools.length} ferramentas` : st.label),
+        h('div.srv-status', null, h('span.dot.' + st.dot), s.status === 'connected' ? `${s.tools.length} ferramentas` : s.status === 'connecting' && s.since ? `conectando... ${Math.max(0, Math.round((Date.now() - s.since) / 1000))} s` : st.label),
         h('div.srv-actions', null,
           h('button.icon-btn.sm', { title: 'Reconectar', 'aria-label': 'Reconectar', html: svg('refresh'), onclick: async () => { s.status = 'connecting'; drawMcpList(); try { await api('/api/mcp/reconnect', { name: s.name }); } catch (e) { toast(e.message, 'err'); } loadMcp(); } }),
           h('button.icon-btn.sm', { title: 'Editar', 'aria-label': 'Editar', html: svg('edit'), onclick: () => editServer(s.name, s.config) }),
@@ -2063,13 +2063,15 @@ function drawMcpList() {
             await api('/api/mcp/delete', { name: s.name }); S.sel.mcp = S.sel.mcp.filter((x) => x !== s.name); saveSel(); loadMcp();
           } })),
         h('label.switch', { title: 'Ligar/desligar' }, sw, h('span'))),
-      s.error ? h('div.srv-err', null, s.error) : null);
+      s.error ? h('div.srv-err', null, s.error.length > 300 ? s.error.slice(0, 300) + '...' : s.error) : null);
+    const keep = (d, key) => { d.open = S.mcpOpen?.has(key) || false; d.addEventListener('toggle', () => { (S.mcpOpen ||= new Set())[d.open ? 'add' : 'delete'](key); }); return d; };
     if (s.tools.length) {
-      const d = h('details', null, h('summary', null, ic('chev'), `Ferramentas (${s.tools.length})`),
-        h('div.srv-tools', null, s.tools.map((t) => h('div.srv-tool', null, h('b', null, t.name), t.description ? h('div', null, t.description) : null))));
+      const d = keep(h('details', null, h('summary', null, ic('chev'), `Ferramentas (${s.tools.length})`),
+        h('div.srv-tools', null, s.tools.map((t) => h('div.srv-tool', null, h('b', null, t.name), t.description ? h('div', null, t.description) : null)))), s.name + ':tools');
       card.append(d);
     }
-    if (s.log?.trim()) card.append(h('details', null, h('summary', null, ic('chev'), 'Log do servidor'), h('pre.srv-log', null, s.log)));
+    // log sempre recolhido; só abre se a pessoa clicar
+    if (s.log?.trim()) card.append(keep(h('details', null, h('summary', null, ic('chev'), `Log do servidor (${s.log.trim().split('\n').length} linhas)`), h('pre.srv-log', null, s.log.trim().split('\n').slice(-80).join('\n'))), s.name + ':log'));
     list.append(card);
   }
 }

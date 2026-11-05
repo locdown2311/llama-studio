@@ -148,7 +148,10 @@ impl Conn {
                 if let Some(p) = proto.lock().unwrap().clone() {
                     rb = rb.header("MCP-Protocol-Version", p);
                 }
-                let resp = rb.body(serde_json::to_vec(&msg).unwrap()).send().await.map_err(|e| chain(&e))?;
+                let resp = tokio::time::timeout(Duration::from_secs(30), rb.body(serde_json::to_vec(&msg).unwrap()).send())
+                    .await
+                    .map_err(|_| "O servidor não respondeu em 30 s.".to_string())?
+                    .map_err(|e| chain(&e))?;
                 if let Some(s) = resp.headers().get("mcp-session-id").and_then(|v| v.to_str().ok()) {
                     *session.lock().unwrap() = Some(s.to_string());
                 }
@@ -164,7 +167,12 @@ impl Conn {
                 if ct.contains("text/event-stream") {
                     let me = self.clone();
                     let h = tokio::spawn(async move {
-                        read_sse(resp, |_, data| {
+                        read_sse(resp, |event, data| {
+                            if event == "endpoint" {
+                                // é um servidor do transporte SSE antigo: desiste já para tentar SSE
+                                me.fail_all("O servidor usa o transporte SSE antigo.");
+                                return;
+                            }
                             if let Ok(v) = serde_json::from_str::<Value>(&data) {
                                 me.dispatch(v);
                             }
@@ -187,7 +195,10 @@ impl Conn {
                 for (k, v) in headers {
                     rb = rb.header(k, v);
                 }
-                let resp = rb.body(serde_json::to_vec(&msg).unwrap()).send().await.map_err(|e| chain(&e))?;
+                let resp = tokio::time::timeout(Duration::from_secs(30), rb.body(serde_json::to_vec(&msg).unwrap()).send())
+                    .await
+                    .map_err(|_| "O servidor não respondeu em 30 s.".to_string())?
+                    .map_err(|e| chain(&e))?;
                 if !resp.status().is_success() {
                     return Err(format!("HTTP {}", resp.status()));
                 }
@@ -203,11 +214,19 @@ impl Conn {
         let id = self.next.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().unwrap().insert(id, tx);
-        if let Err(e) = self.send_raw(json!({"jsonrpc":"2.0","id":id,"method":method,"params":params})).await {
-            self.pending.lock().unwrap().remove(&id);
-            return Err(e);
+        let started = std::time::Instant::now();
+        match tokio::time::timeout(timeout, self.send_raw(json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}))).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                self.pending.lock().unwrap().remove(&id);
+                return Err(e);
+            }
+            Err(_) => {
+                self.pending.lock().unwrap().remove(&id);
+                return Err(format!("Tempo esgotado ({}s) ao enviar {method}", timeout.as_secs()));
+            }
         }
-        match tokio::time::timeout(timeout, rx).await {
+        match tokio::time::timeout(timeout.saturating_sub(started.elapsed()), rx).await {
             Ok(Ok(r)) => r,
             Ok(Err(_)) => Err("Conexão encerrada.".into()),
             Err(_) => {
@@ -226,7 +245,7 @@ impl Conn {
             .request(
                 "initialize",
                 json!({"protocolVersion":PROTOCOL,"capabilities":{"roots":{"listChanged":false}},"clientInfo":{"name":"llama-studio","version":env!("CARGO_PKG_VERSION")}}),
-                Duration::from_secs(90),
+                Duration::from_secs(110),
             )
             .await?;
         if let Tx::Http { proto, .. } = &self.tx {
@@ -293,6 +312,7 @@ pub struct Entry {
     log: Arc<Mutex<String>>,
     tools: Mutex<Vec<Value>>,
     conn: Mutex<Option<Arc<Conn>>>,
+    since: u128,
 }
 
 impl Entry {
@@ -318,6 +338,7 @@ impl Entry {
             "error": *self.error.lock().unwrap(),
             "log": *self.log.lock().unwrap(),
             "config": self.cfg,
+            "since": self.since as u64,
             "tools": self.tools.lock().unwrap().iter().map(|t| json!({"name": t["name"], "description": t.get("description").cloned().unwrap_or(json!(""))})).collect::<Vec<_>>(),
         })
     }
@@ -327,7 +348,7 @@ fn kind_of(cfg: &Value) -> &'static str {
     if cfg.get("url").and_then(Value::as_str).is_some() {
         match cfg.get("type").or_else(|| cfg.get("transport")).and_then(Value::as_str).unwrap_or("").to_lowercase().as_str() {
             "sse" => "sse",
-            "http" | "streamable-http" | "streamablehttp" => "http",
+            "http" | "streamable-http" | "streamablehttp" | "streamable_http" => "http",
             _ => "auto",
         }
     } else {
@@ -389,6 +410,7 @@ impl Mcp {
                         log: Arc::new(Mutex::new(String::new())),
                         tools: Mutex::new(vec![]),
                         conn: Mutex::new(None),
+                        since: crate::app::now_ms(),
                     });
                     map.insert(name.clone(), e.clone());
                     todo.push(e);
@@ -466,10 +488,30 @@ async fn connect(e: Arc<Entry>, http: reqwest::Client) {
         e.set("disabled", None);
         return;
     }
+    // prazo total: locais podem demorar para subir (ex.: Ghidra), remotos não
+    let limit = Duration::from_secs(if kind_of(&e.cfg) == "stdio" { 120 } else { 45 });
+    if tokio::time::timeout(limit, connect_inner(e.clone(), http)).await.is_err() {
+        *e.conn.lock().unwrap() = None;
+        e.set("error", Some(format!("Tempo esgotado: o servidor não terminou de conectar em {} s. Veja o log.", limit.as_secs())));
+    }
+}
+
+async fn connect_inner(e: Arc<Entry>, http: reqwest::Client) {
     let kind = kind_of(&e.cfg);
+    let url_is_sse = e.cfg.get("url").and_then(Value::as_str).is_some_and(|u| u.trim_end_matches('/').ends_with("/sse"));
     let result = match kind {
         "stdio" => connect_stdio(&e, http).await,
-        "http" => connect_http(&e, http).await,
+        "http" => match connect_http(&e, http.clone()).await {
+            Err(err) if url_is_sse => {
+                push_log(&e.log, &format!("HTTP falhou ({err}); o endereço termina em /sse, tentando SSE...\n"));
+                let r = connect_sse(&e, http).await;
+                if r.is_ok() {
+                    *e.kind.lock().unwrap() = "sse".into();
+                }
+                r
+            }
+            r => r,
+        },
         "sse" => connect_sse(&e, http).await,
         _ => match connect_http(&e, http.clone()).await {
             Ok(c) => {
@@ -573,7 +615,10 @@ async fn connect_sse(e: &Arc<Entry>, http: reqwest::Client) -> Result<Arc<Conn>,
     for (k, v) in &headers {
         rb = rb.header(k, v);
     }
-    let resp = rb.send().await.map_err(|err| chain(&err))?;
+    let resp = tokio::time::timeout(Duration::from_secs(20), rb.send())
+        .await
+        .map_err(|_| "O servidor SSE não respondeu em 20 s.".to_string())?
+        .map_err(|err| chain(&err))?;
     if !resp.status().is_success() {
         return Err(format!("HTTP {}", resp.status()));
     }

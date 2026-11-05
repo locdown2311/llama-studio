@@ -49,28 +49,87 @@ pub fn ui_version(app: &App) -> String {
 
 static CACHE: Mutex<Option<(Instant, Value)>> = Mutex::new(None);
 
+fn chain(e: &dyn std::error::Error) -> String {
+    let mut out = e.to_string();
+    let mut cur = e.source();
+    while let Some(c) = cur {
+        let t = c.to_string();
+        if !out.contains(&t) {
+            out.push_str(": ");
+            out.push_str(&t);
+        }
+        cur = c.source();
+    }
+    out
+}
+
+/// Baixa uma URL. Se a conexão própria falhar no Windows (certificado, proxy, antivírus),
+/// usa o PowerShell, que segue o proxy e os certificados do sistema.
+async fn fetch(app: &App, url: &str, json: bool, timeout: Duration) -> Result<(u16, Vec<u8>), String> {
+    let mut rb = app.web.get(url).header("User-Agent", "llama-studio").timeout(timeout);
+    if json {
+        rb = rb.header("Accept", "application/vnd.github+json");
+    }
+    match rb.send().await {
+        Ok(r) => {
+            let status = r.status().as_u16();
+            let body = r.bytes().await.map_err(|e| chain(&e))?.to_vec();
+            Ok((status, body))
+        }
+        Err(e) => {
+            let first = chain(&e);
+            #[cfg(windows)]
+            {
+                return fetch_powershell(url, json, timeout).await.map_err(|e2| format!("{first} (e pelo PowerShell: {e2})"));
+            }
+            #[allow(unreachable_code)]
+            Err(first)
+        }
+    }
+}
+
+#[cfg(windows)]
+async fn fetch_powershell(url: &str, json: bool, timeout: Duration) -> Result<(u16, Vec<u8>), String> {
+    let tmp = std::env::temp_dir().join(format!("llama-studio-{}.bin", crate::app::now_ms()));
+    let accept = if json { "application/vnd.github+json" } else { "*/*" };
+    let script = format!(
+        "$ProgressPreference='SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; \
+         try {{ Invoke-WebRequest -UseBasicParsing -Uri '{}' -Headers @{{'User-Agent'='llama-studio';'Accept'='{}'}} -OutFile '{}' -TimeoutSec {}; exit 0 }} \
+         catch {{ $c = $_.Exception.Response.StatusCode.value__; if ($c) {{ exit $c }} else {{ [Console]::Error.WriteLine($_.Exception.Message); exit 1 }} }}",
+        url.replace('\'', "''"),
+        accept,
+        tmp.display().to_string().replace('\'', "''"),
+        timeout.as_secs().max(10)
+    );
+    let mut c = tokio::process::Command::new("powershell.exe");
+    c.args(["-NoProfile", "-NonInteractive", "-Command", &script]).creation_flags(crate::CREATE_NO_WINDOW).kill_on_drop(true);
+    let out = tokio::time::timeout(timeout + Duration::from_secs(15), c.output()).await.map_err(|_| "tempo esgotado".to_string())?.map_err(|e| e.to_string())?;
+    let code = out.status.code().unwrap_or(1);
+    let body = std::fs::read(&tmp).unwrap_or_default();
+    let _ = std::fs::remove_file(&tmp);
+    match code {
+        0 => Ok((200, body)),
+        c if c >= 100 => Ok((c as u16, body)),
+        _ => Err(String::from_utf8_lossy(&out.stderr).trim().to_string()),
+    }
+}
+
 async fn latest_release(app: &App) -> Result<Value, String> {
     if let Some((t, v)) = CACHE.lock().unwrap().as_ref() {
         if t.elapsed() < Duration::from_secs(1800) {
             return Ok(v.clone());
         }
     }
-    let resp = app
-        .web
-        .get(format!("https://api.github.com/repos/{REPO}/releases/latest"))
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "llama-studio")
-        .timeout(Duration::from_secs(20))
-        .send()
+    let (status, body) = fetch(app, &format!("https://api.github.com/repos/{REPO}/releases/latest"), true, Duration::from_secs(20))
         .await
         .map_err(|e| format!("Sem conexão com o GitHub: {e}"))?;
-    if resp.status().as_u16() == 404 {
+    if status == 404 {
         return Err("Ainda não há nenhuma versão publicada.".into());
     }
-    if !resp.status().is_success() {
-        return Err(format!("GitHub respondeu {}", resp.status()));
+    if !(200..300).contains(&status) {
+        return Err(format!("GitHub respondeu {status}"));
     }
-    let v: Value = serde_json::from_slice(&resp.bytes().await.map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    let v: Value = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
     *CACHE.lock().unwrap() = Some((Instant::now(), v.clone()));
     Ok(v)
 }
@@ -105,11 +164,11 @@ pub async fn check(app: &App, force: bool) -> Value {
 }
 
 async fn download(app: &App, url: &str) -> Result<Vec<u8>, String> {
-    let r = app.web.get(url).header("User-Agent", "llama-studio").timeout(Duration::from_secs(600)).send().await.map_err(|e| e.to_string())?;
-    if !r.status().is_success() {
-        return Err(format!("Download falhou: {}", r.status()));
+    let (status, body) = fetch(app, url, false, Duration::from_secs(600)).await.map_err(|e| format!("Download falhou: {e}"))?;
+    if !(200..300).contains(&status) {
+        return Err(format!("Download falhou: HTTP {status}"));
     }
-    Ok(r.bytes().await.map_err(|e| e.to_string())?.to_vec())
+    Ok(body)
 }
 
 /// Baixa e aplica a interface nova (não precisa reiniciar).
