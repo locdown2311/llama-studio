@@ -75,6 +75,8 @@ pub struct Llama {
     kill: Mutex<Option<oneshot::Sender<()>>>,
     running: std::sync::atomic::AtomicBool,
     pid: AtomicU32,
+    /// quando o servidor foi iniciado pelo studio (ms desde 1970), para a tela de abertura
+    started_at: std::sync::atomic::AtomicU64,
     state: Mutex<String>,
     log: Mutex<LogBuf>,
 }
@@ -104,6 +106,7 @@ impl Llama {
             kill: Mutex::new(None),
             running: false.into(),
             pid: AtomicU32::new(0),
+            started_at: std::sync::atomic::AtomicU64::new(0),
             state: Mutex::new("stopped".into()),
             log: Mutex::new(LogBuf { first: 0, lines: VecDeque::new() }),
         }
@@ -174,6 +177,7 @@ impl Llama {
             "state": self.state(),
             "running": self.is_running(),
             "pid": self.pid.load(Ordering::SeqCst),
+            "startedAt": self.started_at.load(Ordering::SeqCst),
             "url": c.base_url(),
             "command": self.command_line(),
         })
@@ -226,6 +230,7 @@ impl Llama {
         cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).kill_on_drop(true);
         let mut child = cmd.spawn().map_err(|e| format!("Erro ao iniciar: {e}"))?;
         self.pid.store(child.id().unwrap_or(0), Ordering::SeqCst);
+        self.started_at.store(crate::app::now_ms() as u64, Ordering::SeqCst);
         self.running.store(true, Ordering::SeqCst);
         self.set_state(app, "loading");
 

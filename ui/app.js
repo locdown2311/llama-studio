@@ -566,8 +566,9 @@ function renderAI(b, conv, isLast) {
     if (sp.text.trim()) card.append(h('div.md', { html: md(sp.text) }));
     if (m.tool_calls?.length) card.append(h('div.trace', null, m.tool_calls.map((tc) => renderTool(tc, results.get(tc.id), live))));
   });
+  if (live && conv._waitingModel) card.append(h('div.ai-status', null, h('span', { html: svg('loader', 'spin'), style: { display: 'grid' } }), 'Esperando o modelo terminar de carregar. A resposta começa sozinha.'));
   if (live && conv._compacting) card.append(h('div.ai-status', null, h('span', { html: svg('loader', 'spin'), style: { display: 'grid' } }), 'Compactando a conversa para caber no contexto...'));
-  const waiting = live && !conv._compacting && (!card.childElementCount || (last && !last.content && !last.reasoning && !last.tool_calls?.length && toolMsgs.length));
+  const waiting = live && !conv._compacting && !conv._waitingModel && (!card.childElementCount || (last && !last.content && !last.reasoning && !last.tool_calls?.length && toolMsgs.length));
   if (waiting) card.append(h('div.typing', null, h('i'), h('i'), h('i')));
   if (!live && !assistants.some((m) => splitThink(m.content).text.trim() || m.tool_calls?.length)) card.append(h('div.muted', null, 'Execução interrompida.'));
 
@@ -1331,10 +1332,12 @@ async function runAgent(conv) {
     const maxSteps = Math.max(1, Number(S.settings.maxSteps) || 30);
 
     for (let step = 0; step < maxSteps; step++) {
-      await maybeCompact(conv, system, tools, ac.signal);
       const msg = { role: 'assistant', content: '', reasoning: '', tool_calls: [], t0: step === 0 ? t0 : Date.now() };
       conv.messages.push(msg);
       scheduleRender();
+      if (step === 0) await waitModel(conv, ac.signal);
+      if (ac.signal.aborted) throw new DOMException('abort', 'AbortError');
+      await maybeCompact(conv, system, tools, ac.signal);
       try {
         await streamCompletion(conv, system, tools, msg, ac.signal);
       } finally {
@@ -2300,7 +2303,7 @@ function renderSettings() {
 
 /* ============================================================ servidor (llama-server) */
 async function startLlama() {
-  try { S.llama = await api('/api/llama/start', {}); toast('Iniciando o llama-server...'); }
+  try { S.llama = await api('/api/llama/start', {}); showSplash(); }
   catch (e) { toast(e.message, 'err'); setView('server'); }
   lastHealth = ''; checkHealth(); if (S.view === 'server') drawServerStatus();
 }
@@ -2389,6 +2392,105 @@ async function pollLog() {
   $('#srv-log-count').textContent = `${logNext} linhas`;
 }
 
+/* ============================================================ tela de abertura */
+// Etapas reconhecidas no log do llama-server e onde cada uma começa na barra (%)
+const LOAD_STEPS = [
+  { re: /llama_model_loader|print_info|loading model/i, pct: 5, label: 'Lendo o modelo' },
+  { re: /load_tensors|offload|model buffer size/i, pct: 20, label: 'Carregando os pesos na memória e na GPU' },
+  { re: /llama_context|llama_kv_cache|KV self size|kv_unified|n_ctx/i, pct: 80, label: 'Preparando o contexto' },
+  { re: /warming up|warmup/i, pct: 92, label: 'Aquecendo o modelo' },
+  { re: /server is listening|all slots are idle|main: model loaded/i, pct: 99, label: 'Abrindo o servidor' },
+];
+const splash = { on: false, step: -1, logNext: 0, timer: null, t0: 0, last: '' };
+
+function splashFmt(ms) { const s = Math.round(ms / 1000); return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s`; }
+
+function showSplash() {
+  if (splash.on) return;
+  const l = S.llama || {};
+  splash.on = true; splash.step = -1; splash.logNext = 0; splash.last = '';
+  splash.t0 = l.startedAt || Date.now();
+  $('#sp-model').textContent = l.config?.Model ? shortModel(l.config.Model) : `llama-server em ${l.url || S.info.llamaUrl}`;
+  $('#sp-steps').innerHTML = '';
+  if (l.state !== 'external-loading') for (const st of LOAD_STEPS.slice(0, 4)) $('#sp-steps').append(h('li', null, st.label));
+  $('#splash').hidden = false;
+  requestAnimationFrame(() => $('#splash').classList.add('show'));
+  tickSplash();
+  splash.timer = setInterval(tickSplash, 700);
+}
+
+function hideSplash(done) {
+  if (!splash.on) return;
+  splash.on = false; clearInterval(splash.timer);
+  if (done) {
+    $('#sp-fill').style.width = '100%'; $('#sp-stage').textContent = 'Pronto';
+    $$('#sp-steps li').forEach((li) => { li.className = 'ok'; });
+  }
+  setTimeout(() => { $('#splash').classList.remove('show'); setTimeout(() => { $('#splash').hidden = true; }, 350); }, done ? 450 : 0);
+}
+
+async function tickSplash() {
+  let l;
+  try { l = S.llama = noteLlama(await api('/api/llama')); } catch { return; }
+  if (l.state === 'ready' || l.state === 'external') {
+    lastHealth = ''; checkHealth();
+    return hideSplash(true);
+  }
+  if (l.state === 'stopped') { toast('O llama-server parou durante a carga. Veja o log.', 'err'); hideSplash(false); setView('server'); return; }
+  // log: etapa e última linha
+  if (l.running) {
+    try {
+      const r = await api('/api/llama/log?since=' + splash.logNext);
+      splash.logNext = r.next;
+      for (const line of r.lines) {
+        LOAD_STEPS.forEach((st, i) => { if (i > splash.step && st.re.test(line)) splash.step = i; });
+        if (line.trim()) splash.last = line.trim();
+      }
+    } catch { /* ok */ }
+  }
+  const elapsed = Date.now() - splash.t0;
+  const prev = store.get('loadMs', 0);
+  const stage = LOAD_STEPS[splash.step];
+  const floor = stage ? stage.pct : 2;
+  const ceil = LOAD_STEPS[splash.step + 1]?.pct ?? 99;
+  let pct = floor;
+  if (prev) pct = Math.max(floor, Math.min(ceil - 1, (elapsed / prev) * 100));
+  else if (stage) pct = Math.min(ceil - 1, floor + Math.log1p(elapsed / 4000) * 6);
+  const known = l.running;
+  $('#splash').classList.toggle('indet', !known);
+  $('#sp-fill').style.width = known ? `${Math.min(99, pct).toFixed(1)}%` : '35%';
+  $('#sp-stage').textContent = known ? (stage ? stage.label + '...' : 'Iniciando o servidor...') : 'Carregando o modelo (servidor iniciado fora do studio)...';
+  $('#sp-time').textContent = splashFmt(elapsed) + (prev && known ? ` de ~${splashFmt(prev)}` : '');
+  $$('#sp-steps li').forEach((li, i) => { li.className = i < splash.step ? 'ok' : i === splash.step ? 'now' : ''; });
+  $('#sp-log').textContent = splash.last;
+}
+
+/** Guarda quanto a última carga do modelo levou (estimativa da barra). */
+function noteLlama(l) {
+  if (!l) return l;
+  if (l.state === 'loading' && l.running && l.startedAt) S._loadingSince = l.startedAt;
+  else if (l.state === 'ready' && S._loadingSince && l.startedAt === S._loadingSince) {
+    const took = Date.now() - l.startedAt;
+    if (took > 3000) store.set('loadMs', took);
+    S._loadingSince = 0;
+  }
+  return l;
+}
+
+/** Espera o modelo terminar de carregar antes de responder (sem dar erro). */
+async function waitModel(conv, signal) {
+  const loading = () => S.llama && ['loading', 'external-loading'].includes(S.llama.state);
+  if (!loading()) return;
+  conv._waitingModel = true; scheduleRender();
+  const t0 = Date.now();
+  try {
+    while (loading() && !signal.aborted && Date.now() - t0 < 20 * 60 * 1000) {
+      await new Promise((r) => setTimeout(r, 1000));
+      try { S.llama = noteLlama(await api('/api/llama')); } catch { /* ok */ }
+    }
+  } finally { conv._waitingModel = false; scheduleRender(); }
+}
+
 /* ============================================================ atualizações */
 async function checkUpdates(force = false) {
   try { S.update = await api('/api/update' + (force ? '?force=1' : '')); } catch { return null; }
@@ -2465,7 +2567,7 @@ let lastHealth = '';
 async function checkHealth() {
   let status = 'offline';
   try {
-    S.llama = await api('/api/llama');
+    S.llama = noteLlama(await api('/api/llama'));
     status = { ready: 'ok', external: 'ok', loading: 'loading', 'external-loading': 'loading' }[S.llama.state] || 'offline';
   } catch {
     try { const r = await fetch('/health'); status = r.ok ? 'ok' : r.status === 503 ? 'loading' : 'offline'; } catch { status = 'offline'; }
@@ -2582,6 +2684,11 @@ async function init() {
   renderChat();
   renderTree();
   await Promise.all([loadSkills(), loadMcp(), checkHealth()]);
+  // tela de abertura enquanto o modelo carrega (o servidor pode estar subindo agora)
+  for (let i = 0; i < 4 && S.llama && S.llama.state === 'stopped' && S.llama.config?.AutoStart; i++) { await new Promise((r) => setTimeout(r, 400)); await checkHealth(); }
+  if (S.llama && ['loading', 'external-loading'].includes(S.llama.state)) showSplash();
+  $('#sp-skip').addEventListener('click', () => hideSplash(false));
+  $('#sp-logbtn').addEventListener('click', () => { hideSplash(false); setView('server'); });
   renderComposer(); renderChatTitle();
   setInterval(checkHealth, 5000);
   setTimeout(() => checkUpdates(), 4000);

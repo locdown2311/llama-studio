@@ -202,6 +202,21 @@
   </section>
 </div>
 
+<div id="splash" hidden>
+  <div class="sp-card" role="status" aria-live="polite">
+    <div class="sp-mark">L</div>
+    <div class="sp-title">llama studio</div>
+    <div class="sp-model" id="sp-model"></div>
+    <div class="sp-bar"><i id="sp-fill"></i></div>
+    <div class="sp-row"><span id="sp-stage">Iniciando o servidor...</span><span id="sp-time"></span></div>
+    <ol class="sp-steps" id="sp-steps"></ol>
+    <div class="sp-log" id="sp-log"></div>
+    <div class="sp-actions">
+      <button class="btn ghost" id="sp-skip" type="button">Usar enquanto carrega</button>
+      <button class="btn ghost" id="sp-logbtn" type="button">Ver log completo</button>
+    </div>
+  </div>
+</div>
 <div id="modal-root"></div>
 <div id="toasts" aria-live="polite"></div>
 <script src="/app.js"></script>
