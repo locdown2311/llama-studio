@@ -865,3 +865,11 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .ctx-parts { margin: 0 0 4px 10px; padding-left: 8px; border-left: 2px solid var(--line); }
 .ctx-row.sub { font-size: 12px; padding: 1px 0; color: var(--muted); }
 .ctx-row.sub b { font-weight: 500; color: var(--text-2); }
+
+/* barra do chat: seletores só com ícone */
+.bar-btn.icon-only { position: relative; width: 31px; padding: 0; justify-content: center; border-color: transparent; color: var(--muted); }
+.bar-btn.icon-only > svg { width: 16px; height: 16px; }
+.bar-btn.icon-only.on { color: var(--on, var(--accent)); background: color-mix(in srgb, var(--on, var(--accent)) 10%, transparent); }
+.bar-btn.icon-only .badge { position: absolute; top: -3px; right: -4px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px; background: var(--on, var(--accent)); color: #fff; font-size: 10px; font-weight: 700; line-height: 15px; text-align: center; box-shadow: 0 0 0 2px var(--card); }
+.bar-btn .p-ava { width: 19px; height: 19px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 10.5px; font-weight: 700; }
+#pick-model b { max-width: 150px; }

@@ -1132,23 +1132,26 @@ function updatePickers() {
   const nMcp = new Set([...act.mcp, ...pills.filter((p) => p.kind === 'mcp').map((p) => p.id)]).size;
 
   const pm = $('#pick-model'); pm.innerHTML = '';
-  pm.append(h('span.dot.' + ({ ok: 'ok', loading: 'busy', offline: 'err' }[S.health.status] || '')), h('b', null, S.model ? shortModel(S.model) : (S.health.status === 'loading' ? 'carregando...' : 'llama-server')), h('span', { html: svg('chev', 'caret'), style: { display: 'contents' } }));
+  pm.append(h('span.dot.' + ({ ok: 'ok', loading: 'busy', offline: 'err' }[S.health.status] || '')), h('b', null, S.model ? shortModel(S.model).replace(/[-_.](I?Q\d[\w]*|BF16|F16|F32)$/i, '') : (S.health.status === 'loading' ? 'carregando...' : 'llama-server')), h('span', { html: svg('chev', 'caret'), style: { display: 'contents' } }));
   pm.title = S.model || S.info.llamaUrl || '';
   pm.querySelector('.caret').style.transform = 'rotate(90deg)';
 
-  const pr = $('#pick-persona'); pr.innerHTML = '';
+  // só ícone; o nome aparece na dica e no menu ao clicar
+  const iconBtn = (el, icon, title, on, badge, color) => {
+    el.innerHTML = ''; el.classList.add('icon-only'); el.classList.toggle('on', !!on);
+    el.style.setProperty('--on', color || '');
+    el.append(icon);
+    if (badge) el.append(h('span.badge', null, String(badge)));
+    el.title = title; el.setAttribute('aria-label', title);
+  };
   const pers = personaOf(c);
-  pr.append(pers ? h('span.p-dot', { style: { background: pers.color } }) : ic('user'), h('span.lbl', null, 'Personalidade:'), h('b', { style: pers ? { color: pers.color } : null }, pers ? pers.name : 'nenhuma'));
-  pr.title = pers ? pers.prompt.slice(0, 300) : 'Escolher personalidade';
-  const ps = $('#pick-skills'); ps.innerHTML = ''; ps.classList.toggle('has-skill', nSk > 0);
-  ps.append(ic('sparkles'), h('span.lbl', null, 'Habilidades:'), h('b', null, nSk || 'nenhuma'));
-  const pc = $('#pick-mcp'); pc.innerHTML = ''; pc.classList.toggle('has-mcp', nMcp > 0);
-  pc.append(ic('plug'), h('span.lbl', null, 'Conectores:'), h('b', null, nMcp || 'nenhum'));
-  pc.title = act.mcp.join(', ') || 'Nenhum conector MCP ativo';
-  const pw = $('#pick-ws'); pw.innerHTML = '';
-  pw.append(h('span.lbl', null, projectOf(c) ? 'Projeto:' : 'Espaço de trabalho:'), h('code', null, projectOf(c)?.name || basename(S.ws.path) || '...'), h('span', { html: svg('chev', 'caret'), style: { display: 'contents' } }));
-  pw.querySelector('.caret').style.transform = 'rotate(90deg)';
-  pw.title = S.ws.path;
+  iconBtn($('#pick-persona'), pers ? h('span.p-ava', { style: { background: pers.color } }, (pers.name[0] || '?').toUpperCase()) : ic('user'),
+    pers ? `Personalidade: ${pers.name}` : 'Personalidade: nenhuma', !!pers, 0, pers?.color);
+  const skNames = act.skills.map((id) => S.skills.find((k) => k.id === id)?.name || id);
+  iconBtn($('#pick-skills'), ic('sparkles'), nSk ? `Habilidades: ${skNames.join(', ') || nSk}` : 'Habilidades: nenhuma', nSk > 0, nSk, 'var(--skill)');
+  iconBtn($('#pick-mcp'), ic('plug'), nMcp ? `Conectores: ${act.mcp.join(', ') || nMcp}` : 'Conectores: nenhum', nMcp > 0, nMcp, 'var(--mcp)');
+  const proj = projectOf(c);
+  iconBtn($('#pick-ws'), ic('folder'), proj ? `Projeto: ${proj.name}\n${S.ws.path}` : `Espaço de trabalho: ${S.ws.path || '...'}`, !!proj, 0, '#b07a14');
 }
 
 function checkRow({ checked, title, desc, extra, disabled, onchange }) {
