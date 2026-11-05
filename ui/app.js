@@ -562,21 +562,13 @@ function renderChatTitle() {
   $('#chat-title').textContent = c ? c.title : 'Nova conversa';
   document.title = c && c.messages.length ? `${c.title} - llama studio` : 'llama studio';
   const sub = $('#chat-sub'); sub.innerHTML = '';
-  // fileira única de etiquetas: contexto (projeto/pasta, personalidade) | execução (modelo, habilidades, conectores)
-  const open = (sel) => (e) => { e.stopPropagation(); $(sel).click(); };
+  // cabeçalho: só onde a conversa está (projeto ou pasta); os controles ficam na barra de baixo
   const chip = (cls, title, onclick, ...kids) => h('button.hchip' + cls, { title, onclick }, ...kids);
   const proj = projectOf(c);
-  const dir = wsOf(c);
   if (proj) sub.append(chip('.hc-proj', `Projeto · ${proj.dir}`, (e) => { e.stopPropagation(); editProject(proj); }, ic('folder'), h('span.t', null, proj.name),
     basename(proj.dir) && basename(proj.dir).toLowerCase() !== proj.name.toLowerCase() ? h('span.dim', null, basename(proj.dir)) : null));
-  else sub.append(chip('', dir || 'Escolher pasta de trabalho', open('#pick-ws'), ic('folder'), h('span.t', null, basename(dir) || 'sem pasta')));
-  const pers = personaOf(c);
-  if (pers) sub.append(chip('.hc-pers', 'Personalidade', open('#pick-persona'), h('span.p-dot', { style: { background: pers.color } }), h('span.t', null, pers.name)));
-  const act = activeSel(c);
-  if (S.model || act.skills.length || act.mcp.length) sub.append(h('span.hdiv'));
-  if (S.model) sub.append(chip('.hc-model', S.model, open('#pick-model'), ic('cpu' in ICONS ? 'cpu' : 'server'), h('span.t', null, shortModel(S.model).replace(/[-_.](I?Q\d[\w]*|BF16|F16|F32)$/i, ''))));
-  if (act.skills.length) sub.append(chip('.hc-skill', act.skills.map((id) => S.skills.find((k) => k.id === id)?.name || id).join(', '), open('#pick-skills'), ic('sparkles'), h('span.t', null, String(act.skills.length))));
-  if (act.mcp.length) sub.append(chip('.hc-mcp', act.mcp.join(', '), open('#pick-mcp'), ic('plug'), h('span.t', null, String(act.mcp.length))));
+  // personalidade, modelo, habilidades e conectores ficam só na barra de baixo
+  if (c?.compactions) sub.append(h('span.hnote', { title: 'O começo da conversa foi resumido para caber no contexto' }, ic('archive'), `compactada ${c.compactions}x`));
 }
 
 function fillConvMenu() {

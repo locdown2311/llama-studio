@@ -886,3 +886,6 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .srv-tool.tg.off .st-main { opacity: .45; }
 .srv-tool.tg.off b { text-decoration: line-through; }
 .switch.sm { transform: scale(.8); transform-origin: right center; flex: none; margin-top: 1px; }
+.hnote { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--muted); }
+.hnote svg { width: 12px; height: 12px; }
+.chat-sub:empty { display: none; }
