@@ -1,3 +1,4 @@
+#![cfg_attr(not(feature = "desktop"), allow(dead_code))]
 //! llama studio: interface local para o llama-server.
 //! Um executável só: servidor HTTP + interface embutida + janela própria + bandeja.
 

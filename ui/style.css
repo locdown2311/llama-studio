@@ -862,3 +862,6 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .bin-link { white-space: nowrap; }
 .send { flex-shrink: 0; }
 .pick-wrap:has(> #ctx-meter) { flex-shrink: 0; }
+.ctx-parts { margin: 0 0 4px 10px; padding-left: 8px; border-left: 2px solid var(--line); }
+.ctx-row.sub { font-size: 12px; padding: 1px 0; color: var(--muted); }
+.ctx-row.sub b { font-weight: 500; color: var(--text-2); }

@@ -700,17 +700,18 @@ fn groups_of(v: &Value) -> Vec<String> {
 async fn tools_list(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     let only = v.get("only").map(|_| strs(&v, "only"));
-    ok(tools::build_tools(&app, &groups_of(&v), &strs(&v, "mcp"), !strs(&v, "skills").is_empty(), &strs(&v, "extra"), only.as_deref()))
+    let lazy = v.get("lazy").and_then(Value::as_bool).unwrap_or(false);
+    ok(tools::build_tools(&app, &groups_of(&v), &strs(&v, "mcp"), !strs(&v, "skills").is_empty(), &strs(&v, "extra"), only.as_deref(), lazy))
 }
 
 async fn tools_search(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
-    ok(tools::search_tools(&app, st(&v, "query")))
+    ok(tools::search_tools(&app, st(&v, "query"), &strs(&v, "names")))
 }
 
 async fn context(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
-    ok(json!({"text": tools::build_context(&app, &ws_of(&app, st(&v, "ws")), &strs(&v, "skills"), &groups_of(&v), &strs(&v, "refs"), st(&v, "now"))}))
+    ok(json!({"text": tools::build_context(&app, &ws_of(&app, st(&v, "ws")), &strs(&v, "skills"), &groups_of(&v), &strs(&v, "refs"), st(&v, "now"), v.get("lazy").and_then(Value::as_bool).unwrap_or(false))}))
 }
 
 async fn tools_call(State(app): S, b: Bytes) -> Res {

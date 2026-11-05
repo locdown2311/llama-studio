@@ -259,7 +259,7 @@ document.addEventListener('click', (e) => {
 
 /* ============================================================ estado */
 const TOOL_GROUPS = ['read', 'write', 'edit', 'shell', 'code', 'browser', 'computer', 'history', 'toolsearch', 'explore'];
-const DEFAULT_SETTINGS = { systemPrompt: '', temperature: '', topP: '', maxTokens: '', maxSteps: 30, approval: 'writes', theme: 'light', showThinking: true, vision: 'auto', explorerSteps: 20, autoCompact: true, compactAt: 75, tools: Object.fromEntries(TOOL_GROUPS.map((g) => [g, true])) };
+const DEFAULT_SETTINGS = { systemPrompt: '', temperature: '', topP: '', maxTokens: '', maxSteps: 30, approval: 'writes', theme: 'light', showThinking: true, vision: 'auto', explorerSteps: 20, autoCompact: true, compactAt: 75, lazyLoad: true, tools: Object.fromEntries(TOOL_GROUPS.map((g) => [g, true])) };
 const S = {
   view: 'chat',
   convs: store.get('convs', []),
@@ -1485,7 +1485,12 @@ function renderToolsPage() {
   };
   box.append(
     opt('compactOutput', 'Enxugar saídas de ferramentas', 'Antes de ir para o modelo, tira cores e barras de progresso, junta linhas repetidas e, se passar de ~12 mil caracteres, mantém começo e fim. A saída inteira fica salva para o modelo consultar se precisar.'),
-    opt('useRtk', 'Passar comandos pelo RTK', 'Quando o RTK está instalado, git, cargo, pytest, docker, gh e outros rodam por ele, que devolve só o essencial (falhas, arquivos alterados).'));
+    opt('useRtk', 'Passar comandos pelo RTK', 'Quando o RTK está instalado, git, cargo, pytest, docker, gh e outros rodam por ele, que devolve só o essencial (falhas, arquivos alterados).'),
+    (() => {
+      const i = h('input', { type: 'checkbox', checked: S.settings.lazyLoad !== false, onchange: () => { S.settings.lazyLoad = i.checked; store.set('settings', S.settings); } });
+      return h('label.tcard.wrap', null, h('span.tc-main', null, h('span.tc-title', null, 'Carregar ferramentas e habilidades sob demanda'),
+        h('span.tc-desc', null, 'Em vez de mandar o esquema de todas as ferramentas dos conectores e o texto inteiro das habilidades em todo pedido, manda só um catálogo com nome e uma linha. O modelo carrega o que for usar. Reduz muito o contexto fixo.')), h('span.switch', null, i, h('span')));
+    })());
   drawBins();
   loadBins(false).then(() => { if (!S.bins?.items.some((b) => 'latest' in b)) loadBins(true); });
 }
@@ -1535,6 +1540,22 @@ async function binRemove(b) {
 }
 
 /* ============================================================ medidor de contexto */
+/** De onde vêm os tokens fixos de cada pedido (instruções, ferramentas por origem). */
+function ctxBreakdown(system, ctxText, catalog, tools, meta) {
+  const tk = (x) => Math.ceil((typeof x === 'string' ? x.length : JSON.stringify(x).length) / 3.2);
+  const parts = {};
+  const add = (k, n) => { parts[k] = (parts[k] || 0) + n; };
+  const skillsAt = ctxText.indexOf('O usuário ativou as skills');
+  add('Instruções', tk(system) - (catalog ? tk(catalog) : 0) - (skillsAt >= 0 ? tk(ctxText.slice(skillsAt)) : 0));
+  if (skillsAt >= 0) add('Habilidades', tk(ctxText.slice(skillsAt)));
+  if (catalog) add('Catálogo de conectores', tk(catalog));
+  for (const t of tools) {
+    const m = meta[t.function.name] || {};
+    add(m.source === 'mcp' ? 'Conector ' + m.server : 'Ferramentas internas', tk(t));
+  }
+  return Object.entries(parts).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
+}
+
 /** Tokens ocupados: a última medida do servidor + estimativa do que entrou depois. */
 function ctxUsage(conv) {
   const nCtx = S.nCtx || 0;
@@ -1582,6 +1603,7 @@ function fillCtxPop() {
     row('Em uso', `${exact ? '' : '~'}${used.toLocaleString('pt-BR')} tokens (${pct.toFixed(0)}%)`),
     row('Limite do modelo', nCtx.toLocaleString('pt-BR')),
     sys ? row('Instruções e ferramentas', '~' + sys.toLocaleString('pt-BR')) : null,
+    c?.ctxParts?.length ? h('div.ctx-parts', null, c.ctxParts.slice(0, 7).map(([k, n]) => h('div.ctx-row.sub', null, h('span', null, k), h('b', null, '~' + n.toLocaleString('pt-BR'))))) : null,
     row('Compacta sozinho em', S.settings.autoCompact ? `${at}% (${Math.round(nCtx * at / 100).toLocaleString('pt-BR')})` : 'desligado'),
     c?.compactions ? row('Compactações feitas', String(c.compactions)) : null,
     h('div.ctx-note', null, exact ? 'Medido pelo llama-server na última resposta.' : 'Estimativa: a medida exata chega com a próxima resposta.'),
@@ -1664,10 +1686,11 @@ async function runAgent(conv) {
     const groups = enabledGroups();
     const sel = { groups, mcp: act.mcp.filter((n) => S.mcp.some((s) => s.name === n && s.status === 'connected')), skills: act.skills };
     const refs = collectRefs(conv);
-    const fetchTools = () => api('/api/tools', { ...sel, extra: conv.extraTools || [] });
-    let [{ tools, meta }, ctx] = await Promise.all([
+    const lazy = S.settings.lazyLoad !== false;
+    const fetchTools = () => api('/api/tools', { ...sel, extra: conv.extraTools || [], lazy });
+    let [{ tools, meta, catalog }, ctx] = await Promise.all([
       fetchTools(),
-      api('/api/context', { ws: wsOf(conv), skills: sel.skills, groups, refs, now: new Date().toLocaleString('pt-BR', { dateStyle: 'full', timeStyle: 'short' }) }),
+      api('/api/context', { ws: wsOf(conv), skills: sel.skills, groups, refs, lazy, now: new Date().toLocaleString('pt-BR', { dateStyle: 'full', timeStyle: 'short' }) }),
     ]);
     const tctx = { signal: ac.signal, conv, refs, groups, ctxText: ctx.text, ws: wsOf(conv) };
     const persona = personaOf(conv); const proj = projectOf(conv);
@@ -1676,7 +1699,9 @@ async function runAgent(conv) {
       persona?.prompt?.trim() ? `# Personalidade: ${persona.name}\n${persona.prompt.trim()}` : '',
       proj?.instructions?.trim() ? `# Instruções do projeto "${proj.name}"\n${proj.instructions.trim()}` : '',
       ctx.text,
+      catalog || '',
     ].filter(Boolean).join('\n\n');
+    conv.ctxParts = ctxBreakdown(system, ctx.text, catalog, tools, meta);
     const maxSteps = Math.max(1, Number(S.settings.maxSteps) || 30);
 
     for (let step = 0; step < maxSteps; step++) {
@@ -1741,7 +1766,7 @@ async function runAgent(conv) {
       if (images.length && visionOn()) {
         for (const im of images) conv.messages.push({ role: 'user', hidden: true, content: `[Imagem devolvida pela ferramenta ${im.name}]`, _images: im.images });
       }
-      if (refetch) ({ tools, meta } = await fetchTools());
+      if (refetch) { ({ tools, meta } = await fetchTools()); conv.ctxParts = ctxBreakdown(system, ctx.text, catalog, tools, meta); }
       if (step === maxSteps - 1) conv.messages.push({ role: 'error', content: `Parei depois de ${maxSteps} rodadas de ferramentas. Envie "continue" para seguir ou aumente o limite nas configurações.` });
     }
   } catch (e) {
@@ -1861,7 +1886,8 @@ async function execTool(name, args, info, tctx, tmsg) {
     if (name === 'execute_code') return await runCode(args?.code ?? '', tctx, tmsg);
     if (name === 'recall_history') return recallHistory(args || {}, tctx.conv);
     if (name === 'search_tools') {
-      const r = await api('/api/tools/search', { query: args?.query || '' });
+      const names = Array.isArray(args?.names) ? args.names : typeof args?.names === 'string' ? args.names.split(/[\s,]+/).filter(Boolean) : [];
+      const r = await api('/api/tools/search', { query: args?.query || '', names });
       if (!r.tools.length) return { content: 'Nenhuma ferramenta encontrada para essa busca.', isError: false };
       tctx.conv.extraTools = [...new Set([...(tctx.conv.extraTools || []), ...r.tools.map((t) => t.name)])];
       return { content: 'Ferramentas ativadas para os próximos passos:\n' + r.tools.map((t) => `- ${t.name} (${t.server}): ${t.description}`).join('\n'), isError: false };

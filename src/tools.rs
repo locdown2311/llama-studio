@@ -78,8 +78,8 @@ const DEFS: &[Def] = &[
     // ---------------- busca
     d("recall_history", "history", false, true, "Procura nas conversas anteriores (ou só na atual) trechos sobre um assunto. Use quando o usuário se referir a algo já conversado.",
       r#"{"type":"object","properties":{"query":{"type":"string"},"scope":{"type":"string","enum":["todas","atual"]},"limit":{"type":"integer"}},"required":["query"]}"#),
-    d("search_tools", "toolsearch", false, true, "Procura ferramentas de conectores MCP que ainda não estão ativas (por palavra-chave) e as ativa para os próximos passos desta conversa.",
-      r#"{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}"#),
+    d("search_tools", "toolsearch", false, true, "Ativa ferramentas de conectores MCP para os próximos passos: passe os nomes exatos do catálogo em names, ou palavras-chave em query.",
+      r#"{"type":"object","properties":{"names":{"type":"array","items":{"type":"string"},"description":"Nomes exatos do catálogo"},"query":{"type":"string","description":"Palavras-chave"}}}"#),
     // ---------------- subagentes
     d("explore", "explore", false, true, "Inicia um subagente explorador: ele investiga sozinho (só leitura: arquivos, busca e, se ativo, navegador) com contexto próprio e devolve um relatório. Use para pesquisas amplas sem encher o seu contexto. Chame várias vezes na mesma resposta para explorar em paralelo.",
       r#"{"type":"object","properties":{"task":{"type":"string","description":"O que investigar e o que deve constar no relatório"},"where":{"type":"string","description":"Pasta, arquivos ou site para começar (opcional)"}},"required":["task"]}"#),
@@ -122,7 +122,7 @@ fn mcp_entries(app: &App, servers: Option<&[String]>) -> Vec<(String, String, Va
 }
 
 /// Monta a lista de ferramentas no formato OpenAI e os metadados para a interface.
-pub fn build_tools(app: &App, groups: &[String], servers: &[String], with_skills: bool, extra: &[String], only: Option<&[String]>) -> Value {
+pub fn build_tools(app: &App, groups: &[String], servers: &[String], with_skills: bool, extra: &[String], only: Option<&[String]>, lazy: bool) -> Value {
     let mut tools = vec![];
     let mut meta = Map::new();
     let mut add = |name: String, desc: String, params: Value, info: Value| {
@@ -133,8 +133,11 @@ pub fn build_tools(app: &App, groups: &[String], servers: &[String], with_skills
         meta.insert(name, info);
     };
     let allowed = |n: &str| only.map(|o| o.iter().any(|x| x == n)).unwrap_or(true);
+    // sob demanda: o catálogo vai no prompt e search_tools carrega o que for usado
+    let lazy_on = lazy && only.is_none() && !servers.is_empty();
     for dd in DEFS {
-        if groups.iter().any(|g| g == dd.group) && allowed(dd.name) {
+        let forced = lazy_on && dd.name == "search_tools";
+        if (forced || groups.iter().any(|g| g == dd.group)) && allowed(dd.name) {
             add(dd.name.into(), dd.desc.into(), serde_json::from_str(dd.params).unwrap(), json!({"source": if dd.client { "client" } else { "builtin" }, "group": dd.group, "label": dd.name, "mutating": dd.mutating}));
         }
     }
@@ -142,48 +145,120 @@ pub fn build_tools(app: &App, groups: &[String], servers: &[String], with_skills
         add(SKILL_TOOL.name.into(), SKILL_TOOL.desc.into(), serde_json::from_str(SKILL_TOOL.params).unwrap(), json!({"source":"builtin","group":"read","label":SKILL_TOOL.name,"mutating":false}));
     }
     let mut index = HashMap::new();
+    let mut catalog: Vec<(String, Vec<String>)> = vec![];
     if only.is_none() {
         for (name, sname, t) in mcp_entries(app, None) {
-            if !servers.contains(&sname) && !extra.contains(&name) {
+            let selected = servers.contains(&sname);
+            if !selected && !extra.contains(&name) {
                 continue;
             }
             let tname = t.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+            let desc = t.get("description").and_then(Value::as_str).unwrap_or("").to_string();
+            index.insert(name.clone(), (sname.clone(), tname.clone()));
+            if lazy_on && selected {
+                // o catálogo lista tudo (carregadas ou não) para o prompt não mudar entre passos
+                let line = format!("{name}: {}", first_sentence(&desc, 90));
+                match catalog.iter_mut().find(|(s, _)| *s == sname) {
+                    Some((_, v)) => v.push(line),
+                    None => catalog.push((sname.clone(), vec![line])),
+                }
+                if !extra.contains(&name) {
+                    continue;
+                }
+            }
             let mut schema = t.get("inputSchema").cloned().filter(Value::is_object).unwrap_or_else(|| json!({"type":"object"}));
+            slim_schema(&mut schema, 0);
             if let Some(o) = schema.as_object_mut() {
-                o.remove("$schema");
                 o.entry("type").or_insert(json!("object"));
                 o.entry("properties").or_insert(json!({}));
             }
             let read_only = t.pointer("/annotations/readOnlyHint").and_then(Value::as_bool).unwrap_or(false);
-            let desc = t.get("description").and_then(Value::as_str).unwrap_or("").to_string();
-            index.insert(name.clone(), (sname.clone(), tname.clone()));
-            add(name, desc, schema, json!({"source":"mcp","server":sname,"label":format!("{sname} › {tname}"),"mutating":!read_only}));
+            add(name, cut(&desc, 700), schema, json!({"source":"mcp","server":sname,"label":format!("{sname} › {tname}"),"mutating":!read_only}));
         }
     }
     app.mcp.set_index(index);
-    json!({"tools": tools, "meta": meta})
+    let catalog_text = if catalog.is_empty() {
+        String::new()
+    } else {
+        let body: Vec<String> = catalog.iter().map(|(s, v)| format!("## {s}\n{}", v.join("\n"))).collect();
+        format!("Catálogo de ferramentas dos conectores ativos (ainda não carregadas). Para usar uma, chame antes search_tools com names=[...] e ela fica disponível no passo seguinte. Carregue só as que for usar.\n\n{}", body.join("\n\n"))
+    };
+    json!({"tools": tools, "meta": meta, "catalog": catalog_text})
+}
+
+fn cut(s: &str, n: usize) -> String {
+    if s.chars().count() <= n {
+        return s.to_string();
+    }
+    let t: String = s.chars().take(n).collect();
+    format!("{}...", t.trim_end())
+}
+
+/// Primeira frase (ou começo) de uma descrição, para o catálogo.
+fn first_sentence(s: &str, n: usize) -> String {
+    let s = s.trim();
+    let end = s.find(|c| c == '\n').unwrap_or(s.len());
+    let line = &s[..end];
+    let line = match line.find(". ") {
+        Some(i) => &line[..=i],
+        None => line,
+    };
+    cut(line, n)
+}
+
+/// Tira do schema o que não ajuda o modelo e encurta descrições longas.
+fn slim_schema(v: &mut Value, depth: usize) {
+    match v {
+        Value::Object(o) => {
+            for k in ["$schema", "title", "examples", "$comment", "additionalProperties", "$id", "deprecated"] {
+                if k == "additionalProperties" && o.get(k).is_some_and(Value::is_object) {
+                    continue; // mapas de verdade
+                }
+                o.remove(k);
+            }
+            if let Some(Value::String(d)) = o.get_mut("description") {
+                *d = cut(d, if depth == 0 { 300 } else { 160 });
+            }
+            for (k, x) in o.iter_mut() {
+                if k != "description" && k != "enum" && k != "default" && k != "const" {
+                    slim_schema(x, depth + 1);
+                }
+            }
+        }
+        Value::Array(a) => a.iter_mut().for_each(|x| slim_schema(x, depth + 1)),
+        _ => {}
+    }
 }
 
 /// Busca ferramentas MCP por palavras (para search_tools).
-pub fn search_tools(app: &App, q: &str) -> Value {
+pub fn search_tools(app: &App, q: &str, names: &[String]) -> Value {
     let words: Vec<String> = q.to_lowercase().split_whitespace().map(str::to_string).collect();
     let mut found = vec![];
     let mut index = HashMap::new();
     for (name, sname, t) in mcp_entries(app, None) {
         let desc = t.get("description").and_then(Value::as_str).unwrap_or("");
-        let hay = format!("{} {} {}", name, sname, desc).to_lowercase();
-        let score = words.iter().filter(|w| hay.contains(w.as_str())).count();
-        if score > 0 || words.is_empty() {
-            index.insert(name.clone(), (sname.clone(), t["name"].as_str().unwrap_or("").to_string()));
-            found.push((score, json!({"name": name, "server": sname, "description": desc.chars().take(240).collect::<String>()})));
+        let tname = t["name"].as_str().unwrap_or("");
+        let exact = names.iter().any(|n| n == &name || n == tname);
+        let score = if exact {
+            1000
+        } else if words.is_empty() {
+            if names.is_empty() { 1 } else { 0 }
+        } else {
+            let hay = format!("{} {} {}", name, sname, desc).to_lowercase();
+            words.iter().filter(|w| hay.contains(w.as_str())).count()
+        };
+        if score > 0 {
+            index.insert(name.clone(), (sname.clone(), tname.to_string()));
+            found.push((score, json!({"name": name, "server": sname, "description": first_sentence(desc, 160)})));
         }
     }
     app.mcp.set_index(index);
     found.sort_by(|a, b| b.0.cmp(&a.0));
-    json!({"tools": found.into_iter().take(15).map(|(_, v)| v).collect::<Vec<_>>()})
+    let max = if names.is_empty() { 10 } else { names.len().max(1) + 5 };
+    json!({"tools": found.into_iter().take(max).map(|(_, v)| v).collect::<Vec<_>>()})
 }
 
-pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[String], refs: &[String], now: &str) -> String {
+pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[String], refs: &[String], now: &str, lazy: bool) -> String {
     let has = |g: &str| groups.iter().any(|x| x == g);
     let mut parts = vec![];
     if !now.is_empty() {
@@ -231,7 +306,15 @@ pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[Strin
             let text = std::fs::read_to_string(s.dir.join("SKILL.md")).unwrap_or_default();
             let (_, body) = skills::parse_frontmatter(&text);
             let files = if s.files.is_empty() { String::new() } else { format!("Arquivos auxiliares (leia com read_skill_file): {}\n", s.files.join(", ")) };
-            active.push(format!("<skill id=\"{}\" name=\"{}\">\nPasta da skill: {}\n{files}\n{}\n</skill>", s.id, s.name, s.dir.display(), body.trim()));
+            if lazy && body.len() > 1500 {
+                // só o resumo; o corpo é lido quando a tarefa pedir
+                active.push(format!(
+                    "<skill id=\"{}\" name=\"{}\">\n{}\nAntes de seguir esta skill, leia as instruções completas com read_skill_file(skill=\"{}\", path=\"SKILL.md\").\n{files}</skill>",
+                    s.id, s.name, cut(s.description.trim(), 400), s.id
+                ));
+            } else {
+                active.push(format!("<skill id=\"{}\" name=\"{}\">\nPasta da skill: {}\n{files}\n{}\n</skill>", s.id, s.name, s.dir.display(), body.trim()));
+            }
         }
     }
     if !active.is_empty() {
