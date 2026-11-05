@@ -130,8 +130,11 @@ fn main() {
         .spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
-                .max_blocking_threads(4)
-                .thread_keep_alive(Duration::from_secs(5))
+                // No Windows cada pipe de processo filho (llama-server, conectores MCP) ocupa uma
+                // thread de bloqueio enquanto lê; com poucas, a escrita para o conector nunca saía.
+                .max_blocking_threads(128)
+                .thread_stack_size(1024 * 1024)
+                .thread_keep_alive(Duration::from_secs(10))
                 .build()
                 .expect("runtime");
             let _ = app2.rt.set(rt.handle().clone());

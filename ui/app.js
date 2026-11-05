@@ -56,6 +56,7 @@ const ICONS = {
   monitor: '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>',
   compass: '<circle cx="12" cy="12" r="10"/><path d="m16.24 7.76-2.12 6.36-6.36 2.12 2.12-6.36z"/>',
   history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l4 2"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
   pin: '<path d="M12 17v5M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/>',
 };
 function svg(name, cls = '') {
@@ -268,6 +269,9 @@ const S = {
   vision: false,
   nCtx: 0,
   refs: [],
+  projects: store.get('projects', []),
+  personas: store.get('personas', null),
+  draftPersona: undefined,
   runs: new Map(), // id da conversa -> AbortController
   waiting: new Set(), // conversas esperando permissão
   approvals: new Map(),
@@ -304,13 +308,48 @@ function setView(v) {
   if (v === 'skills') renderSkillsPage();
   if (v === 'mcp') renderMcpPage();
   if (v === 'settings') renderSettings();
+  if (v === 'personas') renderPersonasPage();
   if (v === 'server') renderServerPage();
   if (v === 'chat') { renderConvList(); setTimeout(() => focusEditor(), 20); }
 }
 
+/* ============================================================ projetos e personalidades */
+const DEFAULT_PERSONAS = [
+  { id: 'programador', name: 'Programador', color: '#5b5bd6', prompt: 'Você é um engenheiro de software sênior. Leia o código antes de mudar, prefira mudanças pequenas e corretas, explique o porquê em poucas linhas e mostre o código final completo quando for curto. Rode testes ou comandos para confirmar quando puder.' },
+  { id: 'engenheiro-reverso', name: 'Engenheiro reverso', color: '#c2410c', prompt: 'Você é um engenheiro reverso experiente (binários nativos, .NET, Electron/JavaScript, APKs). Use as ferramentas de análise disponíveis antes de concluir. Registre achados com nomes de classes, métodos, assinaturas, offsets e endereços exatos. Separe o que foi confirmado do que é hipótese.' },
+  { id: 'revisor', name: 'Revisor de texto', color: '#2f9e58', prompt: 'Você revisa textos em português do Brasil: corrige gramática, clareza e tom sem mudar o sentido. Mostre o texto revisado e, depois, uma lista curta das mudanças mais importantes.' },
+];
+if (!Array.isArray(S.personas)) S.personas = DEFAULT_PERSONAS.map((p) => ({ ...p }));
+const PERSONA_COLORS = ['#5b5bd6', '#c2410c', '#2f9e58', '#b4366b', '#0e7490', '#7c4dcc', '#a16207', '#475569'];
+
+function saveProjects() { store.set('projects', S.projects); }
+function savePersonas() { store.set('personas', S.personas); }
+function projectOf(c) { return c?.projectId ? S.projects.find((p) => p.id === c.projectId) || null : null; }
+function personaOf(c) {
+  const id = c ? c.personaId : (S.draftPersona !== undefined ? S.draftPersona : S.settings.defaultPersona);
+  return id ? S.personas.find((p) => p.id === id) || null : null;
+}
+/** Pasta de trabalho da conversa: a do projeto ou a geral. */
+function wsOf(c) { return projectOf(c)?.dir || S.info.workspace || ''; }
+
+/** Painel de arquivos acompanha a pasta da conversa aberta. */
+function syncWsRoot(force) {
+  const w = wsOf(cur());
+  if (!w || (w === S.ws.path && !force)) return;
+  S.ws.path = w;
+  S.ws.cache.clear(); S.ws.fresh.clear();
+  S.ws.expanded = new Set(store.get('wsExp:' + w, []));
+  $('#ws-preview')?.classList.remove('open');
+  renderWsPath(); renderTree(); updatePickers();
+}
+
 /* ============================================================ conversas */
-function newConv() {
-  const c = { id: uid(), title: 'Nova conversa', messages: [], createdAt: Date.now(), updatedAt: Date.now(), autoApprove: false };
+function newConv(projectId) {
+  const proj = projectId ? S.projects.find((p) => p.id === projectId) : null;
+  const personaId = S.draftPersona !== undefined ? S.draftPersona : (proj?.personaId || S.settings.defaultPersona || null);
+  S.draftPersona = undefined;
+  const c = { id: uid(), title: 'Nova conversa', messages: [], createdAt: Date.now(), updatedAt: Date.now(), autoApprove: false, projectId: proj ? proj.id : null, personaId };
+  if (proj) { proj.open = true; saveProjects(); }
   S.convs.unshift(c);
   S.curId = c.id;
   saveConvs();
@@ -325,35 +364,185 @@ function selectConv(id) {
 }
 
 async function deleteConv(c) {
-  S.runs.get(c.id)?.abort();
   if (!(await confirmBox(`Apagar a conversa "${c.title}"?`, 'Apagar', true))) return;
+  S.runs.get(c.id)?.abort();
   S.convs = S.convs.filter((x) => x.id !== c.id);
   if (S.curId === c.id) S.curId = S.convs[0]?.id || null;
   saveConvs(); renderConvList(); renderChat();
 }
 
+function convRow(c, nested) {
+  const active = c.id === S.curId && S.view === 'chat';
+  const row = h('div.conv' + (active ? '.active' : '') + (nested ? '.nested' : ''), { onclick: () => selectConv(c.id), title: c.title },
+    h('span.conv-name', null, c.title),
+    S.waiting.has(c.id) ? h('span.wait-dot', { title: 'Esperando sua permissão' }) : running(c) ? h('span.run-dot', { title: 'Respondendo em segundo plano' }) : null,
+    h('button.icon-btn', { title: 'Apagar', 'aria-label': 'Apagar', html: svg('trash'), onclick: (e) => { e.stopPropagation(); deleteConv(c); } }));
+  row.addEventListener('dblclick', () => renameConv(c, row));
+  return row;
+}
+
+function secHead(key, label, extra) {
+  const open = store.get('sec:' + key, true);
+  return [h('div.sec-row', null,
+    h('button.sec-head', { 'aria-expanded': String(open), onclick: () => { store.set('sec:' + key, !open); renderConvList(); } }, h('span', { html: svg('chev'), style: { display: 'contents' } }), h('span', null, label)),
+    extra || null), open];
+}
+
 function renderConvList() {
-  const list = $('#conv-list'); list.innerHTML = '';
+  const box = $('#conv-list'); box.innerHTML = '';
   const q = ($('#search').value || '').trim().toLowerCase();
+  const match = (c) => !q || c.title.toLowerCase().includes(q) || c.messages.some((m) => m.role === 'user' && (m.content || '').toLowerCase().includes(q));
+  const curProj = projectOf(cur());
+
+  // projetos
+  const [phead, popen] = secHead('projects', 'Projetos', h('button.icon-btn.sm', { title: 'Novo projeto', 'aria-label': 'Novo projeto', html: svg('plus'), onclick: () => editProject(null) }));
+  box.append(phead);
+  if (popen || q) {
+    if (!S.projects.length && !q) box.append(h('div.side-empty', null, 'Projetos agrupam conversas que trabalham na mesma pasta.'));
+    for (const p of [...S.projects].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))) {
+      const convs = S.convs.filter((c) => c.projectId === p.id && match(c)).sort((a, b) => b.updatedAt - a.updatedAt);
+      if (q && !convs.length && !p.name.toLowerCase().includes(q)) continue;
+      const busy = convs.some((c) => running(c));
+      box.append(h('div.proj' + (curProj?.id === p.id ? '.active' : ''), { onclick: () => { p.open = !p.open; saveProjects(); renderConvList(); }, title: p.dir },
+        h('span', { html: svg(p.open || q ? 'folderOpen' : 'folder'), style: { display: 'contents' } }),
+        h('span.conv-name', null, p.name),
+        busy ? h('span.run-dot', { title: 'Alguma conversa está respondendo' }) : h('span.proj-count', null, S.convs.filter((c) => c.projectId === p.id).length || ''),
+        h('button.icon-btn', { title: 'Nova conversa neste projeto', 'aria-label': 'Nova conversa neste projeto', html: svg('plus'), onclick: (e) => { e.stopPropagation(); newConv(p.id); setView('chat'); } }),
+        h('button.icon-btn', { title: 'Configurar projeto', 'aria-label': 'Configurar projeto', html: svg('gear'), onclick: (e) => { e.stopPropagation(); editProject(p); } })));
+      if (p.open || q) {
+        for (const c of convs) box.append(convRow(c, true));
+        if (!convs.length && !q) box.append(h('button.side-empty.nested.link', { onclick: () => { newConv(p.id); setView('chat'); } }, '+ Começar uma conversa aqui'));
+      }
+    }
+  }
+
+  // conversas sem projeto
+  const [rhead, ropen] = secHead('recent', 'Conversas');
+  box.append(rhead);
+  if (!ropen && !q) return;
   const now = new Date(); const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const groups = [['Hoje', (t) => t >= today], ['Ontem', (t) => t >= today - 864e5 && t < today], ['Últimos 7 dias', (t) => t >= today - 7 * 864e5 && t < today - 864e5], ['Mais antigas', (t) => t < today - 7 * 864e5]];
-  const match = (c) => !q || c.title.toLowerCase().includes(q) || c.messages.some((m) => m.role === 'user' && (m.content || '').toLowerCase().includes(q));
-  const sorted = [...S.convs].filter(match).sort((a, b) => b.updatedAt - a.updatedAt);
+  const sorted = S.convs.filter((c) => !projectOf(c) && match(c)).sort((a, b) => b.updatedAt - a.updatedAt);
   for (const [label, test] of groups) {
     const items = sorted.filter((c) => test(c.updatedAt));
     if (!items.length) continue;
-    list.append(h('div.conv-group', null, label));
-    for (const c of items) {
-      const active = c.id === S.curId && S.view === 'chat';
-      const row = h('div.conv' + (active ? '.active' : ''), { onclick: () => selectConv(c.id), title: c.title },
-        h('span.conv-name', null, c.title),
-        S.waiting.has(c.id) ? h('span.wait-dot', { title: 'Esperando sua permissão' }) : running(c) ? h('span.run-dot', { title: 'Respondendo em segundo plano' }) : null,
-        h('button.icon-btn', { title: 'Apagar', 'aria-label': 'Apagar', html: svg('trash'), onclick: (e) => { e.stopPropagation(); deleteConv(c); } }));
-      row.addEventListener('dblclick', () => renameConv(c, row));
-      list.append(row);
-    }
+    box.append(h('div.conv-group', null, label));
+    for (const c of items) box.append(convRow(c, false));
   }
-  if (!sorted.length) list.append(h('div.side-empty', null, q ? 'Nada encontrado.' : 'Suas conversas aparecem aqui.'));
+  if (!sorted.length) box.append(h('div.side-empty', null, q ? 'Nada encontrado.' : 'Suas conversas aparecem aqui.'));
+}
+
+/** Criar ou configurar um projeto. */
+async function editProject(p) {
+  const isNew = !p;
+  const name = h('input.input', { value: p?.name || '', placeholder: 'Ex.: Decompilar dll' });
+  const dir = h('input.input.mono', { value: p?.dir || '', placeholder: 'Pasta onde as conversas do projeto trabalham' });
+  const instr = h('textarea.textarea', { rows: 5, value: p?.instructions || '', placeholder: 'Contexto que vale para todas as conversas do projeto. Ex.: o alvo é o arquivo app.dll; registre os achados em notas.md.' });
+  const persona = h('select.select', null, h('option', { value: '' }, 'Nenhuma (usa a padrão)'), S.personas.map((x) => h('option', { value: x.id }, x.name)));
+  persona.value = p?.personaId || '';
+  const browse = h('button.btn', { type: 'button', onclick: async () => { const r = await pickPath({ title: 'Pasta do projeto', mode: 'dir', start: dir.value || S.info.workspace }); if (r) { dir.value = r; if (!name.value.trim()) name.value = basename(r); } } }, 'Procurar');
+  let m;
+  const save = async () => {
+    const n = name.value.trim(); const d = dir.value.trim().replace(/^"|"$/g, '');
+    if (!n) { toast('Dê um nome ao projeto.', 'err'); return; }
+    if (!d) { toast('Escolha a pasta do projeto.', 'err'); return; }
+    const st = await api('/api/stat', { path: d }).catch(() => ({}));
+    if (!st.exists || !st.dir) { toast('Essa pasta não existe.', 'err'); return; }
+    if (isNew) {
+      const np = { id: uid(), name: n, dir: st.path, instructions: instr.value.trim(), personaId: persona.value || null, createdAt: Date.now(), open: true };
+      S.projects.push(np); saveProjects(); m.close();
+      newConv(np.id); setView('chat');
+      toast(`Projeto "${n}" criado`);
+    } else {
+      Object.assign(p, { name: n, dir: st.path, instructions: instr.value.trim(), personaId: persona.value || null });
+      saveProjects(); m.close(); renderConvList(); renderChatTitle(); syncWsRoot(true);
+      toast('Projeto salvo');
+    }
+  };
+  m = modal({
+    title: isNew ? 'Novo projeto' : `Projeto: ${p.name}`,
+    body: h('div.form', null,
+      h('div.field', null, h('label', null, 'Nome'), name),
+      h('div.field', null, h('label', null, 'Pasta do projeto'), h('div.inline', null, dir, browse), h('small', null, 'Todas as conversas do projeto leem e escrevem aqui.')),
+      h('div.field', null, h('label', null, 'Instruções do projeto'), instr),
+      h('div.field', null, h('label', null, 'Personalidade das conversas novas'), persona)),
+    foot: [
+      !isNew ? h('button.btn.danger', { style: { marginRight: 'auto' }, onclick: async () => {
+        const n = S.convs.filter((c) => c.projectId === p.id).length;
+        if (!(await confirmBox(`Apagar o projeto "${p.name}"? ${n ? `As ${n} conversas dele continuam, como conversas avulsas.` : ''} A pasta não é apagada.`, 'Apagar projeto', true))) return;
+        S.convs.forEach((c) => { if (c.projectId === p.id) c.projectId = null; });
+        S.projects = S.projects.filter((x) => x.id !== p.id);
+        saveProjects(); saveConvs(); m.close(); renderConvList(); renderChat();
+      } }, 'Apagar projeto') : null,
+      h('button.btn', { onclick: () => m.close() }, 'Cancelar'),
+      h('button.btn.primary', { onclick: save }, isNew ? 'Criar projeto' : 'Salvar'),
+    ],
+  });
+}
+
+/* ------------------------------------------------------------ personalidades */
+function renderPersonasPage() {
+  const grid = $('#persona-grid'); grid.innerHTML = '';
+  if (!S.personas.length) grid.append(h('div.empty-card', null, 'Nenhuma personalidade. Crie uma para mudar o jeito de o modelo trabalhar.'));
+  for (const p of S.personas) {
+    const isDef = S.settings.defaultPersona === p.id;
+    grid.append(h('div.skill.persona', null,
+      h('div.skill-top', null, h('div.p-avatar', { style: { background: p.color } }, (p.name[0] || '?').toUpperCase()), h('div.skill-name', null, p.name), isDef ? h('span.tag', null, 'padrão') : null),
+      h('div.skill-desc', null, p.prompt || 'Sem instruções.'),
+      h('div.skill-foot', null,
+        h('span', null, `${p.prompt.length} caracteres`), h('span.spacer'),
+        !isDef ? h('button.btn.ghost.sm', { onclick: () => { S.settings.defaultPersona = p.id; store.set('settings', S.settings); renderPersonasPage(); updatePickers(); toast(`${p.name} é a personalidade padrão`); } }, 'Usar como padrão')
+          : h('button.btn.ghost.sm', { onclick: () => { S.settings.defaultPersona = null; store.set('settings', S.settings); renderPersonasPage(); updatePickers(); } }, 'Tirar padrão'),
+        h('button.icon-btn.sm', { title: 'Editar', 'aria-label': 'Editar', html: svg('edit'), onclick: () => editPersona(p) }),
+        h('button.icon-btn.sm', { title: 'Apagar', 'aria-label': 'Apagar', html: svg('trash'), onclick: async () => {
+          if (!(await confirmBox(`Apagar a personalidade "${p.name}"?`, 'Apagar', true))) return;
+          S.personas = S.personas.filter((x) => x.id !== p.id);
+          if (S.settings.defaultPersona === p.id) { S.settings.defaultPersona = null; store.set('settings', S.settings); }
+          savePersonas(); renderPersonasPage(); updatePickers();
+        } }))));
+  }
+}
+
+function editPersona(p) {
+  const isNew = !p;
+  let color = p?.color || PERSONA_COLORS[S.personas.length % PERSONA_COLORS.length];
+  const name = h('input.input', { value: p?.name || '', placeholder: 'Ex.: Commander' });
+  const prompt = h('textarea.textarea', { rows: 12, value: p?.prompt || '', placeholder: 'Quem o modelo é, como deve pensar, falar e trabalhar. Ex.: Você é um analista de segurança. Responda em tópicos, cite as evidências...' });
+  prompt.style.minHeight = '260px';
+  const swatches = h('div.swatches', null, PERSONA_COLORS.map((c) => {
+    const b = h('button.swatch' + (c === color ? '.on' : ''), { type: 'button', style: { background: c }, 'aria-label': 'Cor', onclick: () => { color = c; $$('.swatch', swatches).forEach((x) => x.classList.toggle('on', x === b)); } });
+    return b;
+  }));
+  let m;
+  m = modal({
+    title: isNew ? 'Nova personalidade' : `Editar ${p.name}`, wide: true,
+    body: h('div.form', null,
+      h('div.row', null, h('div.field', null, h('label', null, 'Nome'), name), h('div.field', null, h('label', null, 'Cor'), swatches)),
+      h('div.field', null, h('label', null, 'Prompt de sistema'), prompt, h('small', null, 'Entra depois do prompt geral das configurações e antes das instruções do projeto.'))),
+    foot: [h('button.btn', { onclick: () => m.close() }, 'Cancelar'), h('button.btn.primary', { onclick: () => {
+      const n = name.value.trim();
+      if (!n) { toast('Dê um nome à personalidade.', 'err'); return; }
+      if (isNew) S.personas.push({ id: uid(), name: n, color, prompt: prompt.value.trim() });
+      else Object.assign(p, { name: n, color, prompt: prompt.value.trim() });
+      savePersonas(); m.close(); renderPersonasPage(); updatePickers(); renderMessages(false);
+      toast(isNew ? 'Personalidade criada' : 'Personalidade salva');
+    } }, isNew ? 'Criar' : 'Salvar')],
+  });
+}
+
+function fillPersonaPop() {
+  const pop = $('#pop-persona'); pop.innerHTML = '';
+  const c = cur(); const curP = personaOf(c);
+  const pick = (id) => {
+    if (c) { c.personaId = id; saveConvs(); } else S.draftPersona = id;
+    closePops(); updatePickers(); renderMessages(false);
+  };
+  pop.append(h('div.pop-head', null, h('span', null, c ? 'Personalidade desta conversa' : 'Personalidade da próxima conversa')));
+  pop.append(h('button.menu-item' + (!curP ? '.hl' : ''), { onclick: () => pick(null) }, h('span.p-dot', { style: { background: 'var(--line-2)' } }), h('span.mi-main', null, 'Sem personalidade', h('span.mi-sub', null, 'Só o prompt geral das configurações'))));
+  for (const p of S.personas) {
+    pop.append(h('button.menu-item' + (curP?.id === p.id ? '.hl' : ''), { onclick: () => pick(p.id) }, h('span.p-dot', { style: { background: p.color } }), h('span.mi-main', null, p.name, h('span.mi-sub', null, p.prompt.split('\n')[0]))));
+  }
+  pop.append(h('div.pop-foot', null, h('button.btn.ghost.sm.wide', { onclick: () => { closePops(); setView('personas'); } }, ic('gear'), 'Gerenciar personalidades')));
 }
 
 function renameConv(c, row) {
@@ -372,7 +561,11 @@ function renderChatTitle() {
   $('#chat-title').textContent = c ? c.title : 'Nova conversa';
   document.title = c && c.messages.length ? `${c.title} - llama studio` : 'llama studio';
   const sub = $('#chat-sub'); sub.innerHTML = '';
-  sub.append(h('span.sq'), h('span', { title: S.ws.path }, basename(S.ws.path) || 'sem pasta'));
+  const proj = projectOf(c);
+  if (proj) sub.append(h('span.proj-chip', { title: proj.dir, onclick: () => editProject(proj) }, ic('folder'), proj.name), h('span.sep'));
+  sub.append(h('span.sq'), h('span', { title: S.ws.path }, basename(wsOf(c)) || 'sem pasta'));
+  const pers = personaOf(c);
+  if (pers) sub.append(h('span.sep'), h('span', { style: { color: pers.color } }, pers.name));
   if (S.model) sub.append(h('span.sep'), h('span.model', null, shortModel(S.model)));
   const act = activeSel(c);
   if (act.skills.length) sub.append(h('span.sep'), h('span', { style: { color: 'var(--skill)' } }, `${act.skills.length} ${act.skills.length === 1 ? 'habilidade' : 'habilidades'}`));
@@ -402,8 +595,8 @@ function exportConv(c) {
       for (const tc of m.tool_calls || []) lines.push(`> Ferramenta \`${tc.function.name}\` ${tc.function.arguments}`, '');
     }
   }
-  api('/api/export', { name: c.title, text: lines.join('\n') })
-    .then((r) => { toast('Conversa salva em ' + r.path); api('/api/reveal', { path: r.path }).catch(() => {}); refreshTree(); })
+  api('/api/export', { name: c.title, text: lines.join('\n'), ws: wsOf(c) })
+    .then((r) => { toast('Conversa salva em ' + r.path); api('/api/reveal', { path: r.path, ws: wsOf(c) }).catch(() => {}); refreshTree(); })
     .catch((e) => toast(e.message, 'err'));
 }
 
@@ -443,7 +636,7 @@ function scheduleRender() {
 
 const renderConvListSoon = debounce(() => renderConvList(), 300);
 
-function renderChat() { renderChatTitle(); renderMessages(false); renderComposer(); }
+function renderChat() { syncWsRoot(); renderChatTitle(); renderMessages(false); renderComposer(); }
 
 function renderMessages(onlyLast) {
   const box = $('#messages');
@@ -506,7 +699,7 @@ function pillEl(p) {
   const label = kind === 'skill' ? 'Habilidade' : kind === 'mcp' ? 'Conector' : 'Arquivo';
   const name = kind === 'file' ? (p.name || basename(p.path)) : p.name;
   const el = h('span.pill.pill-' + kind, { title: kind === 'file' ? p.path : `${label}: ${name}` }, h('span.k', null, label + ':'), name);
-  if (kind === 'file' && p.path) el.addEventListener('click', () => api('/api/reveal', { path: p.path }).catch((e) => toast(e.message, 'err')));
+  if (kind === 'file' && p.path) el.addEventListener('click', () => api('/api/reveal', { path: p.path, ws: S.ws.path }).catch((e) => toast(e.message, 'err')));
   return el;
 }
 
@@ -581,7 +774,7 @@ function renderAI(b, conv, isLast) {
 
   const finalText = assistants.map((m) => splitThink(m.content).text).filter((t) => t.trim()).join('\n\n');
   return h('div.msg.msg-ai', { dataset: { start: b.start } },
-    h('div.ai-head', null, h('div.ai-avatar', null, 'L'), h('span.ai-name', null, 'llama'), h('span.stamp', null, fmtStamp(t0))),
+    (() => { const pp = personaOf(conv); return h('div.ai-head', null, h('div.ai-avatar', { style: pp ? { background: pp.color, color: '#fff', borderColor: pp.color } : null }, pp ? (pp.name[0] || 'L').toUpperCase() : 'L'), h('span.ai-name', null, pp ? pp.name : 'llama'), h('span.stamp', null, fmtStamp(t0))); })(),
     card,
     !live ? h('div.chips', null,
       h('button.chip', { onclick: () => navigator.clipboard.writeText(finalText).then(() => toast('Resposta copiada')) }, ic('copy'), 'Copiar'),
@@ -935,13 +1128,17 @@ function updatePickers() {
   pm.title = S.model || S.info.llamaUrl || '';
   pm.querySelector('.caret').style.transform = 'rotate(90deg)';
 
+  const pr = $('#pick-persona'); pr.innerHTML = '';
+  const pers = personaOf(c);
+  pr.append(pers ? h('span.p-dot', { style: { background: pers.color } }) : ic('user'), h('span.lbl', null, 'Personalidade:'), h('b', { style: pers ? { color: pers.color } : null }, pers ? pers.name : 'nenhuma'));
+  pr.title = pers ? pers.prompt.slice(0, 300) : 'Escolher personalidade';
   const ps = $('#pick-skills'); ps.innerHTML = ''; ps.classList.toggle('has-skill', nSk > 0);
   ps.append(ic('sparkles'), h('span.lbl', null, 'Habilidades:'), h('b', null, nSk || 'nenhuma'));
   const pc = $('#pick-mcp'); pc.innerHTML = ''; pc.classList.toggle('has-mcp', nMcp > 0);
   pc.append(ic('plug'), h('span.lbl', null, 'Conectores:'), h('b', null, nMcp || 'nenhum'));
   pc.title = act.mcp.join(', ') || 'Nenhum conector MCP ativo';
   const pw = $('#pick-ws'); pw.innerHTML = '';
-  pw.append(h('span.lbl', null, 'Espaço de trabalho:'), h('code', null, basename(S.ws.path) || '...'), h('span', { html: svg('chev', 'caret'), style: { display: 'contents' } }));
+  pw.append(h('span.lbl', null, projectOf(c) ? 'Projeto:' : 'Espaço de trabalho:'), h('code', null, projectOf(c)?.name || basename(S.ws.path) || '...'), h('span', { html: svg('chev', 'caret'), style: { display: 'contents' } }));
   pw.querySelector('.caret').style.transform = 'rotate(90deg)';
   pw.title = S.ws.path;
 }
@@ -1001,13 +1198,15 @@ function fillModelPop() {
 
 function fillWsPop() {
   const pop = $('#pop-ws'); pop.innerHTML = '';
-  pop.append(h('div.pop-head', null, h('span', null, 'Espaço de trabalho')), h('div.pop-path', null, S.ws.path));
-  for (const p of (S.info.recentWorkspaces || []).filter((x) => x !== S.ws.path).slice(0, 5)) {
+  const proj = projectOf(cur());
+  pop.append(h('div.pop-head', null, h('span', null, proj ? `Pasta do projeto ${proj.name}` : 'Espaço de trabalho')), h('div.pop-path', null, S.ws.path));
+  if (proj) pop.append(h('button.menu-item', { onclick: () => { closePops(); editProject(proj); } }, ic('gear'), 'Configurar o projeto'));
+  for (const p of proj ? [] : (S.info.recentWorkspaces || []).filter((x) => x !== S.ws.path).slice(0, 5)) {
     pop.append(h('button.menu-item', { onclick: () => { closePops(); setWorkspace(p); } }, ic('folder'), h('span.mi-main', null, basename(p), h('span.mi-sub', null, p))));
   }
   pop.append(h('div.menu-sep'),
     h('button.menu-item', { onclick: () => { closePops(); chooseWorkspace(); } }, ic('folderOpen'), 'Escolher outra pasta...'),
-    h('button.menu-item', { onclick: () => { closePops(); api('/api/reveal', { path: '.' }); } }, ic('external'), 'Abrir no Explorer'),
+    h('button.menu-item', { onclick: () => { closePops(); api('/api/reveal', { path: '.', ws: S.ws.path }); } }, ic('external'), 'Abrir no Explorer'),
     h('button.menu-item', { onclick: () => { closePops(); toggleWs(); } }, ic('panel'), $('#ws').classList.contains('hidden') ? 'Mostrar painel de arquivos' : 'Ocultar painel de arquivos'));
 }
 
@@ -1017,7 +1216,7 @@ function fillPlusPop() {
     h('button.menu-item', { onclick: async () => {
       closePops();
       const p = await pickPath({ title: 'Referenciar arquivo ou pasta', mode: 'any', start: S.ws.path });
-      if (p) { const st = await api('/api/stat', { path: p }); addRef({ name: basename(p), path: st.path, dir: st.dir }); }
+      if (p) { const st = await api('/api/stat', { path: p, ws: S.ws.path }); addRef({ name: basename(p), path: st.path, dir: st.dir }); }
     } }, ic('pin'), h('span.mi-main', null, 'Arquivo ou pasta do computador', h('span.mi-sub', null, 'Entra o caminho completo, sem enviar o arquivo'))),
     h('button.menu-item', { onclick: () => { closePops(); focusEditor(); document.execCommand('insertText', false, '@'); checkMention(); } }, ic('sparkles'), h('span.mi-main', null, 'Habilidade ou conector', h('span.mi-sub', null, 'O mesmo que digitar @'))),
     h('div.menu-sep'),
@@ -1059,7 +1258,7 @@ async function locateRef(r) {
   try {
     const cached = store.get('loc', {})[locKey(r)];
     if (cached && !r.dir) {
-      const st = await api('/api/stat', { path: cached });
+      const st = await api('/api/stat', { path: cached, ws: S.ws.path });
       if (st.exists && st.size === r.size) { r.path = cached; r.status = 'ok'; updateRefPill(r); return; }
     }
     const res = await api('/api/locate', { name: r.name, size: r.size, lastModified: r.lastModified, isDir: r.dir });
@@ -1095,14 +1294,14 @@ function refAction(r) {
     h('button.btn', { onclick: async () => {
       const p = await promptBox('Caminho do arquivo', `Cole o caminho completo de "${r.name}"`, r.path || '', 'Usar');
       if (!p) return;
-      const st = await api('/api/stat', { path: p.replace(/^"|"$/g, '') });
+      const st = await api('/api/stat', { path: p.replace(/^"|"$/g, ''), ws: S.ws.path });
       if (!st.exists) { toast('Esse caminho não existe.', 'err'); return; }
       r.path = st.path; r.dir = st.dir; r.status = 'ok'; r.name = basename(st.path); remember(r); done();
     } }, 'Informar caminho'),
     r.file && r.status !== 'ok' ? h('button.btn.primary', { onclick: async () => {
       try {
         r.status = 'loading'; done();
-        const res = await api('/api/ws/upload?name=' + encodeURIComponent(r.name), r.file);
+        const res = await api('/api/ws/upload?name=' + encodeURIComponent(r.name) + '&ws=' + encodeURIComponent(S.ws.path), r.file);
         r.path = res.path; r.status = 'ok'; r.file = null; updateRefPill(r); refreshTree();
         toast('Copiado para a pasta anexos do espaço de trabalho');
       } catch (e) { r.status = 'missing'; updateRefPill(r); toast(e.message, 'err'); }
@@ -1124,7 +1323,7 @@ function fileUriToPath(u) {
 
 function statRef(p) {
   const r = addRef({ name: basename(p), path: p, status: 'loading' });
-  api('/api/stat', { path: p }).then((st) => { r.dir = st.dir; r.path = st.path; r.status = st.exists ? 'ok' : 'missing'; updateRefPill(r); });
+  api('/api/stat', { path: p, ws: S.ws.path }).then((st) => { r.dir = st.dir; r.path = st.path; r.status = st.exists ? 'ok' : 'missing'; updateRefPill(r); });
 }
 
 function handleDrop(dt) {
@@ -1325,10 +1524,16 @@ async function runAgent(conv) {
     const fetchTools = () => api('/api/tools', { ...sel, extra: conv.extraTools || [] });
     let [{ tools, meta }, ctx] = await Promise.all([
       fetchTools(),
-      api('/api/context', { skills: sel.skills, groups, refs, now: new Date().toLocaleString('pt-BR', { dateStyle: 'full', timeStyle: 'short' }) }),
+      api('/api/context', { ws: wsOf(conv), skills: sel.skills, groups, refs, now: new Date().toLocaleString('pt-BR', { dateStyle: 'full', timeStyle: 'short' }) }),
     ]);
-    const tctx = { signal: ac.signal, conv, refs, groups, ctxText: ctx.text };
-    const system = [S.settings.systemPrompt.trim(), ctx.text].filter(Boolean).join('\n\n');
+    const tctx = { signal: ac.signal, conv, refs, groups, ctxText: ctx.text, ws: wsOf(conv) };
+    const persona = personaOf(conv); const proj = projectOf(conv);
+    const system = [
+      S.settings.systemPrompt.trim(),
+      persona?.prompt?.trim() ? `# Personalidade: ${persona.name}\n${persona.prompt.trim()}` : '',
+      proj?.instructions?.trim() ? `# Instruções do projeto "${proj.name}"\n${proj.instructions.trim()}` : '',
+      ctx.text,
+    ].filter(Boolean).join('\n\n');
     const maxSteps = Math.max(1, Number(S.settings.maxSteps) || 30);
 
     for (let step = 0; step < maxSteps; step++) {
@@ -1385,7 +1590,7 @@ async function runAgent(conv) {
         if (tc.function.name === 'search_tools') refetch = true;
         if (info.source === 'builtin' && info.mutating && !r.isError) {
           const a = parseArgs(tc.function.arguments);
-          if (a?.path) markFresh(a.path);
+          if (a?.path && wsOf(conv) === S.ws.path) markFresh(a.path);
         }
         saveConvs(); scheduleRender();
       }
@@ -1518,7 +1723,7 @@ async function execTool(name, args, info, tctx, tmsg) {
       tctx.conv.extraTools = [...new Set([...(tctx.conv.extraTools || []), ...r.tools.map((t) => t.name)])];
       return { content: 'Ferramentas ativadas para os próximos passos:\n' + r.tools.map((t) => `- ${t.name} (${t.server}): ${t.description}`).join('\n'), isError: false };
     }
-    const r = await api('/api/tools/call', { name, arguments: typeof args === 'string' ? args : JSON.stringify(args ?? {}), allow: tctx.refs });
+    const r = await api('/api/tools/call', { name, arguments: typeof args === 'string' ? args : JSON.stringify(args ?? {}), allow: tctx.refs, ws: tctx.ws });
     return r;
   } catch (e) { return { content: 'Erro: ' + e.message, isError: true }; }
 }
@@ -1660,7 +1865,7 @@ function renderWsPath() {
 }
 
 async function loadDir(rel) {
-  const r = await api('/api/ws/list?path=' + encodeURIComponent(rel || '.'));
+  const r = await api('/api/ws/list?path=' + encodeURIComponent(rel || '.') + '&ws=' + encodeURIComponent(S.ws.path));
   S.ws.cache.set(rel, r.items);
   return r.items;
 }
@@ -1702,7 +1907,7 @@ async function buildLevel(parent, rel, depth) {
       if (treeDragJustEnded) return;
       if (it.dir) {
         if (S.ws.expanded.has(r)) S.ws.expanded.delete(r); else S.ws.expanded.add(r);
-        store.set('wsExpanded', [...S.ws.expanded]);
+        store.set('wsExp:' + S.ws.path, [...S.ws.expanded]);
         renderTree();
       } else { S.ws.selected = r; $$('.node.sel').forEach((n) => n.classList.remove('sel')); node.classList.add('sel'); previewFile(it); }
     });
@@ -1772,11 +1977,11 @@ async function previewFile(it) {
     h('span', { html: svg(ftype(it.name).icon), style: { width: '15px', color: ftype(it.name).color, display: 'grid' } }),
     h('span.wp-name', { title: it.path }, it.name),
     h('button.icon-btn.sm', { title: 'Referenciar no chat', 'aria-label': 'Referenciar no chat', html: svg('pin'), onclick: () => { addRef({ name: it.name, path: it.path, dir: false }); toast('Arquivo referenciado no chat'); } }),
-    h('button.icon-btn.sm', { title: 'Mostrar no Explorer', 'aria-label': 'Mostrar no Explorer', html: svg('external'), onclick: () => api('/api/reveal', { path: it.path }) }),
+    h('button.icon-btn.sm', { title: 'Mostrar no Explorer', 'aria-label': 'Mostrar no Explorer', html: svg('external'), onclick: () => api('/api/reveal', { path: it.path, ws: S.ws.path }) }),
     h('button.icon-btn.sm', { title: 'Fechar', 'aria-label': 'Fechar', html: svg('x'), onclick: () => { box.classList.remove('open'); S.ws.selected = null; $$('.node.sel').forEach((n) => n.classList.remove('sel')); } })),
   body);
   try {
-    const r = await api('/api/ws/read?path=' + encodeURIComponent(it.rel));
+    const r = await api('/api/ws/read?path=' + encodeURIComponent(it.rel) + '&ws=' + encodeURIComponent(S.ws.path));
     body.innerHTML = '';
     if (r.tooBig) body.append(h('div.wp-note', null, `Arquivo grande (${fmtSize(r.size)}). Abra no Explorer para ver.`));
     else if (r.binary) body.append(h('div.wp-note', null, `Arquivo binário (${fmtSize(r.size)}). O modelo recebe só o caminho.`));
@@ -1788,15 +1993,25 @@ async function previewFile(it) {
 }
 
 async function chooseWorkspace() {
-  const p = await pickPath({ title: 'Escolher o espaço de trabalho', mode: 'dir', start: S.ws.path });
-  if (p) setWorkspace(p);
+  const proj = projectOf(cur());
+  const p = await pickPath({ title: proj ? `Pasta do projeto ${proj.name}` : 'Escolher o espaço de trabalho', mode: 'dir', start: S.ws.path });
+  if (!p) return;
+  if (proj) {
+    const st = await api('/api/stat', { path: p }).catch(() => ({}));
+    if (!st.exists || !st.dir) { toast('Essa pasta não existe.', 'err'); return; }
+    proj.dir = st.path; saveProjects(); syncWsRoot(true); renderChatTitle();
+    toast(`Pasta do projeto: ${basename(st.path)}`);
+    return;
+  }
+  setWorkspace(p);
 }
 
 async function setWorkspace(p) {
   try {
     const r = await api('/api/workspace', { path: p });
+    S.info.workspace = r.workspace;
     S.ws.path = r.workspace; S.ws.expanded.clear(); S.ws.fresh.clear(); S.ws.cache.clear();
-    store.set('wsExpanded', []);
+    store.set('wsExp:' + S.ws.path, []);
     S.info.recentWorkspaces = [r.workspace, ...(S.info.recentWorkspaces || []).filter((x) => x !== r.workspace)];
     renderWsPath(); renderTree();
     $('#ws-preview').classList.remove('open');
@@ -2603,8 +2818,8 @@ function toggleWs() {
 
 async function init() {
   applyTheme();
-  const navIcons = { chat: 'chat', skills: 'sparkles', mcp: 'plug', server: 'server', settings: 'gear' };
-  const navLabels = { chat: 'Nova conversa', skills: 'Habilidades', mcp: 'Conectores', server: 'Servidor', settings: 'Configurações' };
+  const navIcons = { chat: 'chat', skills: 'sparkles', mcp: 'plug', personas: 'user', server: 'server', settings: 'gear' };
+  const navLabels = { chat: 'Nova conversa', skills: 'Habilidades', mcp: 'Conectores', personas: 'Personalidades', server: 'Servidor', settings: 'Configurações' };
   $$('.nav-item').forEach((b) => {
     b.innerHTML = svg(navIcons[b.dataset.view]) + `<span>${navLabels[b.dataset.view]}</span>`;
     b.addEventListener('click', () => {
@@ -2614,8 +2829,9 @@ async function init() {
   });
   $('.search-ico').innerHTML = svg('search');
   $('#search').addEventListener('input', () => { if (S.view !== 'chat') setView('chat'); renderConvList(); });
-  $('#sec-recent').innerHTML = svg('chev') + '<span>Conversas recentes</span>';
-  $('#sec-recent').addEventListener('click', (e) => { const b = e.currentTarget; b.setAttribute('aria-expanded', b.getAttribute('aria-expanded') === 'true' ? 'false' : 'true'); });
+  $('#persona-new').append(ic('plus'), 'Nova personalidade');
+  $('#persona-new').addEventListener('click', () => editPersona(null));
+  $('#pick-persona').addEventListener('click', () => togglePop('#pop-persona', fillPersonaPop));
   $('#conv-menu-btn').innerHTML = svg('more');
   $('#conv-menu-btn').addEventListener('click', () => togglePop('#pop-conv', fillConvMenu));
   $('#toggle-ws').innerHTML = svg('panel');
@@ -2628,7 +2844,7 @@ async function init() {
   $('#toggle-ws').classList.toggle('on', !wsHidden);
   $('#toggle-ws').addEventListener('click', toggleWs);
   $('#ws-refresh').addEventListener('click', () => { S.ws.fresh.clear(); refreshTree(); });
-  $('#ws-open').addEventListener('click', () => api('/api/reveal', { path: '.' }));
+  $('#ws-open').addEventListener('click', () => api('/api/reveal', { path: '.', ws: S.ws.path }));
   $('#ws-path').addEventListener('click', chooseWorkspace);
 
   const ed = editor();
@@ -2674,7 +2890,7 @@ async function init() {
 
   try {
     S.info = await api('/api/state');
-    S.ws.path = S.info.workspace;
+    S.ws.path = wsOf(cur()) || S.info.workspace;
     $('#app-ver').textContent = 'v' + (S.info.uiVersion || S.info.version || '');
     $('#app-ver').title = `Programa ${S.info.version}, interface ${S.info.uiVersion}`;
   } catch (e) {

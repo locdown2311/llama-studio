@@ -49,6 +49,17 @@ fn strs(v: &Value, k: &str) -> Vec<String> {
 fn q<'a>(q: &'a HashMap<String, String>, k: &str) -> &'a str {
     q.get(k).map(String::as_str).unwrap_or("")
 }
+/// Pasta de trabalho da conversa (a do projeto) ou a geral.
+fn ws_of(app: &App, p: &str) -> PathBuf {
+    let p = p.trim();
+    if !p.is_empty() {
+        let pb = PathBuf::from(p);
+        if pb.is_absolute() && pb.is_dir() {
+            return app::normalize(&pb);
+        }
+    }
+    app.workspace()
+}
 
 pub fn router(app: Arc<App>) -> Router {
     Router::new()
@@ -371,7 +382,7 @@ fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
 }
 
 async fn ws_list(State(app): S, Query(qs): Q) -> Res {
-    let ws = app.workspace();
+    let ws = ws_of(&app, q(&qs, "ws"));
     let dir = resolve(&ws, q(&qs, "path"));
     if !is_inside(&ws, &dir) {
         return Err(ApiErr(StatusCode::FORBIDDEN, "Fora da pasta de trabalho".into()));
@@ -391,7 +402,7 @@ async fn ws_list(State(app): S, Query(qs): Q) -> Res {
 }
 
 async fn ws_read(State(app): S, Query(qs): Q) -> Res {
-    let ws = app.workspace();
+    let ws = ws_of(&app, q(&qs, "ws"));
     let file = resolve(&ws, q(&qs, "path"));
     if !is_inside(&ws, &file) {
         return Err(ApiErr(StatusCode::FORBIDDEN, "Fora da pasta de trabalho".into()));
@@ -410,7 +421,7 @@ async fn ws_read(State(app): S, Query(qs): Q) -> Res {
 async fn ws_upload(State(app): S, Query(qs): Q, b: Bytes) -> Res {
     let name = file_name(Path::new(q(&qs, "name")));
     let name = if name.is_empty() { "arquivo".into() } else { name };
-    let dir = app.workspace().join("anexos");
+    let dir = ws_of(&app, q(&qs, "ws")).join("anexos");
     std::fs::create_dir_all(&dir).map_err(|e| bad(e.to_string()))?;
     let p = Path::new(&name);
     let (stem, ext) = (p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(), p.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default());
@@ -432,7 +443,7 @@ async fn export_conv(State(app): S, b: Bytes) -> Res {
     if name.is_empty() {
         name = "conversa".into();
     }
-    let dir = app.workspace().join("conversas");
+    let dir = ws_of(&app, st(&v, "ws")).join("conversas");
     std::fs::create_dir_all(&dir).map_err(|e| bad(e.to_string()))?;
     let mut target = dir.join(format!("{name}.md"));
     let mut i = 2;
@@ -446,7 +457,7 @@ async fn export_conv(State(app): S, b: Bytes) -> Res {
 
 async fn reveal(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
-    let p = resolve(&app.workspace(), st(&v, "path"));
+    let p = resolve(&ws_of(&app, st(&v, "ws")), st(&v, "path"));
     if !p.exists() {
         return Err(ApiErr(StatusCode::NOT_FOUND, format!("Não encontrado: {}", p.display())));
     }
@@ -491,7 +502,7 @@ async fn remember(State(app): S, b: Bytes) -> Res {
 
 async fn stat(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
-    let p = resolve(&app.workspace(), st(&v, "path"));
+    let p = resolve(&ws_of(&app, st(&v, "ws")), st(&v, "path"));
     match std::fs::metadata(&p) {
         Ok(m) => ok(json!({"exists": true, "path": p, "dir": m.is_dir(), "size": m.len()})),
         Err(_) => ok(json!({"exists": false, "path": p})),
@@ -688,7 +699,7 @@ async fn tools_search(State(app): S, b: Bytes) -> Res {
 
 async fn context(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
-    ok(json!({"text": tools::build_context(&app, &strs(&v, "skills"), &groups_of(&v), &strs(&v, "refs"), st(&v, "now"))}))
+    ok(json!({"text": tools::build_context(&app, &ws_of(&app, st(&v, "ws")), &strs(&v, "skills"), &groups_of(&v), &strs(&v, "refs"), st(&v, "now"))}))
 }
 
 async fn tools_call(State(app): S, b: Bytes) -> Res {
@@ -702,7 +713,7 @@ async fn tools_call(State(app): S, b: Bytes) -> Res {
         Some(a) => a.clone(),
         None => json!({}),
     };
-    let r = tools::call(&app, st(&v, "name"), args, &strs(&v, "allow")).await;
+    let r = tools::call(&app, ws_of(&app, st(&v, "ws")), st(&v, "name"), args, &strs(&v, "allow")).await;
     ok(json!({"content": r.content, "isError": r.is_error, "images": r.images}))
 }
 

@@ -183,7 +183,7 @@ pub fn search_tools(app: &App, q: &str) -> Value {
     json!({"tools": found.into_iter().take(15).map(|(_, v)| v).collect::<Vec<_>>()})
 }
 
-pub fn build_context(app: &App, skill_ids: &[String], groups: &[String], refs: &[String], now: &str) -> String {
+pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[String], refs: &[String], now: &str) -> String {
     let has = |g: &str| groups.iter().any(|x| x == g);
     let mut parts = vec![];
     if !now.is_empty() {
@@ -193,7 +193,7 @@ pub fn build_context(app: &App, skill_ids: &[String], groups: &[String], refs: &
     if has("read") || has("write") || has("edit") || has("shell") {
         parts.push(format!(
             "Pasta de trabalho: {}\nAs ferramentas de arquivo usam caminhos relativos a essa pasta e só escrevem dentro dela. Leia um arquivo antes de editá-lo.",
-            app.workspace().display()
+            ws.display()
         ));
         if !refs.is_empty() {
             let list: Vec<String> = refs.iter().map(|r| format!("- {r}")).collect();
@@ -244,8 +244,7 @@ fn out(r: Result<(String, Vec<String>), String>) -> ToolOut {
 }
 
 /// Executa uma ferramenta do servidor (arquivos, shell, navegador, computador ou MCP).
-pub async fn call(app: &Arc<App>, name: &str, args: Value, allow: &[String]) -> ToolOut {
-    let ws = app.workspace();
+pub async fn call(app: &Arc<App>, ws: PathBuf, name: &str, args: Value, allow: &[String]) -> ToolOut {
     if name.starts_with("browser_") && def(name).is_some() {
         return out(app.browser.tool(&app.http, &ws, name, &args).await);
     }

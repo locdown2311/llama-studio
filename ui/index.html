@@ -29,13 +29,11 @@
       <button class="nav-item" id="nav-new" data-view="chat"></button>
       <button class="nav-item" data-view="skills"></button>
       <button class="nav-item" data-view="mcp"></button>
+      <button class="nav-item" data-view="personas"></button>
       <button class="nav-item" data-view="server"></button>
       <button class="nav-item" data-view="settings"></button>
     </nav>
-    <div class="side-sec">
-      <button class="sec-head" id="sec-recent" aria-expanded="true"></button>
-      <div class="conv-list" id="conv-list"></div>
-    </div>
+    <div class="side-scroll" id="conv-list"></div>
     <div class="server-status" id="server-status"></div>
   </aside>
 
@@ -69,6 +67,10 @@
             <div class="pick-wrap">
               <button class="bar-btn" id="pick-model"></button>
               <div class="popover" id="pop-model"></div>
+            </div>
+            <div class="pick-wrap">
+              <button class="bar-btn" id="pick-persona"></button>
+              <div class="popover" id="pop-persona"></div>
             </div>
             <div class="pick-wrap">
               <button class="bar-btn" id="pick-skills"></button>
@@ -168,6 +170,20 @@
 
       <h2 class="h-small">Seus conectores</h2>
       <div class="server-list" id="mcp-list"></div>
+    </div>
+  </section>
+
+  <!-- ===================== PERSONALIDADES ===================== -->
+  <section class="view" id="view-personas">
+    <div class="page">
+      <header class="page-head">
+        <div>
+          <h1>Personalidades</h1>
+          <p class="lead">Cada personalidade é um jeito de o modelo trabalhar: um prompt de sistema com nome. Escolha por conversa na barra de baixo, ou deixe uma como padrão de um projeto.</p>
+        </div>
+        <div class="page-actions"><button class="btn primary" id="persona-new"></button></div>
+      </header>
+      <div class="grid" id="persona-grid"></div>
     </div>
   </section>
 
