@@ -313,6 +313,21 @@ pub struct Entry {
     tools: Mutex<Vec<Value>>,
     conn: Mutex<Option<Arc<Conn>>>,
     since: u128,
+    /// ferramentas escondidas do modelo ("disabledTools" no mcp.json)
+    hidden: Mutex<std::collections::HashSet<String>>,
+}
+
+fn hidden_of(cfg: &Value) -> std::collections::HashSet<String> {
+    cfg.get("disabledTools").and_then(Value::as_array).map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default()
+}
+
+/// Configuração sem o que não exige reconectar.
+fn conn_cfg(cfg: &Value) -> Value {
+    let mut c = cfg.clone();
+    if let Some(o) = c.as_object_mut() {
+        o.remove("disabledTools");
+    }
+    c
 }
 
 impl Entry {
@@ -325,6 +340,14 @@ impl Entry {
     }
     pub fn tools(&self) -> Vec<Value> {
         self.tools.lock().unwrap().clone()
+    }
+    /// Só as que o modelo pode ver.
+    pub fn visible_tools(&self) -> Vec<Value> {
+        let h = self.hidden.lock().unwrap();
+        self.tools.lock().unwrap().iter().filter(|t| !t["name"].as_str().is_some_and(|n| h.contains(n))).cloned().collect()
+    }
+    pub fn set_hidden(&self, names: std::collections::HashSet<String>) {
+        *self.hidden.lock().unwrap() = names;
     }
     fn set(&self, status: &str, err: Option<String>) {
         *self.status.lock().unwrap() = status.to_string();
@@ -340,6 +363,7 @@ impl Entry {
             "config": self.cfg,
             "since": self.since as u64,
             "tools": self.tools.lock().unwrap().iter().map(|t| json!({"name": t["name"], "description": t.get("description").cloned().unwrap_or(json!(""))})).collect::<Vec<_>>(),
+            "hidden": self.hidden.lock().unwrap().iter().cloned().collect::<Vec<_>>(),
         })
     }
 }
@@ -399,8 +423,10 @@ impl Mcp {
             let mut map = self.servers.write().unwrap();
             map.retain(|k, _| wanted.contains_key(k));
             for (name, c) in &wanted {
-                let same = map.get(name).is_some_and(|e| &e.cfg == c && matches!(e.status().as_str(), "connected" | "connecting" | "disabled"));
-                if !same {
+                let cur = map.get(name).filter(|e| conn_cfg(&e.cfg) == conn_cfg(c) && matches!(e.status().as_str(), "connected" | "connecting" | "disabled"));
+                if let Some(e) = cur {
+                    e.set_hidden(hidden_of(c));
+                } else {
                     let e = Arc::new(Entry {
                         name: name.clone(),
                         cfg: c.clone(),
@@ -411,6 +437,7 @@ impl Mcp {
                         tools: Mutex::new(vec![]),
                         conn: Mutex::new(None),
                         since: crate::app::now_ms(),
+                        hidden: Mutex::new(hidden_of(c)),
                     });
                     map.insert(name.clone(), e.clone());
                     todo.push(e);
@@ -454,6 +481,9 @@ impl Mcp {
             }
         };
         let e = self.get(&server).ok_or_else(|| format!("Servidor MCP \"{server}\" não existe mais."))?;
+        if e.hidden.lock().unwrap().contains(&tool) {
+            return Err(format!("A ferramenta {tool} foi desativada pelo usuário no conector {server}."));
+        }
         let conn = e.conn.lock().unwrap().clone().filter(|c| c.alive.load(Ordering::SeqCst)).ok_or_else(|| format!("Servidor MCP \"{server}\" não está conectado."))?;
         let args = if args.is_object() { args } else { json!({}) };
         let r = conn.request("tools/call", json!({"name": tool, "arguments": args}), Duration::from_secs(600)).await?;

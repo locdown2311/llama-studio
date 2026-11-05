@@ -2441,7 +2441,7 @@ function drawMcpList() {
         h('div.srv-main', null,
           h('div.srv-name', null, s.name, h('span.tag', null, s.kind === 'stdio' ? 'local' : s.kind === 'sse' ? 'SSE' : 'HTTP')),
           h('div.srv-cmd', { title: cmdLine(s.config || {}) }, cmdLine(s.config || {}))),
-        h('div.srv-status', null, h('span.dot.' + st.dot), s.status === 'connected' ? `${s.tools.length} ferramentas` : s.status === 'connecting' && s.since ? `conectando... ${Math.max(0, Math.round((Date.now() - s.since) / 1000))} s` : st.label),
+        h('div.srv-status', null, h('span.dot.' + st.dot), s.status === 'connected' ? (s.hidden?.length ? `${s.tools.length - s.tools.filter((t) => s.hidden.includes(t.name)).length} de ${s.tools.length} ferramentas` : `${s.tools.length} ferramentas`) : s.status === 'connecting' && s.since ? `conectando... ${Math.max(0, Math.round((Date.now() - s.since) / 1000))} s` : st.label),
         h('div.srv-actions', null,
           h('button.icon-btn.sm', { title: 'Reconectar', 'aria-label': 'Reconectar', html: svg('refresh'), onclick: async () => { s.status = 'connecting'; drawMcpList(); try { await api('/api/mcp/reconnect', { name: s.name }); } catch (e) { toast(e.message, 'err'); } loadMcp(); } }),
           h('button.icon-btn.sm', { title: 'Editar', 'aria-label': 'Editar', html: svg('edit'), onclick: () => editServer(s.name, s.config) }),
@@ -2452,15 +2452,54 @@ function drawMcpList() {
         h('label.switch', { title: 'Ligar/desligar' }, sw, h('span'))),
       s.error ? h('div.srv-err', null, s.error.length > 300 ? s.error.slice(0, 300) + '...' : s.error) : null);
     const keep = (d, key) => { d.open = S.mcpOpen?.has(key) || false; d.addEventListener('toggle', () => { (S.mcpOpen ||= new Set())[d.open ? 'add' : 'delete'](key); }); return d; };
-    if (s.tools.length) {
-      const d = keep(h('details', null, h('summary', null, ic('chev'), `Ferramentas (${s.tools.length})`),
-        h('div.srv-tools', null, s.tools.map((t) => h('div.srv-tool', null, h('b', null, t.name), t.description ? h('div', null, t.description) : null)))), s.name + ':tools');
-      card.append(d);
-    }
+    if (s.tools.length) card.append(keep(toolsBox(s), s.name + ':tools'));
     // log sempre recolhido; só abre se a pessoa clicar
     if (s.log?.trim()) card.append(keep(h('details', null, h('summary', null, ic('chev'), `Log do servidor (${s.log.trim().split('\n').length} linhas)`), h('pre.srv-log', null, s.log.trim().split('\n').slice(-80).join('\n'))), s.name + ':log'));
     list.append(card);
   }
+}
+
+/** Lista de ferramentas de um conector com chave para esconder cada uma do modelo. */
+function toolsBox(s) {
+  const hidden = new Set(s.hidden || []);
+  const total = s.tools.length;
+  const sumTxt = () => hidden.size ? `Ferramentas (${total - hidden.size} de ${total} visíveis para o modelo)` : `Ferramentas (${total})`;
+  const sumLbl = h('span', null, sumTxt());
+  let filter = S.mcpFilter?.[s.name] || '';
+  let timer = 0;
+  const save = () => {
+    sumLbl.textContent = sumTxt();
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      try { const r = await api('/api/mcp/hide', { name: s.name, hidden: [...hidden] }); S.mcp = r.servers; updatePickers(); if (!document.activeElement?.closest('.st-q')) drawMcpList(); }
+      catch (e) { toast(e.message, 'err'); }
+    }, 350);
+  };
+  const list = h('div.srv-tools');
+  const matches = (t) => !filter || (t.name + ' ' + (t.description || '')).toLowerCase().includes(filter.toLowerCase());
+  const draw = () => {
+    list.innerHTML = '';
+    const shown = s.tools.filter(matches);
+    for (const t of shown) {
+      const on = !hidden.has(t.name);
+      const i = h('input', { type: 'checkbox', checked: on, onchange: () => { if (i.checked) hidden.delete(t.name); else hidden.add(t.name); row.classList.toggle('off', !i.checked); save(); } });
+      const row = h('label.srv-tool.tg' + (on ? '' : '.off'), null,
+        h('span.st-main', null, h('b', null, t.name), t.description ? h('div', null, t.description.length > 220 ? t.description.slice(0, 220) + '...' : t.description) : null),
+        h('span.switch.sm', null, i, h('span')));
+      list.append(row);
+    }
+    if (!shown.length) list.append(h('div.muted', { style: { padding: '8px 2px', fontSize: '13px' } }, 'Nenhuma ferramenta com esse filtro.'));
+    cnt.textContent = filter ? `${shown.length} encontradas` : '';
+  };
+  const cnt = h('span.muted.st-cnt');
+  const q = h('input.input.sm', { value: filter, placeholder: 'Filtrar (ex.: jeb)', oninput: () => { filter = q.value.trim(); (S.mcpFilter ||= {})[s.name] = filter; draw(); } });
+  const bulk = (show) => { for (const t of s.tools.filter(matches)) show ? hidden.delete(t.name) : hidden.add(t.name); draw(); save(); };
+  const tools = h('div.st-bar', null, h('span.st-q', null, ic('search'), q), cnt, h('span.spacer'),
+    h('button.btn.ghost.sm', { onclick: () => bulk(true), title: 'Mostra ao modelo todas as ferramentas da lista (respeita o filtro)' }, 'Mostrar todas'),
+    h('button.btn.ghost.sm', { onclick: () => bulk(false), title: 'Esconde do modelo todas as ferramentas da lista (respeita o filtro)' }, 'Esconder todas'));
+  draw();
+  return h('details', null, h('summary', null, ic('chev'), sumLbl),
+    h('div.st-hint', null, 'Ferramentas desligadas não aparecem para o modelo nem no catálogo, e economizam contexto.'), tools, list);
 }
 
 async function renderMcpPage() {
@@ -2566,6 +2605,7 @@ function editServer(oldName, config = {}, suggestedName = '') {
           const hd = linesToObj(headers.value, /^([^:]+):(.*)$/); if (Object.keys(hd).length) cfg.headers = hd;
         }
         if (config.disabled) cfg.disabled = true;
+        if (config.disabledTools?.length) cfg.disabledTools = config.disabledTools;
         toast('Conectando a ' + n + '...');
         m.close();
         const r = await api('/api/mcp/upsert', { name: n, oldName, config: cfg });

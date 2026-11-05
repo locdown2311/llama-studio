@@ -873,3 +873,16 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .bar-btn.icon-only .badge { position: absolute; top: -3px; right: -4px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px; background: var(--on, var(--accent)); color: #fff; font-size: 10px; font-weight: 700; line-height: 15px; text-align: center; box-shadow: 0 0 0 2px var(--card); }
 .bar-btn .p-ava { width: 19px; height: 19px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 10.5px; font-weight: 700; }
 #pick-model b { max-width: 150px; }
+
+/* ferramentas de um conector: ligar/desligar */
+.st-hint { font-size: 12px; color: var(--muted); margin: 0 14px 8px 33px; }
+.st-bar { display: flex; align-items: center; gap: 8px; margin: 0 14px 10px 33px; flex-wrap: wrap; }
+.st-q { position: relative; display: inline-flex; align-items: center; }
+.st-q svg { position: absolute; left: 9px; width: 13px; height: 13px; color: var(--muted); pointer-events: none; }
+.st-q .input { height: 30px; padding-left: 28px; width: 220px; font-size: 13px; }
+.st-cnt { font-size: 12px; }
+.srv-tool.tg { display: flex; align-items: flex-start; gap: 12px; cursor: pointer; }
+.srv-tool.tg .st-main { flex: 1; min-width: 0; }
+.srv-tool.tg.off .st-main { opacity: .45; }
+.srv-tool.tg.off b { text-decoration: line-through; }
+.switch.sm { transform: scale(.8); transform-origin: right center; flex: none; margin-top: 1px; }

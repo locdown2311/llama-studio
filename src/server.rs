@@ -94,6 +94,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/mcp/import", post(mcp_import))
         .route("/api/mcp/delete", post(mcp_delete))
         .route("/api/mcp/toggle", post(mcp_toggle))
+        .route("/api/mcp/hide", post(mcp_hide))
         .route("/api/mcp/reconnect", post(mcp_reconnect))
         .route("/api/tools", post(tools_list))
         .route("/api/context", post(context))
@@ -673,6 +674,24 @@ async fn mcp_toggle(State(app): S, b: Bytes) -> Res {
         s["disabled"] = json!(true);
     } else {
         s.as_object_mut().unwrap().remove("disabled");
+    }
+    write_mcp(&app, &cfg)?;
+    app.mcp.sync(&app.http, &app.mcp_file()).await;
+    ok(json!({"servers": app.mcp.status_json()}))
+}
+
+/// Esconde ferramentas de um conector do modelo (sem reconectar).
+async fn mcp_hide(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let mut cfg = crate::mcp::Mcp::read_config(&app.mcp_file());
+    let s = cfg["mcpServers"].get_mut(st(&v, "name")).filter(|s| s.is_object()).ok_or_else(|| bad("Servidor não encontrado"))?;
+    let mut names = strs(&v, "hidden");
+    names.sort();
+    names.dedup();
+    if names.is_empty() {
+        s.as_object_mut().unwrap().remove("disabledTools");
+    } else {
+        s["disabledTools"] = json!(names);
     }
     write_mcp(&app, &cfg)?;
     app.mcp.sync(&app.http, &app.mcp_file()).await;

@@ -109,7 +109,7 @@ fn mcp_entries(app: &App, servers: Option<&[String]>) -> Vec<(String, String, Va
         if entry.status() != "connected" {
             continue;
         }
-        for t in entry.tools() {
+        for t in entry.visible_tools() {
             let tname = t.get("name").and_then(Value::as_str).unwrap_or("").to_string();
             let mut name: String = format!("{}__{}", safe_name(&sname), safe_name(&tname)).chars().take(64).collect();
             if def(&name).is_some() {
