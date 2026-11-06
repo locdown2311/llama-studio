@@ -72,9 +72,13 @@ const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const PROPS = new Set(['value', 'checked', 'disabled', 'selected', 'hidden', 'draggable', 'open', 'type', 'rows', 'placeholder', 'title', 'spellcheck']);
 
 function h(tag, attrs, ...kids) {
+  // "tag.classe#id" (o #id pode vir em qualquer ponto)
+  let id = '';
+  tag = tag.replace(/#([\w-]+)/, (_, x) => { id = x; return ''; });
   const [t, ...cls] = tag.split('.');
   const el = document.createElement(t || 'div');
   if (cls.length) el.className = cls.join(' ');
+  if (id) el.id = id;
   if (attrs) {
     for (const [k, v] of Object.entries(attrs)) {
       if (v == null || v === false) continue;

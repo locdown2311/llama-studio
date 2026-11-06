@@ -52,7 +52,7 @@ jobs:
           - name: vulkan
             cmake: -DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_VULKAN=ON
           - name: cuda-12.4
-            cmake: -DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89"
+            cmake: -DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89" -DCMAKE_CUDA_FLAGS="-allow-unsupported-compiler"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -79,7 +79,7 @@ jobs:
         shell: pwsh
         working-directory: ik
         run: |
-          cmake -B build -G "Visual Studio 17 2022" -A x64 -DLLAMA_CURL=OFF -DBUILD_SHARED_LIBS=ON ${{ matrix.cmake }}
+          cmake -B build -A x64 -DLLAMA_CURL=OFF -DBUILD_SHARED_LIBS=ON ${{ matrix.cmake }}
           cmake --build build --config Release -j 4 --target llama-server llama-bench
           if ($LASTEXITCODE -ne 0) { throw "falhou" }
 

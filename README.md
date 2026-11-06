@@ -18,6 +18,10 @@
 
 ---
 
+<p align="center">
+  <img src="assets/screenshots/chat.png" alt="Conversa com linha do tempo das ferramentas e a aba Atividade" width="900">
+</p>
+
 O Llama Studio transforma o `llama-server` num agente que trabalha no seu computador: lê e edita arquivos, roda comandos, navega na web, controla aplicativos, chama conectores MCP e segue habilidades (`SKILL.md`), tudo com o modelo rodando localmente.
 
 É um único executável em Rust (cerca de 5 MB) com a interface embutida. Ele foi feito para atrapalhar o mínimo possível o modelo: roda com prioridade baixa e em modo de economia de energia do Windows, a janela não usa a GPU, e ao fechar ela é destruída de verdade (o programa fica só na bandeja).
@@ -25,18 +29,26 @@ O Llama Studio transforma o `llama-server` num agente que trabalha no seu comput
 ## Instalação
 
 1. Baixe o `llama-studio-setup-X.Y.Z.exe` da [última versão](../../releases/latest).
-2. Na instalação, escolha o motor do llama.cpp. O instalador sugere um pela placa de vídeo detectada:
-   - **Vulkan**: AMD, NVIDIA e Intel (recomendado);
-   - **CUDA**: NVIDIA, já com as bibliotecas de runtime;
-   - **HIP/ROCm**: AMD Radeon compatíveis;
-   - **CPU**: sem placa de vídeo.
-3. Abra o programa, vá em **Servidor → Modelos → Buscar e baixar do Hugging Face** e escolha um modelo GGUF.
+2. Abra o programa. Na primeira vez, um guia sugere o motor pela placa de vídeo detectada e baixa:
+   - **llama.cpp**: Vulkan (AMD, NVIDIA e Intel), CUDA, ROCm, SYCL ou só CPU, da release oficial;
+   - **ik_llama.cpp**: fork mais rápido para MoE com camadas na CPU, compilado pelo CI deste projeto.
+3. No mesmo guia, baixe um modelo GGUF do Hugging Face.
 
-O instalador não pede administrador: instala em `%LOCALAPPDATA%\Programs\Llama Studio`. Ele baixa o llama.cpp da release oficial e instala o WebView2 se faltar. Depois disso, o próprio programa avisa quando há versão nova e se atualiza sozinho.
+O instalador não pede administrador: instala em `%LOCALAPPDATA%\Programs\Llama Studio` e, se faltar, instala o WebView2. Depois disso, o próprio programa avisa quando há versão nova e se atualiza sozinho.
 
 > Já tem o llama.cpp numa pasta? Coloque o `llama-studio.exe` numa subpasta dela (`llama\llama-studio\`) e ele encontra o `llama-server.exe` e o `llama-gui.json` sozinho.
 
 ## Recursos
+
+<table>
+  <tr>
+    <td width="50%"><img src="assets/screenshots/primeiro-uso.png" alt="Guia da primeira abertura"><br><sub>Primeira abertura: motor sugerido pela placa de vídeo e modelos para começar.</sub></td>
+    <td width="50%"><img src="assets/screenshots/motor-e-modelos.png" alt="Motores do llama.cpp e modelos"><br><sub>Motores (llama.cpp e ik_llama.cpp), modelos e "Otimizar para o seu PC".</sub></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="assets/screenshots/escuro.png" alt="Tema escuro com o painel de arquivos do projeto"><br><sub>Tema escuro, projeto com pasta própria e personalidade.</sub></td>
+  </tr>
+</table>
 
 ### Agente
 - **Ferramentas internas**, ligadas e desligadas por grupo: ler, escrever e editar arquivos; PowerShell; executar código que combina várias ferramentas; navegador próprio (Edge/Chrome via CDP); controle do computador (UI Automation, cliques, teclado, capturas); busca no histórico; lista de tarefas do modelo.
@@ -55,7 +67,8 @@ O instalador não pede administrador: instala em `%LOCALAPPDATA%\Programs\Llama 
 - Exportar a conversa em Markdown, histórico pesquisável e medidor de contexto.
 
 ### Modelos
-- **Motores do llama.cpp** direto do programa: Vulkan, CUDA, ROCm, SYCL ou CPU, baixados da release oficial. Dá para ter vários instalados e trocar com um clique. Na primeira abertura, um guia sugere o motor pela placa detectada e ajuda a baixar o primeiro modelo.
+- **Motores** direto do programa: llama.cpp (Vulkan, CUDA, ROCm, SYCL ou CPU) e ik_llama.cpp. Dá para ter vários instalados e trocar com um clique. Opções que um motor não aceita são ignoradas automaticamente.
+- **Otimizar para o seu PC**: o programa mede algumas combinações de microlote e threads com o `llama-bench` e grava no modelo a combinação mais rápida.
 - **Vários modelos cadastrados, um carregado por vez.** Cada conversa escolhe o seu, e o studio troca quando precisa, esperando as respostas em andamento.
 - **Busca e download do Hugging Face**: lista as quantizações com o tamanho, inclui o projetor de visão, retoma downloads interrompidos e cria o modelo pronto para usar.
 - **Editor visual dos argumentos** do llama-server, com explicação de cada opção e sliders com limites.
@@ -70,6 +83,8 @@ Modelo local tem contexto curto e processamento caro, então o harness foi pensa
 
 | | |
 |---|---|
+| **Cache por conversa** | Cada conversa tem um slot no llama-server. Quando outra conversa precisa do slot, o cache vai para o disco e volta quando ela é retomada, então uma conversa longa não é reprocessada do zero. |
+| **Pensar ou responder direto** | Um botão na barra do chat liga ou desliga o raciocínio por conversa. Pedidos simples saem na hora. |
 | **Prompt estável** | O prompt de sistema é idêntico entre mensagens (sem hora, sem listas que mudam). Assim o llama-server reaproveita o cache e não relê a conversa inteira. |
 | **Carregamento sob demanda** | Conectores entram como um catálogo de uma linha por ferramenta; o modelo carrega só as que vai usar. Habilidades longas entram só com o resumo. |
 | **Esquemas enxutos** | As definições das ferramentas MCP vêm sem títulos, exemplos e campos que não ajudam o modelo, e com descrições encurtadas. |
@@ -101,6 +116,7 @@ cargo build --release
 | `src/` | Servidor local (axum), cliente MCP, gerenciador do llama-server, ferramentas, downloads, janela e bandeja |
 | `ui/` | Interface (HTML, CSS e JS sem build), embutida no executável |
 | `installer/` | Instalador (Inno Setup) |
+| `.github/workflows/ik-llama.yml` | Compila o ik_llama.cpp para Windows e publica como pré-release `ik-*` |
 | `assets/` | Ícone |
 | `.github/workflows/` | CI e publicação |
 
