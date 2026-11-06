@@ -2898,7 +2898,7 @@ let srvTimer = null; let logNext = 0;
 async function renderServerPage() {
   try { S.llama = await api('/api/llama'); } catch (e) { toast(e.message, 'err'); return; }
   await loadModels();
-  drawServerStatus(); drawServerForm(); drawModels();
+  drawServerStatus(); drawServerForm(); drawModels(); pollHf();
   $('#srv-log').textContent = ''; logNext = 0;
   await pollLog();
   clearInterval(srvTimer);
@@ -2931,7 +2931,10 @@ function drawModels() {
           await saveModels(models.filter((x) => x.id !== m.id));
         } }))));
   }
-  box.append(h('button.mdl.add', { onclick: () => editModel(null) }, ic('plus'), 'Adicionar modelo'));
+  drawDownloads(box);
+  box.append(h('div.mdl-adds', null,
+    h('button.mdl.add', { onclick: () => openHf() }, ic('download'), 'Buscar e baixar do Hugging Face'),
+    h('button.mdl.add', { onclick: () => editModel(null) }, ic('plus'), 'Adicionar arquivo .gguf do computador')));
   if (found?.length) {
     box.append(h('div.mdl-found-t', null, 'Encontrados perto do llama-server'));
     const wrap = h('div.mdl-found');
@@ -2939,6 +2942,115 @@ function drawModels() {
     box.append(wrap);
   }
 }
+
+/* ------------------------------------------------------------ Hugging Face */
+S.hfJobs = [];
+let hfTimer = 0;
+
+function drawDownloads(box) {
+  for (const j of S.hfJobs) {
+    const pct = j.total ? Math.min(100, j.done / j.total * 100) : 0;
+    const eta = j.rate > 0 && j.total > j.done ? Math.round((j.total - j.done) / j.rate) : 0;
+    const etaTxt = eta ? (eta > 3600 ? `${Math.floor(eta / 3600)} h ${Math.round(eta % 3600 / 60)} min` : eta > 60 ? `${Math.round(eta / 60)} min` : `${eta} s`) : '';
+    const sub = j.status === 'downloading' ? `${fmtBytes(j.done)} de ${fmtBytes(j.total)} · ${j.rate ? fmtBytes(j.rate) + '/s' : 'conectando...'}${etaTxt ? ' · falta ' + etaTxt : ''}`
+      : j.status === 'done' ? 'Baixado e adicionado à lista' : j.status === 'canceled' ? 'Cancelado (o que já baixou fica guardado para continuar depois)' : (j.error || 'Erro');
+    box.append(h('div.mdl.dl.' + j.status, null,
+      h('div.mdl-ico', { html: svg(j.status === 'done' ? 'check' : j.status === 'error' ? 'alert' : 'download') }),
+      h('div.mdl-main', null,
+        h('div.mdl-name', null, j.name, h('span.muted.mdl-repo', null, j.repo)),
+        j.status === 'downloading' ? h('div.dl-bar', null, h('i', { style: { width: pct.toFixed(1) + '%' } })) : null,
+        h('div.mdl-meta', null, sub)),
+      h('div.mdl-acts', null,
+        j.status === 'error' || j.status === 'canceled' ? h('button.btn.sm', { onclick: () => hfDownload(j.repo, { name: j.name, parts: j.parts }) }, ic('refresh'), 'Continuar') : null,
+        j.status === 'done' && j.profile ? h('button.btn.sm', { onclick: async () => { try { await activateModel(j.profile); } catch (e) { toast(e.message, 'err'); } } }, ic('play'), 'Carregar') : null,
+        h('button.icon-btn.sm', { title: j.status === 'downloading' ? 'Cancelar' : 'Tirar da lista', 'aria-label': 'Cancelar', html: svg('x'), onclick: async () => {
+          try { S.hfJobs = (await api('/api/hf/cancel', { id: j.id })).jobs; } catch { /* ok */ }
+          drawModels();
+        } }))));
+  }
+}
+
+async function pollHf() {
+  clearTimeout(hfTimer);
+  let r; try { r = await api('/api/hf/downloads'); } catch { return; }
+  const before = new Map(S.hfJobs.map((j) => [j.id, j.status]));
+  S.hfJobs = r.jobs;
+  for (const j of r.jobs) if (before.get(j.id) === 'downloading' && j.status !== 'downloading') {
+    if (j.status === 'done') { toast(`${j.name} baixado`); loadModels(); }
+    else if (j.status === 'error') toast(`${j.name}: ${j.error}`, 'err');
+  }
+  if (S.view === 'server') drawModels();
+  if (r.jobs.some((j) => j.status === 'downloading')) hfTimer = setTimeout(pollHf, 1000);
+}
+
+async function hfDownload(repo, f, mmproj) {
+  try {
+    await api('/api/hf/download', { repo, name: f.name, parts: f.parts, mmproj: mmproj?.path || '', size: (f.size || 0) + (mmproj?.size || 0) });
+    toast(`Baixando ${f.name}...`);
+    if (S.view !== 'server') setView('server');
+    pollHf();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+function openHf() {
+  let timer = 0; let seq = 0;
+  const q = h('input.input', { placeholder: 'Buscar modelos GGUF (ex.: qwen3 coder, gemma 3, llama 3.1 8b)', autofocus: true });
+  const list = h('div.hf-list');
+  const back = h('button.btn.ghost.sm', { hidden: true, onclick: () => { back.hidden = true; q.parentElement.hidden = false; run(); } }, ic('chev'), 'Voltar à busca');
+  back.querySelector('svg').style.transform = 'rotate(180deg)';
+  const tokenBox = h('details.hf-token', null, h('summary', null, 'Token do Hugging Face (só para modelos restritos)'));
+  api('/api/hf').then((i) => {
+    const t = h('input.input.mono', { type: 'password', placeholder: i.hasToken ? 'Token salvo (digite para trocar)' : 'hf_...' });
+    tokenBox.append(h('div.inline', null, t, h('button.btn', { onclick: async () => { await api('/api/hf', { token: t.value }); t.value = ''; toast('Token salvo'); } }, 'Salvar')),
+      h('small.muted', null, `Os modelos são salvos em ${i.dir}`));
+  }).catch(() => {});
+  const run = async () => {
+    const my = ++seq;
+    list.innerHTML = ''; list.append(h('div.hf-empty', null, h('span', { html: svg('loader', 'spin'), style: { display: 'grid' } }), 'Buscando...'));
+    let r; try { r = await api('/api/hf/search?q=' + encodeURIComponent(q.value.trim())); } catch (e) { if (my === seq) { list.innerHTML = ''; list.append(h('div.hf-empty.err', null, e.message)); } return; }
+    if (my !== seq) return;
+    list.innerHTML = '';
+    if (!r.models.length) { list.append(h('div.hf-empty', null, 'Nada encontrado.')); return; }
+    for (const m of r.models) {
+      const [owner, name] = m.id.split('/');
+      list.append(h('button.hf-repo', { onclick: () => openRepo(m.id) },
+        h('div.hf-r-main', null, h('div.hf-r-name', null, name || m.id), h('div.hf-r-owner', null, owner)),
+        h('span.hf-r-stat', { title: 'Downloads' }, ic('download'), fmtNum(m.downloads)),
+        h('span.hf-r-stat', { title: 'Curtidas' }, ic('heart' in ICONS ? 'heart' : 'sparkles'), fmtNum(m.likes)),
+        h('span', { html: svg('chev'), style: { display: 'grid', color: 'var(--muted)' } })));
+    }
+  };
+  const openRepo = async (repo) => {
+    ++seq; back.hidden = false; q.parentElement.hidden = true;
+    list.innerHTML = ''; list.append(h('div.hf-empty', null, h('span', { html: svg('loader', 'spin'), style: { display: 'grid' } }), 'Lendo os arquivos...'));
+    let r; try { r = await api('/api/hf/files?repo=' + encodeURIComponent(repo)); } catch (e) { list.innerHTML = ''; list.append(h('div.hf-empty.err', null, e.message)); return; }
+    list.innerHTML = '';
+    list.append(h('div.hf-head', null, h('b', null, repo), h('a.bin-link', { href: 'https://huggingface.co/' + repo, target: '_blank', rel: 'noopener' }, ic('external'), 'página')));
+    let mm = null;
+    if (r.mmproj.length) {
+      const pick = r.mmproj.find((x) => /F16/i.test(x.quant)) || r.mmproj[0];
+      const cb = h('input', { type: 'checkbox', checked: true, onchange: () => { mm = cb.checked ? pick : null; } });
+      mm = pick;
+      list.append(h('label.hf-mm', null, cb, h('span', null, `Incluir o projetor de visão (${pick.path.split('/').pop()}, ${fmtBytes(pick.size)}) para o modelo ver imagens`)));
+    }
+    if (!r.files.length) list.append(h('div.hf-empty', null, 'Este repositório não tem arquivos .gguf.'));
+    const rec = r.files.find((f) => f.quant === 'Q4_K_M') || r.files.find((f) => /^Q4/.test(f.quant));
+    for (const f of r.files) {
+      list.append(h('div.hf-file', null,
+        h('span.hf-q', null, f.quant || '?'),
+        h('div.hf-f-main', null, h('div.hf-f-name', null, f.name, f === rec ? h('span.tag.ok', null, 'bom equilíbrio') : null),
+          h('div.hf-f-sub', null, fmtBytes(f.size), f.parts.length > 1 ? ` · ${f.parts.length} partes` : '')),
+        h('button.btn.sm' + (f === rec ? '.primary' : ''), { onclick: () => { md.close(); hfDownload(repo, f, mm); } }, ic('download'), 'Baixar')));
+    }
+  };
+  q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 350); });
+  q.addEventListener('keydown', (e) => { if (e.key === 'Enter') { clearTimeout(timer); run(); } });
+  const md = modal({ title: 'Modelos do Hugging Face', wide: true, body: [h('div.hf-search', null, h('span', { html: svg('search'), style: { display: 'grid' } }), q), back, list, tokenBox], foot: [h('button.btn', { onclick: () => md.close() }, 'Fechar')] });
+  setTimeout(() => q.focus(), 50);
+  run();
+}
+
+function fmtNum(n) { return n >= 1e6 ? (n / 1e6).toFixed(1).replace('.', ',') + ' mi' : n >= 1000 ? Math.round(n / 1000) + ' mil' : String(n); }
 
 async function saveModels(list) {
   try { S.models = await api('/api/models', { models: list }); } catch (e) { toast(e.message, 'err'); return; }

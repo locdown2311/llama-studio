@@ -112,6 +112,12 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/llama/log", get(llama_log))
         .route("/api/models", get(models_list).post(models_save))
         .route("/api/models/activate", post(models_activate))
+        .route("/api/hf", get(hf_info).post(hf_token))
+        .route("/api/hf/search", get(hf_search))
+        .route("/api/hf/files", get(hf_files))
+        .route("/api/hf/download", post(hf_download))
+        .route("/api/hf/downloads", get(hf_downloads))
+        .route("/api/hf/cancel", post(hf_cancel))
         .route("/v1/{*rest}", any(proxy))
         .route("/props", any(proxy))
         .route("/health", any(proxy))
@@ -849,4 +855,41 @@ async fn models_save(State(app): S, b: Bytes) -> Res {
 async fn models_activate(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     crate::models::activate(&app, st(&v, "id")).await.map(ok).map_err(bad)?
+}
+
+// ---------------------------------------------------------------- Hugging Face
+
+async fn hf_info(State(app): S) -> Res {
+    ok(crate::hf::info(&app))
+}
+
+async fn hf_token(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    app.config.write().unwrap().hf_token = st(&v, "token").trim().to_string();
+    app.save_config();
+    ok(crate::hf::info(&app))
+}
+
+async fn hf_search(State(app): S, Query(qs): Q) -> Res {
+    crate::hf::search(&app, q(&qs, "q")).await.map(ok).map_err(bad)?
+}
+
+async fn hf_files(State(app): S, Query(qs): Q) -> Res {
+    crate::hf::files(&app, q(&qs, "repo")).await.map(ok).map_err(bad)?
+}
+
+async fn hf_download(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let mm = v.get("mmproj").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string);
+    crate::hf::start(&app, st(&v, "repo"), st(&v, "name"), strs(&v, "parts"), mm, v["size"].as_u64().unwrap_or(0)).map(ok).map_err(bad)?
+}
+
+async fn hf_downloads() -> Res {
+    ok(crate::hf::list())
+}
+
+async fn hf_cancel(b: Bytes) -> Res {
+    let v = body(&b);
+    crate::hf::cancel(st(&v, "id"));
+    ok(crate::hf::list())
 }

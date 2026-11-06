@@ -37,6 +37,8 @@ pub struct Config {
     pub compact_output: bool,
     /// Passa comandos conhecidos (git, cargo, pytest...) pelo RTK quando instalado.
     pub use_rtk: bool,
+    /// token do Hugging Face para modelos restritos
+    pub hf_token: String,
 }
 
 impl Default for Config {
@@ -55,6 +57,7 @@ impl Default for Config {
             close_to_tray: true,
             compact_output: true,
             use_rtk: true,
+            hf_token: String::new(),
         }
     }
 }

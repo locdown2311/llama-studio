@@ -49,7 +49,7 @@ pub fn ui_version(app: &App) -> String {
 
 static CACHE: Mutex<Option<(Instant, Value)>> = Mutex::new(None);
 
-fn chain(e: &dyn std::error::Error) -> String {
+pub fn chain(e: &dyn std::error::Error) -> String {
     let mut out = e.to_string();
     let mut cur = e.source();
     while let Some(c) = cur {
