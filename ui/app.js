@@ -691,6 +691,7 @@ function renderMessages(onlyLast) {
     });
   }
   if (stick || !onlyLast) toBottom();
+  drawActivitySoon();
 }
 
 function renderEmpty() {
@@ -780,6 +781,10 @@ function renderAI(b, conv, isLast) {
   if (!live && t0 && t1 && t1 - t0 > 1500) {
     card.append(h('div.ai-status', null, h('span', null, 'Duração'), h('b', null, fmtMs(t1 - t0)), last?.tps ? h('span.muted', null, `${last.tps.toFixed(1)} tok/s`) : null));
   }
+  // linha do tempo: raciocínio, falas intermediárias e ferramentas num trilho só;
+  // o texto final (depois da última ferramenta) fica fora, como a resposta.
+  const steps = [];
+  let finalMd = null;
   assistants.forEach((m, ai) => {
     const sp = splitThink(m.content);
     const think = (m.reasoning || '') + (sp.think || '');
@@ -787,18 +792,37 @@ function renderAI(b, conv, isLast) {
     if (think.trim() && S.settings.showThinking) {
       const key = `think-${b.start}-${ai}`;
       const d = h('details.think' + (thinkingNow ? '.live' : ''), { open: thinkingNow || S.openTools.has(key) },
-        h('summary', null, h('span', { html: svg('chev', 'chev'), style: { display: 'contents' } }), ic('brain'), h('span.lbl', null, thinkingNow ? 'Pensando...' : `Raciocínio (${think.trim().split(/\s+/).length} palavras)`)),
+        h('summary', null, h('span', { html: svg('chev', 'chev'), style: { display: 'contents' } }), h('span.lbl', null, thinkingNow ? 'Pensando...' : `Raciocínio`), thinkingNow ? null : h('span.think-n', null, `${think.trim().split(/\s+/).length} palavras`)),
         h('div.think-body', null, think.trim()));
       d.addEventListener('toggle', () => { if (d.open) S.openTools.add(key); else S.openTools.delete(key); });
-      card.append(d);
+      steps.push(tlItem('think' + (thinkingNow ? '.now' : ''), ic('brain'), d));
     }
-    if (sp.text.trim()) card.append(h('div.md', { html: md(sp.text) }));
-    if (m.tool_calls?.length) card.append(h('div.trace', null, m.tool_calls.map((tc) => renderTool(tc, results.get(tc.id), live))));
+    const isFinal = m === last && !m.tool_calls?.length;
+    if (sp.text.trim()) {
+      const mdEl = h('div.md', { html: md(sp.text) });
+      if (isFinal) finalMd = mdEl; else steps.push(tlItem('say', ic('message' in ICONS ? 'message' : 'chat'), mdEl));
+    }
+    for (const tc of m.tool_calls || []) {
+      const res = results.get(tc.id);
+      const t = renderTool(tc, res, live);
+      const st = [...t.classList].find((c) => c.startsWith('s-')) || 's-ok';
+      steps.push(tlItem('tool.' + st, h('span', { html: svg(toolIcon(tc.function?.name || '', res?.source || ((tc.function?.name || '').includes('__') ? 'mcp' : 'builtin'))) }), t));
+    }
   });
-  if (live && conv._waitingModel) card.append(h('div.ai-status', null, h('span', { html: svg('loader', 'spin'), style: { display: 'grid' } }), conv._waitText || 'Esperando o modelo terminar de carregar. A resposta começa sozinha.'));
-  if (live && conv._compacting) card.append(h('div.ai-status', null, h('span', { html: svg('loader', 'spin'), style: { display: 'grid' } }), 'Compactando a conversa para caber no contexto...'));
-  const waiting = live && !conv._compacting && !conv._waitingModel && (!card.childElementCount || (last && !last.content && !last.reasoning && !last.tool_calls?.length && toolMsgs.length));
-  if (waiting) card.append(h('div.typing', null, h('i'), h('i'), h('i')));
+  const nowLabel = live && conv._waitingModel ? (conv._waitText || 'Esperando o modelo terminar de carregar. A resposta começa sozinha.')
+    : live && conv._compacting ? 'Compactando a conversa para caber no contexto...' : '';
+  if (nowLabel) steps.push(tlItem('wait.now', h('span', { html: svg('loader', 'spin') }), h('div.tl-wait', null, nowLabel)));
+  const waiting = live && !nowLabel && !finalMd && (!steps.length || (last && !last.content && !last.reasoning && !last.tool_calls?.length && toolMsgs.length));
+  if (waiting) steps.push(tlItem('wait.now', h('span.tl-dot'), h('div.typing', null, h('i'), h('i'), h('i'))));
+  if (steps.length) {
+    const tl = h('div.tl' + (live ? '.live' : ''));
+    const key = 'tl-all-' + b.start;
+    const hideN = !live && steps.length > 7 && !S.openTools.has(key) ? steps.length - 4 : 0;
+    if (hideN) tl.append(h('button.tl-more', { onclick: () => { S.openTools.add(key); renderMessages(false); } }, h('span.tl-node', { html: svg('list') }), `Mostrar ${hideN} passos anteriores`));
+    steps.slice(hideN).forEach((x) => tl.append(x));
+    card.append(tl);
+  }
+  if (finalMd) card.append(finalMd);
   if (!live && !assistants.some((m) => splitThink(m.content).text.trim() || m.tool_calls?.length)) card.append(h('div.muted', null, 'Execução interrompida.'));
 
   if (!live && toolCount) {
@@ -818,6 +842,10 @@ function renderAI(b, conv, isLast) {
       isLast && toolCount ? h('button.chip', { onclick: () => { $$('.tool', card).forEach((t) => { t.classList.add('open'); }); } }, ic('list'), 'Expandir ferramentas') : null) : null);
 }
 
+function tlItem(kind, icon, content) {
+  return h('div.tl-item.k-' + kind, null, h('span.tl-node', null, icon), h('div.tl-body', null, content));
+}
+
 function shortModel(p) { return basename(p).replace(/\.gguf$/i, ''); }
 
 /* ------------------------------------------------------------ cartões de ferramenta */
@@ -826,7 +854,7 @@ function parseArgs(s) {
   try { return JSON.parse(s || '{}'); } catch { return null; }
 }
 
-const TOOL_ICON = { list_directory: 'list', read_file: 'eye', write_file: 'filePen', edit_file: 'edit', create_directory: 'folderPlus', search_files: 'search', read_skill_file: 'book', run_command: 'terminal', execute_code: 'code', recall_history: 'history', search_tools: 'search', explore: 'compass' };
+const TOOL_ICON = { list_directory: 'list', read_file: 'eye', write_file: 'filePen', edit_file: 'edit', create_directory: 'folderPlus', search_files: 'search', read_skill_file: 'book', run_command: 'terminal', execute_code: 'code', recall_history: 'history', search_tools: 'search', explore: 'compass', update_todos: 'list' };
 function toolIcon(name, source) {
   if (source === 'mcp') return 'plug';
   if (name.startsWith('browser_')) return 'globe';
@@ -850,7 +878,7 @@ function renderTool(tc, res, live) {
   const status = res ? res.status || (res.isError ? 'error' : 'ok') : (live ? 'pending' : 'error');
   const key = tc.id;
   const open = S.openTools.has(key);
-  const el = h('div.tool.s-' + status + '.src-' + source + (open ? '.open' : ''));
+  const el = h('div.tool.s-' + status + '.src-' + source + (open ? '.open' : ''), { dataset: { id: key } });
 
   let displayName = name; let server = '';
   if (source === 'mcp') {
@@ -3627,10 +3655,88 @@ async function checkHealth() {
 }
 
 /* ============================================================ início */
+/* ------------------------------------------------------------ aba Atividade (linha do tempo da conversa) */
+function setWsTab(tab) {
+  S.wsTab = tab; store.set('wsTab', tab);
+  const ws = $('#ws');
+  ws.classList.toggle('tab-activity', tab === 'activity');
+  $$('.ws-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
+  $('#ws-activity').hidden = tab !== 'activity';
+  if (tab === 'activity') drawActivity();
+}
+
+let actTimer = 0;
+function drawActivitySoon() {
+  if (S.wsTab !== 'activity' || actTimer) return;
+  actTimer = setTimeout(() => { actTimer = 0; drawActivity(); }, 300);
+}
+
+function jumpTo(start, toolId) {
+  if (toolId) S.openTools.add(toolId);
+  if (toolId && $$('.tl-more').length) S.openTools.add('tl-all-' + start);
+  renderMessages(false);
+  const el = $(`#messages [data-start="${start}"]`);
+  if (!el) return;
+  const target = toolId ? $$('.tool', el).find((t) => t.dataset.id === toolId) || el : el;
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  target.classList.add('flash'); setTimeout(() => target.classList.remove('flash'), 1400);
+}
+
+function drawActivity() {
+  const box = $('#ws-activity'); if (!box || box.hidden) return;
+  const c = cur();
+  const keep = box.scrollTop; const atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  box.innerHTML = '';
+  if (!c || !c.messages.length) { box.append(h('div.act-empty', null, ic('list'), 'Os passos do modelo (raciocínio, ferramentas, respostas) aparecem aqui conforme ele trabalha.')); return; }
+  const blocks = blocksOf(c);
+  let nTools = 0; let nErr = 0; let ms = 0;
+  const list = h('div.act');
+  blocks.forEach((b, bi) => {
+    if (b.type === 'user') {
+      const m = b.msgs[0];
+      list.append(h('button.act-user', { onclick: () => jumpTo(b.start) }, h('span.act-time', null, fmtStamp(m.ts).slice(11)), h('span.act-u', null, (m.content || '').replace(/\s+/g, ' ').slice(0, 140))));
+      return;
+    }
+    if (b.type === 'error') { list.append(h('button.act-row.err', { onclick: () => jumpTo(b.start) }, h('span.act-ico', { html: svg('alert') }), h('span.act-main', null, h('span.act-name', null, 'Erro'), h('span.act-sub', null, b.msgs[0].content.slice(0, 120))))); return; }
+    const live = bi === blocks.length - 1 && running(c);
+    const results = new Map(b.msgs.filter((m) => m.role === 'tool').map((m) => [m.tool_call_id, m]));
+    const asts = b.msgs.filter((m) => m.role === 'assistant');
+    asts.forEach((m) => {
+      const sp = splitThink(m.content);
+      const think = (m.reasoning || '') + (sp.think || '');
+      if (think.trim()) list.append(h('button.act-row.k-think', { onclick: () => jumpTo(b.start) }, h('span.act-ico', { html: svg('brain') }), h('span.act-main', null, h('span.act-name', null, 'Raciocínio'), h('span.act-sub', null, think.trim().replace(/\s+/g, ' ').slice(0, 90)))));
+      if (sp.text.trim() && m.tool_calls?.length) list.append(h('button.act-row.k-say', { onclick: () => jumpTo(b.start) }, h('span.act-ico', { html: svg('chat') }), h('span.act-main', null, h('span.act-name', null, 'Comentário'), h('span.act-sub', null, sp.text.trim().replace(/\s+/g, ' ').slice(0, 90)))));
+      for (const tc of m.tool_calls || []) {
+        const r = results.get(tc.id); const name = tc.function?.name || '?';
+        const st = r ? r.status || (r.isError ? 'error' : 'ok') : (live ? 'running' : 'error');
+        nTools++; if (st === 'error' || st === 'denied') nErr++; if (r?.ms) ms += r.ms;
+        const src = r?.source || (name.includes('__') ? 'mcp' : 'builtin');
+        const nm = src === 'mcp' && name.includes('__') ? name.slice(name.indexOf('__') + 2) : name;
+        list.append(h('button.act-row.k-tool.s-' + st, { onclick: () => jumpTo(b.start, tc.id), title: name },
+          h('span.act-ico', { html: svg(st === 'running' || st === 'pending' ? 'loader' : toolIcon(name, src), st === 'running' || st === 'pending' ? 'spin' : '') }),
+          h('span.act-main', null, h('span.act-name', null, nm), h('span.act-sub', null, toolSummary(name, parseArgs(tc.function?.arguments)) || '')),
+          h('span.act-st', null, st === 'ok' ? (r?.ms != null ? fmtMs(r.ms) : '') : st === 'error' ? 'erro' : st === 'denied' ? 'negada' : st === 'approval' ? 'aguarda' : '')));
+      }
+      if (sp.text.trim() && !m.tool_calls?.length) list.append(h('button.act-row.k-answer', { onclick: () => jumpTo(b.start) }, h('span.act-ico', { html: svg('check') }), h('span.act-main', null, h('span.act-name', null, 'Resposta'), h('span.act-sub', null, sp.text.trim().replace(/\s+/g, ' ').slice(0, 90)))));
+    });
+    if (live) list.append(h('div.act-row.k-live', null, h('span.act-ico', { html: svg('loader', 'spin') }), h('span.act-main', null, h('span.act-name', null, c._waitingModel ? 'Esperando o modelo' : 'Trabalhando...'))));
+  });
+  box.append(h('div.act-stats', null,
+    h('div', null, h('b', null, String(nTools)), h('span', null, 'ferramentas')),
+    h('div', { class: nErr ? 'bad' : '' }, h('b', null, String(nErr)), h('span', null, 'erros')),
+    h('div', null, h('b', null, fmtMs(ms)), h('span', null, 'em ferramentas'))), list);
+  box.scrollTop = atEnd ? box.scrollHeight : keep;
+}
+
 function toggleWs() {
   const hid = $('#ws').classList.toggle('hidden');
   $('#toggle-ws').classList.toggle('on', !hid);
   store.set('wsHidden', hid);
+}
+
+function initWsTabs() {
+  $$('.ws-tabs button').forEach((b) => b.addEventListener('click', () => setWsTab(b.dataset.tab)));
+  setWsTab(store.get('wsTab', 'files'));
 }
 
 async function init() {
@@ -3660,6 +3766,7 @@ async function init() {
   $('#plus-btn').innerHTML = svg('plus');
   const wsHidden = store.get('wsHidden', false);
   $('#ws').classList.toggle('hidden', wsHidden);
+  initWsTabs();
   $('#toggle-ws').classList.toggle('on', !wsHidden);
   $('#toggle-ws').addEventListener('click', toggleWs);
   $('#ws-refresh').addEventListener('click', () => { S.ws.fresh.clear(); refreshTree(); });

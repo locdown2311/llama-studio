@@ -108,7 +108,10 @@
 
     <aside id="ws">
       <div class="ws-head">
-        <div class="ws-label">Espaço de trabalho</div>
+        <div class="ws-tabs" role="tablist">
+          <button role="tab" data-tab="files">Arquivos</button>
+          <button role="tab" data-tab="activity">Atividade</button>
+        </div>
         <div class="ws-actions">
           <button class="icon-btn sm" id="ws-refresh" title="Atualizar" aria-label="Atualizar"></button>
           <button class="icon-btn sm" id="ws-open" title="Abrir no Explorer" aria-label="Abrir no Explorer"></button>
@@ -117,6 +120,7 @@
       <button class="ws-path" id="ws-path" title="Trocar a pasta"></button>
       <div class="ws-tree" id="ws-tree"></div>
       <div class="ws-preview" id="ws-preview"></div>
+      <div class="ws-activity" id="ws-activity" hidden></div>
     </aside>
   </section>
 
