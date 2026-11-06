@@ -2223,7 +2223,7 @@ function auditorSection() {
   const reset = h('button.btn.sm', { type: 'button', onclick: () => { pol.value = AUDIT_POLICY; S.settings.auditPolicy = ''; save(); toast('Política padrão restaurada'); } }, 'Restaurar a padrão');
   const more = h('div', { hidden: !st.auditor },
     sw('auditMcp', 'Auditar também as ferramentas de conectores', 'Debuggers, bancos de dados e APIs também passam por ele.'),
-    h('div.field', null, h('label', null, 'O auditor aprova sozinho'), max, h('small', null, 'Acima disso, ou se ele tiver dúvida, a ação espera você com a análise dele.')),
+    h('div.field', null, h('label', null, 'O auditor aprova sozinho'), max, h('small', null, 'Acima disso, ou se ele tiver dúvida, a ação espera você com a análise dele, mesmo em "Nunca perguntar".')),
     h('div.field', null, h('label', null, 'Política do auditor'), pol, h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', marginTop: '6px' } }, h('small', { style: { flex: 1 } }, 'Regras que ele segue para decidir. Escreva o que é seguro e o que deve sempre passar por você.'), reset)));
   return h('div', null,
     sw('auditor', 'Auditor de ações', 'Um subagente avalia o risco de cada ação e aprova sozinho o que é seguro.'),
@@ -2231,8 +2231,11 @@ function auditorSection() {
 }
 
 function shouldAudit(info, conv) {
-  if (!S.settings.auditor || S.settings.approval === 'never' || conv.autoApprove) return false;
-  return needsApproval(info, conv) || (S.settings.auditMcp && info.source === 'mcp');
+  if (!S.settings.auditor || conv.autoApprove) return false;
+  if (S.settings.auditMcp && info.source === 'mcp') return true;
+  // em "Nunca perguntar" o auditor continua olhando o que altera algo (como em "Alterar arquivos")
+  if (S.settings.approval === 'never') return (info.source === 'builtin' || info.source === 'client') && !!info.mutating;
+  return needsApproval(info, conv);
 }
 
 async function auditCall(tc, info, conv, signal) {
