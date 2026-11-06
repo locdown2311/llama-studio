@@ -383,12 +383,111 @@ pub async fn call(app: &Arc<App>, ws: PathBuf, name: &str, args: Value, allow: &
         let r = tokio::task::spawn_blocking(move || run_builtin(&app2, &ws, &name, &args, &allow)).await;
         return out(r.map_err(|e| e.to_string()).and_then(|x| x).map(|t| (t, vec![])));
     }
+    // confere os argumentos com o esquema do conector antes de chamar: com o catálogo sob demanda,
+    // o modelo às vezes chama a ferramenta sem ter visto os parâmetros e inventa os nomes,
+    // e o servidor recebe os campos certos vazios
+    let mut args = args;
+    if let Some(schema) = mcp_schema(app, name) {
+        match fit_args(&schema, &mut args) {
+            Ok(()) => {}
+            Err(msg) => return ToolOut { content: format!("Erro: argumentos inválidos para {name}. {msg}\n{}", describe_params(&schema)), is_error: true, images: vec![] },
+        }
+    }
     match app.mcp.call_by_tool(name, args).await {
         Ok((text, is_err, images)) => {
             let content = if compact_on { crate::compact::compact(&text, &crate::compact::saidas_dir(app), name, 20000).text } else { app::truncate(text, 40000) };
             ToolOut { content, is_error: is_err, images }
         }
         Err(e) => ToolOut { content: format!("Erro: {e}"), is_error: true, images: vec![] },
+    }
+}
+
+/// Esquema de entrada de uma ferramenta MCP (pelo nome exposto ou pelo nome original).
+fn mcp_schema(app: &App, name: &str) -> Option<Value> {
+    mcp_entries(app, None).into_iter().find(|(n, _, t)| n == name || t["name"] == name).and_then(|(_, _, t)| t.get("inputSchema").cloned()).filter(Value::is_object)
+}
+
+/// Lista legível dos parâmetros, para o modelo corrigir a chamada.
+fn describe_params(schema: &Value) -> String {
+    let req: Vec<&str> = schema["required"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+    let Some(props) = schema["properties"].as_object() else { return "Esta ferramenta não recebe parâmetros.".into() };
+    if props.is_empty() {
+        return "Esta ferramenta não recebe parâmetros.".into();
+    }
+    let lines: Vec<String> = props
+        .iter()
+        .map(|(k, p)| {
+            let ty = p["type"].as_str().unwrap_or("valor");
+            let d = p["description"].as_str().map(|d| format!(": {}", cut(d, 160))).unwrap_or_default();
+            format!("- {k} ({ty}{}){d}", if req.contains(&k.as_str()) { ", obrigatório" } else { "" })
+        })
+        .collect();
+    format!("Parâmetros esperados:\n{}", lines.join("\n"))
+}
+
+/// Ajusta tipos simples (número em texto e vice-versa) e recusa nomes desconhecidos ou obrigatórios faltando.
+fn fit_args(schema: &Value, args: &mut Value) -> Result<(), String> {
+    if !args.is_object() {
+        *args = json!({});
+    }
+    let props = schema["properties"].as_object().cloned().unwrap_or_default();
+    let open = schema.get("additionalProperties").map(|v| v != &json!(false)).unwrap_or(true) && props.is_empty();
+    let obj = args.as_object_mut().unwrap();
+    // um nome só diferente na grafia (Address x address, file_path x filepath) é aceito
+    let norm = |s: &str| s.to_lowercase().replace(['_', '-'], "");
+    let keys: Vec<String> = obj.keys().cloned().collect();
+    let mut unknown = vec![];
+    for k in keys {
+        if props.contains_key(&k) {
+            continue;
+        }
+        if let Some(real) = props.keys().find(|p| norm(p) == norm(&k)) {
+            let v = obj.remove(&k).unwrap();
+            obj.insert(real.clone(), v);
+        } else if !open {
+            unknown.push(k);
+        }
+    }
+    for (k, p) in &props {
+        let Some(v) = obj.get_mut(k) else { continue };
+        match (p["type"].as_str(), &*v) {
+            (Some("string"), Value::Number(n)) => *v = json!(n.to_string()),
+            (Some("string"), Value::Bool(b)) => *v = json!(b.to_string()),
+            (Some("integer"), Value::String(t)) => {
+                let t = t.trim();
+                if let Ok(n) = t.parse::<i64>() {
+                    *v = json!(n);
+                } else if let Some(h) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
+                    if let Ok(n) = i64::from_str_radix(h, 16) {
+                        *v = json!(n);
+                    }
+                }
+            }
+            (Some("number"), Value::String(t)) => {
+                if let Ok(n) = t.trim().parse::<f64>() {
+                    *v = json!(n);
+                }
+            }
+            (Some("boolean"), Value::String(t)) => *v = json!(matches!(t.trim().to_lowercase().as_str(), "true" | "1" | "sim" | "yes")),
+            _ => {}
+        }
+    }
+    let missing: Vec<&str> = schema["required"]
+        .as_array()
+        .map(|a| a.iter().filter_map(Value::as_str).filter(|r| obj.get(*r).is_none_or(|v| v.is_null() || v.as_str() == Some(""))).collect())
+        .unwrap_or_default();
+    match (unknown.is_empty(), missing.is_empty()) {
+        (true, true) => Ok(()),
+        _ => {
+            let mut m = vec![];
+            if !missing.is_empty() {
+                m.push(format!("Faltou: {}.", missing.join(", ")));
+            }
+            if !unknown.is_empty() {
+                m.push(format!("Não existem: {}.", unknown.join(", ")));
+            }
+            Err(m.join(" "))
+        }
     }
 }
 

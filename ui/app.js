@@ -2226,6 +2226,10 @@ async function runAgent(conv) {
         tmsg.content = r.content; tmsg.isError = r.isError; tmsg.status = r.isError ? 'error' : 'ok';
         if (r.images?.length) { tmsg._images = r.images; images.push({ name: tc.function.name, images: r.images }); }
         if (tc.function.name === 'search_tools') refetch = true;
+        // ferramenta de conector chamada sem o esquema carregado: carrega para o próximo passo
+        if (!meta[tc.function.name] && tc.function.name.includes('__') && !(conv.extraTools || []).includes(tc.function.name)) {
+          conv.extraTools = [...(conv.extraTools || []), tc.function.name]; refetch = true;
+        }
         if (info.source === 'builtin' && info.mutating && !r.isError) {
           const a = parseArgs(tc.function.arguments);
           if (a?.path && wsOf(conv) === S.ws.path) markFresh(a.path);
