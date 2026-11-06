@@ -303,8 +303,8 @@ document.addEventListener('click', (e) => {
 });
 
 /* ============================================================ estado */
-const TOOL_GROUPS = ['read', 'write', 'edit', 'shell', 'code', 'browser', 'computer', 'history', 'toolsearch', 'explore', 'todo'];
-const DEFAULT_SETTINGS = { systemPrompt: '', temperature: '', topP: '', maxTokens: '', maxSteps: 30, approval: 'writes', auditor: false, auditMax: 'baixo', auditMcp: false, auditPolicy: '', theme: 'light', showThinking: true, vision: 'auto', explorerSteps: 20, autoCompact: true, compactAt: 75, compactMode: 'meio', lazyLoad: true, tools: Object.fromEntries(TOOL_GROUPS.map((g) => [g, true])) };
+const TOOL_GROUPS = ['read', 'write', 'edit', 'shell', 'code', 'browser', 'computer', 'history', 'toolsearch', 'explore', 'todo', 'notebook'];
+const DEFAULT_SETTINGS = { systemPrompt: '', temperature: '', topP: '', maxTokens: '', maxSteps: 30, approval: 'writes', auditor: false, auditMax: 'baixo', auditMcp: false, auditPolicy: '', theme: 'light', showThinking: true, vision: 'auto', explorerSteps: 20, autoCompact: true, compactAt: 75, compactMode: 'meio', lazyLoad: true, projMap: false, projSummary: false, tools: Object.fromEntries(TOOL_GROUPS.map((g) => [g, true])) };
 const S = {
   view: 'chat',
   convs: store.get('convs', []),
@@ -440,6 +440,7 @@ function newConv(projectId) {
 
 function selectConv(id) {
   if (S.sideDrawer) toggleSide(false);
+  setTimeout(() => { const c = cur(); if (c && S.settings.projMap === true) ensureMap(c).then(() => maybeSummarizeMap(c)); if (S.wsTab === 'notebook') drawNotebook(); }, 50);
   const prev = kitModelId();
   S.curId = id; saveConvs(); closeMention?.();
   const next = kitModelId();
@@ -776,6 +777,8 @@ function fillConvMenu() {
     h('button.menu-item', { onclick: async () => { closePops(); const t = await promptBox('Renomear conversa', 'Título', c.title, 'Renomear'); if (t) { c.title = t; saveConvs(); renderConvList(); renderChatTitle(); } } }, ic('edit'), 'Renomear'),
     h('button.menu-item', { onclick: () => { closePops(); exportConv(c); } }, ic('download'), 'Exportar como Markdown'),
     h('button.menu-item', { onclick: () => { closePops(); compactNow(c); } }, ic('archive'), 'Compactar agora'),
+    h('button.menu-item', { onclick: () => { closePops(); skillFromConv(c); } }, ic('sparkles'), 'Criar habilidade desta conversa'),
+    h('button.menu-item', { onclick: () => { closePops(); showMap(c); } }, ic('folder'), 'Mapa da pasta (pré-leitura)'),
     h('button.menu-item', { onclick: () => { closePops(); c.autoApprove = !c.autoApprove; saveConvs(); toast(c.autoApprove ? 'Ferramentas liberadas nesta conversa' : 'Confirmação reativada'); } }, ic('check'), c.autoApprove ? 'Voltar a pedir confirmação' : 'Permitir ferramentas sem perguntar'),
     h('div.menu-sep'),
     h('button.menu-item.danger', { onclick: () => { closePops(); deleteConv(c); } }, ic('trash'), 'Apagar conversa'));
@@ -1087,7 +1090,7 @@ function parseArgs(s) {
   try { return JSON.parse(s || '{}'); } catch { return null; }
 }
 
-const TOOL_ICON = { list_directory: 'list', read_file: 'eye', write_file: 'filePen', edit_file: 'edit', create_directory: 'folderPlus', search_files: 'search', read_skill_file: 'book', run_command: 'terminal', execute_code: 'code', recall_history: 'history', search_tools: 'search', explore: 'compass', update_todos: 'list' };
+const TOOL_ICON = { list_directory: 'list', read_file: 'eye', write_file: 'filePen', edit_file: 'edit', create_directory: 'folderPlus', search_files: 'search', read_skill_file: 'book', run_command: 'terminal', execute_code: 'code', recall_history: 'history', search_tools: 'search', explore: 'compass', update_todos: 'list', notebook: 'book' };
 function toolIcon(name, source) {
   if (source === 'mcp') return 'plug';
   if (name.startsWith('browser_')) return 'globe';
@@ -1096,6 +1099,7 @@ function toolIcon(name, source) {
 }
 
 function toolSummary(name, args) {
+  if (name === 'notebook' && args) return [args.action, args.id != null ? '#' + args.id : '', args.title || args.query || '', args.status || ''].filter(Boolean).join(' ');
   if (!args) return '';
   const pick = args.task || args.path || args.file_path || args.url || args.query || args.name || args.command || args.keys || args.text || args.window || args.pattern || args.skill || (args.id != null ? `#${args.id}` : '');
   if (typeof pick === 'string') return pick;
@@ -1191,10 +1195,15 @@ function renderTool(tc, res, live) {
     bodyEl.append(h('div.tool-sec', null, h('div.tool-sec-label', null, res.isError ? 'Erro' : 'Resultado', h('span', { style: { marginLeft: 'auto', fontWeight: 400 } }, content.length > 1000 ? fmtSize(content.length) : '')), inner));
   }
 
+  if (status === 'denied' && /^O usuário negou/.test(res?.content || '')) {
+    const conv = S.convs.find((c) => c.messages.includes(res));
+    if (conv) bodyEl.append(h('div.cp-row', null, ic('shield'), h('span', null, 'Você negou esta ação.'), h('button.btn.sm', { onclick: () => ruleFrom(conv, res, tc, 'negou') }, 'Virar regra')));
+  }
   if (res?.cps?.length && (status === 'ok' || status === 'error')) {
     const conv = S.convs.find((c) => c.messages.includes(res));
     bodyEl.append(h('div.cp-row', null, ic('history'),
       h('span', null, res.undone ? 'Alteração desfeita: o arquivo voltou ao estado de antes.' : 'Ponto de restauração guardado antes desta alteração.'),
+      res.undone && conv ? h('button.btn.sm', { onclick: () => ruleFrom(conv, res, tc, 'desfez') }, 'Virar regra') : null,
       res.undone || !conv ? null : h('button.btn.sm', { onclick: async (e) => {
         e.currentTarget.disabled = true;
         try {
@@ -2537,7 +2546,7 @@ async function runAgent(conv) {
       fetchTools(),
       // o prompt de sistema precisa ficar idêntico entre mensagens para o llama-server reaproveitar o cache:
       // só a data (sem hora) e sem a lista de arquivos referenciados (eles já vão na própria mensagem)
-      api('/api/context', { ws: wsOf(conv), skills: sel.skills, groups, refs: [], lazy, now: new Date().toLocaleDateString('pt-BR', { dateStyle: 'full' }) }),
+      (S.settings.projMap === true ? ensureMap(conv) : Promise.resolve()).then(() => api('/api/context', { ws: wsOf(conv), skills: sel.skills, groups, refs: [], lazy, map: S.settings.projMap === true, now: new Date().toLocaleDateString('pt-BR', { dateStyle: 'full' }) })),
     ]);
     const tctx = { signal: ac.signal, conv, refs, groups, ctxText: ctx.text, ws: wsOf(conv) };
     const persona = personaOf(conv); const proj = projectOf(conv);
@@ -2653,6 +2662,7 @@ async function runAgent(conv) {
     if (!(e.name === 'AbortError' || ac.signal.aborted)) conv.messages.push({ role: 'error', content: e.message || String(e) });
   } finally {
     for (const m of conv.messages) if (m.role === 'tool' && ['pending', 'running', 'approval', 'audit'].includes(m.status)) { m.status = 'denied'; m.content = m.content || 'Cancelado pelo usuário.'; }
+    setTimeout(() => maybeSummarizeMap(conv), 1500); // pré-leitura: só quando o servidor ficar livre
     const last = conv.messages[conv.messages.length - 1];
     if (last?.role === 'assistant' && !last.content && !last.reasoning && !last.tool_calls?.length) conv.messages.pop();
     S.runs.delete(conv.id); S.waiting.delete(conv.id);
@@ -2765,6 +2775,7 @@ const TOOL_INFO = {
   history: { sec: 'Busca', title: 'Lembrar conversas', short: 'histórico', desc: 'Procurar no histórico desta e das outras conversas.' },
   toolsearch: { sec: 'Busca', title: 'Buscar ferramentas', short: 'buscar ferramentas', desc: 'Achar e ativar ferramentas de conectores sob demanda.' },
   todo: { sec: 'Planejamento', title: 'Lista de tarefas', short: 'tarefas', desc: 'O modelo escreve um plano e vai marcando cada passo; você acompanha acima da caixa de texto.' },
+  notebook: { sec: 'Planejamento', title: 'Caderno de investigação', short: 'caderno', desc: 'O modelo registra achados (endereços, funções, hipóteses) num caderno do projeto e consulta antes de repetir trabalho.' },
   explore: { sec: 'Subagentes', title: 'Subagentes exploradores', short: 'exploradores', desc: 'Investigação só de leitura com contexto próprio, vários em paralelo.' },
 };
 function enabledGroups() { return TOOL_GROUPS.filter((g) => S.settings.tools[g]); }
@@ -2796,6 +2807,7 @@ async function execTool(name, args, info, tctx, tmsg) {
     if (name === 'execute_code') return await runCode(args?.code ?? '', tctx, tmsg);
     if (name === 'recall_history') return recallHistory(args || {}, tctx.conv);
     if (name === 'update_todos') return await updateTodos(tctx.conv, args, tctx.signal);
+    if (name === 'notebook') return await notebookTool(tctx.conv, args);
     if (name === 'search_tools') {
       const names = Array.isArray(args?.names) ? args.names : typeof args?.names === 'string' ? args.names.split(/[\s,]+/).filter(Boolean) : [];
       const r = await api('/api/tools/search', { query: args?.query || '', names });
@@ -3218,8 +3230,8 @@ async function renderSkillsPage() {
   }
 }
 
-async function editSkill(id) {
-  let data = { name: '', description: '', body: '' };
+async function editSkill(id, prefill) {
+  let data = { name: '', description: '', body: '', ...(prefill || {}) };
   if (id) { try { data = await api('/api/skills/get?id=' + encodeURIComponent(id)); } catch (e) { toast(e.message, 'err'); return; } }
   const name = h('input.input', { value: data.name || data.meta?.name || '', placeholder: 'Ex.: relatorios-em-pt' });
   const desc = h('textarea.textarea', { rows: 2, value: data.description || '', placeholder: 'Quando o modelo deve usar esta skill. Ex.: Use ao escrever relatórios técnicos em português.' });
@@ -3604,7 +3616,7 @@ function renderSettings() {
 
   // ferramentas
   const groupsBySec = {};
-  for (const g of ['browser', 'computer', 'read', 'edit', 'write', 'shell', 'code', 'history', 'toolsearch', 'explore']) (groupsBySec[TOOL_INFO[g].sec] ||= []).push(g);
+  for (const g of ['browser', 'computer', 'read', 'edit', 'write', 'shell', 'code', 'history', 'toolsearch', 'explore', 'todo', 'notebook']) (groupsBySec[TOOL_INFO[g].sec] ||= []).push(g);
   const toolGrid = h('div.tgrid', null, Object.values(groupsBySec).flat().map((g) => sw(TOOL_INFO[g].title, TOOL_INFO[g].desc, S.settings.tools[g], (v) => { S.settings.tools[g] = v; store.set('settings', S.settings); saveKit(); updatePickers(); saved(); })));
 
   const body = [
@@ -3624,6 +3636,8 @@ function renderSettings() {
       field('Pedir confirmação antes de', seg([['writes', 'Alterar arquivos'], ['all', 'Qualquer ferramenta'], ['never', 'Nunca perguntar']], st.approval, (v) => put({ approval: v }))),
       auditorSection()),
     section('context', 'Contexto', 'O que fazer quando a conversa fica longa demais para o modelo.',
+      sw('Pré-leitura da pasta de trabalho', 'O modelo recebe um mapa curto da pasta (estrutura, tipos de arquivo, README) no começo da conversa, sem gastar chamadas de ferramenta. Montado sem o modelo.', st.projMap === true, (v) => put({ projMap: v })),
+      sw('Resumir a pasta com o modelo', 'Uma vez por pasta, quando o servidor estiver livre, o modelo escreve um resumo de 6 linhas que vai junto com o mapa.', st.projSummary === true, (v) => put({ projSummary: v })),
       sw('Compactar automaticamente', `Resume a conversa quando passar do limite abaixo${S.nCtx ? ` (contexto de ${S.nCtx.toLocaleString('pt-BR')} tokens)` : ''}.`, st.autoCompact, (v) => put({ autoCompact: v })),
       h('div.row', null,
         field('Compactar ao chegar em', (() => { const sl = slider({ min: 30, max: 95, step: 5, fmt: (v) => v + '% do contexto' }, st.compactAt, { optional: false }); sl.el.addEventListener('change', () => put({ compactAt: Number(sl.get()) })); return sl.el; })()),
@@ -4495,10 +4509,12 @@ async function checkHealth() {
 function setWsTab(tab) {
   S.wsTab = tab; store.set('wsTab', tab);
   const ws = $('#ws');
-  ws.classList.toggle('tab-activity', tab === 'activity');
+  ws.classList.toggle('tab-activity', tab !== 'files');
   $$('.ws-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
   $('#ws-activity').hidden = tab !== 'activity';
+  $('#ws-notebook').hidden = tab !== 'notebook';
   if (tab === 'activity') drawActivity();
+  if (tab === 'notebook') drawNotebook();
 }
 
 let actTimer = 0;
@@ -4516,6 +4532,267 @@ function jumpTo(start, toolId) {
   const target = toolId ? $$('.tool', el).find((t) => t.dataset.id === toolId) || el : el;
   target.scrollIntoView({ behavior: 'smooth', block: 'center' });
   target.classList.add('flash'); setTimeout(() => target.classList.remove('flash'), 1400);
+}
+
+/* ------------------------------------------------------------ pedidos laterais ao modelo */
+/** Uma pergunta curta ao modelo, sem ferramentas nem raciocínio, num slot que não estraga o cache da conversa. */
+async function sideAsk(conv, system, user, { maxTokens = 300, temperature = 0, signal } = {}) {
+  const extra = { chat_template_kwargs: { enable_thinking: false }, reasoning_budget: 0, temperature, max_tokens: maxTokens, _fixed: true };
+  const slot = conv ? sideSlot(conv) : null; if (slot != null) extra.id_slot = slot;
+  const m = { content: '', reasoning: '', tool_calls: [] };
+  await streamRaw([{ role: 'system', content: system }, { role: 'user', content: user }], [], m, signal || new AbortController().signal, null, extra);
+  return splitThink(m.content || '').text.trim();
+}
+const clipText = (t, n) => { t = String(t ?? ''); return t.length > n ? t.slice(0, n) + ` [... +${t.length - n}]` : t; };
+
+/* ------------------------------------------------------------ correções viram regras */
+// Negou uma ação ou desfez uma alteração: o studio propõe uma regra curta e você escolhe onde ela vale.
+// Só chama o modelo quando você clica (custa uma resposta curta).
+async function ruleFrom(conv, res, tc, what) {
+  const args = parseArgs(tc.function?.arguments) ?? tc.function?.arguments;
+  const proj = projectOf(conv);
+  const ta = h('textarea.textarea', { rows: 3, placeholder: 'Escrevendo uma sugestão...' });
+  const dests = [['system', 'Todas as conversas (prompt de sistema)'], ...(proj ? [['project', `Só o projeto "${proj.name}"`]] : []), ['auditor', 'Política do auditor' + (S.settings.auditor ? '' : ' (desligado)')]];
+  const dest = h('select.select', null, dests.map(([v, l]) => h('option', { value: v }, l)));
+  dest.value = proj ? 'project' : 'system';
+  let m;
+  const save = () => {
+    const rule = ta.value.trim().replace(/^[-*]\s*/, '');
+    if (!rule) { toast('Escreva a regra.', 'err'); return; }
+    const add = (txt) => {
+      const head = 'Regras aprendidas com o usuário:';
+      txt = (txt || '').trimEnd();
+      return txt.includes(head) ? `${txt}\n- ${rule}` : `${txt}${txt ? '\n\n' : ''}${head}\n- ${rule}`;
+    };
+    if (dest.value === 'project' && proj) { proj.instructions = add(proj.instructions); saveProjects(); }
+    else if (dest.value === 'auditor') { S.settings.auditPolicy = add(S.settings.auditPolicy?.trim() || AUDIT_POLICY); store.set('settings', S.settings); }
+    else { S.settings.systemPrompt = add(S.settings.systemPrompt); store.set('settings', S.settings); }
+    m.close(); toast('Regra salva. Vale a partir da próxima mensagem.');
+  };
+  m = modal({ title: 'Transformar em regra', body: h('div.form', null,
+    h('p.muted', { style: { margin: 0 } }, `Você ${what === 'negou' ? 'negou' : 'desfez'} ${tc.function?.name} (${clipText(toolSummary(tc.function?.name, args), 80)}). Uma regra curta evita que isso se repita.`),
+    h('div.field', null, h('label', null, 'Regra'), ta),
+    h('div.field', null, h('label', null, 'Onde vale'), dest, h('small', null, 'No prompt ou no projeto, o modelo evita a ação. No auditor, ela passa a exigir sua aprovação.'))),
+  foot: [h('button.btn', { onclick: () => m.close() }, 'Cancelar'), h('button.btn.primary', { onclick: save }, 'Salvar regra')] });
+  const lastUser = [...conv.messages].reverse().find((x) => x.role === 'user' && !x.hidden);
+  const fallback = `Não use ${tc.function?.name} para "${clipText(toolSummary(tc.function?.name, args), 60)}" sem perguntar antes.`;
+  try {
+    const r = await sideAsk(conv, 'Você transforma uma correção do usuário numa regra curta para um agente de IA. Escreva UMA regra no imperativo, em português, com no máximo 25 palavras, generalizando o que o usuário não quer (não cite valores únicos se uma regra geral servir). Responda só com a regra, sem aspas.',
+      `Pedido do usuário: ${clipText(lastUser ? plainOf(lastUser) : '', 600)}\nAção do agente: ${tc.function?.name} ${clipText(JSON.stringify(args), 1200)}\nO usuário ${what === 'negou' ? 'negou a execução' : 'desfez o resultado'} dessa ação.`, { maxTokens: 80 });
+    if (!ta.value) ta.value = r.split('\n')[0].replace(/^["'“]|["'”]$/g, '') || fallback;
+  } catch { if (!ta.value) ta.value = fallback; }
+  ta.placeholder = '';
+}
+
+/* ------------------------------------------------------------ habilidade a partir da conversa */
+function transcriptOf(c, limit = 14000) {
+  const out = [];
+  for (const m of c.messages) {
+    if (m.hidden) continue;
+    if (m.role === 'user') out.push(`USUÁRIO: ${clipText(plainOf(m), 1500)}`);
+    else if (m.role === 'assistant') {
+      const t = splitThink(m.content || '').text.trim();
+      if (t) out.push(`AGENTE: ${clipText(t, 700)}`);
+      for (const tc of m.tool_calls || []) {
+        const r = c.messages.find((x) => x.role === 'tool' && x.tool_call_id === tc.id);
+        const st = !r ? '?' : r.status === 'denied' ? 'negada' : r.isError ? 'erro: ' + clipText(r.content, 160) : 'ok';
+        out.push(`  → ${tc.function?.name}(${clipText(tc.function?.arguments, 160)}) = ${st}`);
+      }
+    } else if (m.role === 'error') out.push(`ERRO: ${clipText(m.content, 200)}`);
+  }
+  let t = out.join('\n');
+  if (t.length > limit) t = t.slice(0, limit * 0.35) + '\n[... meio omitido ...]\n' + t.slice(-limit * 0.65);
+  return t;
+}
+async function skillFromConv(c) {
+  if (!c.messages.some((m) => m.role === 'assistant')) { toast('A conversa ainda não tem trabalho para virar habilidade.'); return; }
+  const ac = new AbortController();
+  const m = modal({ title: 'Criar habilidade', body: h('div.gen-wait', null, h('span', { html: svg('loader', 'spin') }), 'Lendo a conversa e escrevendo a habilidade...'), foot: [h('button.btn', { onclick: () => { ac.abort(); m.close(); } }, 'Cancelar')] });
+  try {
+    const out = await sideAsk(c, 'Você escreve habilidades (SKILL.md) para um agente de IA local a partir de uma conversa que deu certo. Extraia o procedimento reutilizável: quando usar, passos na ordem, ferramentas e comandos que funcionaram, armadilhas e erros que apareceram e como foram resolvidos, e como verificar o resultado. Generalize (troque nomes de arquivos e valores específicos por descrições). Seja conciso. Responda exatamente neste formato:\nNOME: nome-em-kebab-case\nDESCRIÇÃO: uma frase dizendo quando usar\n---\n# Título\n(corpo em Markdown)',
+      `Conversa "${c.title}":\n\n${transcriptOf(c)}`, { maxTokens: 1600, temperature: 0.2, signal: ac.signal });
+    m.close();
+    const name = (out.match(/^\s*NOME:\s*(.+)$/mi)?.[1] || c.title).trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50);
+    const description = (out.match(/^\s*DESCRI[CÇ][AÃ]O:\s*(.+)$/mi)?.[1] || '').trim();
+    const i = out.indexOf('\n---');
+    const body = (i >= 0 ? out.slice(i + 4) : out.replace(/^\s*(NOME|DESCRI[CÇ][AÃ]O):.*$/gmi, '')).trim();
+    editSkill(null, { name, description, body });
+  } catch (e) { if (!ac.signal.aborted) { m.close(); toast('Não consegui gerar: ' + e.message, 'err'); } }
+}
+
+/* ------------------------------------------------------------ pré-leitura do projeto */
+// Mapa da pasta montado pelo servidor sem o modelo (milissegundos, em cache por 7 dias).
+// O resumo em linguagem natural é opcional: uma resposta curta, só com o servidor parado à toa.
+S.maps = new Map(); const mapTried = new Set();
+async function ensureMap(conv, refresh) {
+  const ws = wsOf(conv); if (!ws) return null;
+  if (!refresh && S.maps.has(ws)) return S.maps.get(ws);
+  try { const m = await api('/api/projmap', { ws, refresh: !!refresh }); S.maps.set(ws, m); return m; } catch { return null; }
+}
+async function maybeSummarizeMap(conv, force) {
+  if (!conv || (!force && S.settings.projSummary !== true) || S.settings.projMap !== true && !force) return;
+  const ws = wsOf(conv);
+  if (!force && (mapTried.has(ws) || S.runs.size || S.health.status !== 'ok')) return;
+  mapTried.add(ws);
+  const map = await ensureMap(conv);
+  if (!map || (map.summary && !force) || map.files === 0) return;
+  try {
+    const sum = await sideAsk(conv, 'Você recebe o mapa de uma pasta de trabalho (estrutura, tipos de arquivo e o começo de arquivos-chave). Escreva em português, em no máximo 6 linhas curtas: do que se trata, linguagem e ferramentas, onde fica o código principal, como rodar ou compilar se der para saber, e o que parecer importante. Não invente o que o mapa não mostra.',
+      map.text, { maxTokens: 260 });
+    if (sum) { const r = await api('/api/projmap/summary', { ws, summary: sum }); S.maps.set(ws, r); }
+  } catch { /* tenta de novo na próxima abertura */ }
+}
+async function showMap(conv) {
+  const box = h('pre.map-text', null, 'Carregando...');
+  const sum = h('div.map-sum');
+  const fill = (m) => { box.textContent = m?.text || 'Sem mapa.'; sum.textContent = m?.summary || 'Sem resumo ainda.'; meta.textContent = m ? `${m.files} arquivos lidos em ${m.ms} ms · ${new Date(m.built).toLocaleString('pt-BR')}` : ''; };
+  const meta = h('small.muted');
+  const m = modal({ title: 'Mapa da pasta', wide: true, body: h('div.form', null,
+    h('p.muted', { style: { margin: 0 } }, 'O que o modelo recebe sobre esta pasta no começo de cada conversa. Montado sem o modelo; o resumo é opcional.'),
+    h('div.field', null, h('label', null, 'Resumo'), sum), h('div.field', null, h('label', null, 'Estrutura'), box), meta),
+  foot: [
+    h('button.btn', { onclick: async () => { fill(await ensureMap(conv, true)); toast('Mapa atualizado'); } }, ic('refresh'), 'Ler de novo'),
+    h('button.btn', { onclick: async (e) => { e.currentTarget.disabled = true; sum.textContent = 'Resumindo...'; await maybeSummarizeMap(conv, true); fill(S.maps.get(wsOf(conv))); e.currentTarget.disabled = false; } }, ic('sparkles'), 'Resumir com o modelo'),
+    h('button.btn.primary', { onclick: () => m.close() }, 'Fechar')] });
+  fill(await ensureMap(conv));
+}
+
+/* ------------------------------------------------------------ caderno de investigação */
+// Cartões por pasta de trabalho (todas as conversas da mesma pasta dividem o caderno).
+const NB = new Map();
+const NB_STATUS = ['hipótese', 'confirmado', 'descartado'];
+function nbKey(conv) { const ws = (wsOf(conv) || 'geral').toLowerCase(); let x = 5381; for (let i = 0; i < ws.length; i++) x = ((x * 33) ^ ws.charCodeAt(i)) >>> 0; return 'ws-' + x.toString(36); }
+async function nbLoad(key) {
+  if (!NB.has(key)) {
+    const r = await api('/api/notebook', { key });
+    const cards = Array.isArray(r.cards) ? r.cards : [];
+    NB.set(key, { cards, next: r.next || cards.reduce((a, c) => Math.max(a, c.id), 0) + 1 });
+  }
+  return NB.get(key);
+}
+async function nbSave(key) {
+  const nb = NB.get(key);
+  await api('/api/notebook/save', { key, cards: nb.cards, next: nb.next });
+  if (S.wsTab === 'notebook') drawNotebook();
+}
+const nbLine = (c) => `#${c.id} [${c.status || 'hipótese'}]${c.kind ? ' ' + c.kind : ''}${c.addr ? ' ' + c.addr : ''} — ${c.title}`;
+async function notebookTool(conv, a) {
+  if (typeof a === 'string') a = parseArgs(a) || {};
+  a = a || {};
+  const key = nbKey(conv); const nb = await nbLoad(key);
+  const id = a.id != null ? Number(String(a.id).replace(/^#/, '')) : null;
+  const card = id != null ? nb.cards.find((c) => c.id === id) : null;
+  const fields = ['title', 'kind', 'addr', 'status', 'text'];
+  const ok = (content) => ({ content, isError: false });
+  const err = (content) => ({ content: 'Erro: ' + content, isError: true });
+  switch (a.action) {
+    case 'list': {
+      const q = String(a.query || '').toLowerCase();
+      const hits = nb.cards.filter((c) => !q || fields.some((f) => String(c[f] || '').toLowerCase().includes(q)));
+      if (!nb.cards.length) return ok('O caderno está vazio.');
+      if (!hits.length) return ok(`Nada encontrado para "${a.query}" (${nb.cards.length} cartões no caderno).`);
+      return ok(`${hits.length} de ${nb.cards.length} cartões (use get com o id para ler o texto):\n` + hits.slice(-80).map(nbLine).join('\n'));
+    }
+    case 'get': return card ? ok(nbLine(card) + (card.text ? '\n\n' + card.text : '')) : err(`não existe o cartão #${id}.`);
+    case 'add': {
+      if (!a.title) return err('informe title.');
+      // mesmo endereço e tipo: atualiza em vez de duplicar
+      const dup = a.addr && nb.cards.find((c) => c.addr && c.addr.toLowerCase() === String(a.addr).toLowerCase() && (c.kind || '') === (a.kind || ''));
+      if (dup) { for (const f of fields) if (a[f] != null && a[f] !== '') dup[f] = String(a[f]); dup.at = Date.now(); await nbSave(key); return ok(`Já existia o cartão #${dup.id} para ${a.addr}; atualizado.`); }
+      const c = { id: nb.next++, at: Date.now(), conv: conv.id, status: 'hipótese' };
+      for (const f of fields) if (a[f] != null && a[f] !== '') c[f] = String(a[f]);
+      if (!NB_STATUS.includes(c.status)) c.status = 'hipótese';
+      nb.cards.push(c); await nbSave(key);
+      return ok(`Cartão #${c.id} criado.`);
+    }
+    case 'update': {
+      if (!card) return err(`não existe o cartão #${id}.`);
+      for (const f of fields) if (a[f] != null) card[f] = String(a[f]);
+      card.at = Date.now(); await nbSave(key);
+      return ok(`Cartão #${card.id} atualizado: ${nbLine(card)}`);
+    }
+    case 'remove': {
+      if (!card) return err(`não existe o cartão #${id}.`);
+      nb.cards = nb.cards.filter((c) => c !== card); await nbSave(key);
+      return ok(`Cartão #${id} removido.`);
+    }
+    default: return err('action deve ser list, get, add, update ou remove.');
+  }
+}
+async function editCard(conv, card) {
+  const key = nbKey(conv); const nb = await nbLoad(key);
+  const title = h('input.input', { value: card?.title || '', placeholder: 'Ex.: verifica a licença' });
+  const kind = h('input.input', { value: card?.kind || '', placeholder: 'função, endereço, string...', list: 'nb-kinds' });
+  const addr = h('input.input.mono', { value: card?.addr || '', placeholder: '0x401000' });
+  const status = h('select.select', null, NB_STATUS.map((x) => h('option', { value: x }, x))); status.value = card?.status || 'hipótese';
+  const text = h('textarea.textarea', { rows: 6, value: card?.text || '' });
+  const m = modal({ title: card ? `Cartão #${card.id}` : 'Novo cartão', body: h('div.form', null,
+    h('datalist#nb-kinds', null, ['função', 'endereço', 'string', 'estrutura', 'hipótese', 'achado'].map((k) => h('option', { value: k }))),
+    h('div.field', null, h('label', null, 'Título'), title),
+    h('div.row', null, h('div.field', null, h('label', null, 'Tipo'), kind), h('div.field', null, h('label', null, 'Endereço ou local'), addr), h('div.field', null, h('label', null, 'Situação'), status)),
+    h('div.field', null, h('label', null, 'Anotações'), text)),
+  foot: [h('button.btn', { onclick: () => m.close() }, 'Cancelar'), h('button.btn.primary', { onclick: async () => {
+    if (!title.value.trim()) { toast('Dê um título.', 'err'); return; }
+    const c = card || { id: nb.next++, conv: conv.id };
+    Object.assign(c, { title: title.value.trim(), kind: kind.value.trim(), addr: addr.value.trim(), status: status.value, text: text.value, at: Date.now() });
+    if (!card) nb.cards.push(c);
+    await nbSave(key); m.close();
+  } }, 'Salvar')] });
+  setTimeout(() => title.focus(), 30);
+}
+function nbExport(conv, nb, kind) {
+  let text; let name;
+  if (kind === 'x64dbg') {
+    const q = (t) => String(t).replace(/"/g, "'");
+    const lines = nb.cards.filter((c) => /^(0x)?[0-9a-f]{4,16}$/i.test(c.addr || '') && c.status !== 'descartado')
+      .map((c) => `${/fun[cç]/i.test(c.kind || '') ? 'lbl' : 'cmt'} ${c.addr.startsWith('0x') ? c.addr : '0x' + c.addr}, "${q(c.title)}"`);
+    if (!lines.length) { toast('Nenhum cartão com endereço em hexadecimal.'); return; }
+    text = lines.join('\n') + '\n'; name = 'caderno-x64dbg.txt';
+  } else {
+    const by = (st) => nb.cards.filter((c) => (c.status || 'hipótese') === st);
+    text = `# Caderno de investigação\n\nPasta: ${wsOf(conv)}\n`;
+    for (const st of NB_STATUS) {
+      const cs = by(st); if (!cs.length) continue;
+      text += `\n## ${st[0].toUpperCase() + st.slice(1)}\n`;
+      for (const c of cs) text += `\n### #${c.id} ${c.title}\n${[c.kind && `- Tipo: ${c.kind}`, c.addr && `- Local: \`${c.addr}\``].filter(Boolean).join('\n')}\n${c.text ? '\n' + c.text + '\n' : ''}`;
+    }
+    name = 'caderno.md';
+  }
+  navigator.clipboard?.writeText(text).catch(() => {});
+  api('/api/ws/upload?name=' + encodeURIComponent(name) + '&ws=' + encodeURIComponent(wsOf(conv)), new Blob([text]))
+    .then((r) => { toast(`Copiado e salvo em ${relOf(r.path)}`); refreshTree(); })
+    .catch((e) => toast(e.message, 'err'));
+}
+S.nbQuery = '';
+async function drawNotebook() {
+  const box = $('#ws-notebook'); if (!box || box.hidden) return;
+  const c = cur() || { id: 'none', messages: [] };
+  const key = nbKey(c);
+  let nb;
+  try { nb = await nbLoad(key); } catch (e) { box.innerHTML = ''; box.append(h('div.act-empty', null, 'Erro: ' + e.message)); return; }
+  const keep = box.scrollTop;
+  box.innerHTML = '';
+  const q = S.nbQuery.toLowerCase();
+  const search = h('input.input.nb-search', { value: S.nbQuery, placeholder: 'Filtrar cartões', oninput: (e) => { S.nbQuery = e.target.value; clearTimeout(drawNotebook._t); drawNotebook._t = setTimeout(() => { drawNotebook().then(() => { const i = $('.nb-search'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }); }, 150); } });
+  box.append(h('div.nb-top', null, search,
+    h('button.icon-btn.sm', { title: 'Novo cartão', 'aria-label': 'Novo cartão', html: svg('plus'), onclick: () => editCard(c) }),
+    h('button.icon-btn.sm', { title: 'Exportar', 'aria-label': 'Exportar', html: svg('download'), onclick: (e) => { const r = e.currentTarget.getBoundingClientRect(); floatMenu(r.left - 140, r.bottom + 4, [{ label: 'Markdown (caderno.md)', icon: 'fileText', onclick: () => nbExport(c, nb, 'md') }, { label: 'Script de rótulos do x64dbg', icon: 'terminal', onclick: () => nbExport(c, nb, 'x64dbg') }]); } })));
+  const list = nb.cards.filter((x) => !q || ['title', 'kind', 'addr', 'text', 'status'].some((f) => String(x[f] || '').toLowerCase().includes(q))).sort((a, b) => (b.at || 0) - (a.at || 0));
+  if (!nb.cards.length) { box.append(h('div.act-empty', null, ic('book'), 'O caderno desta pasta está vazio. O modelo registra aqui o que descobrir (com a ferramenta Caderno ligada), e você também pode anotar.')); return; }
+  const counts = NB_STATUS.map((st) => [st, nb.cards.filter((x) => (x.status || 'hipótese') === st).length]);
+  box.append(h('div.nb-counts', null, counts.map(([st, n]) => h('span.nb-st.st-' + st.normalize('NFD').replace(/[\u0300-\u036f]/g, ''), null, `${n} ${st}${n === 1 ? '' : 's'}`))));
+  for (const card of list) {
+    const st = (card.status || 'hipótese');
+    box.append(h('div.nb-card.st-' + st.normalize('NFD').replace(/[\u0300-\u036f]/g, ''), { onclick: () => editCard(c, card) },
+      h('div.nb-h', null,
+        h('button.nb-st', { title: 'Trocar a situação', onclick: async (e) => { e.stopPropagation(); card.status = NB_STATUS[(NB_STATUS.indexOf(st) + 1) % 3]; card.at = Date.now(); await nbSave(key); } }, st),
+        card.kind ? h('span.nb-kind', null, card.kind) : null,
+        card.addr ? h('code.nb-addr', null, card.addr) : null,
+        h('span.nb-id', null, '#' + card.id)),
+      h('div.nb-title', null, card.title),
+      card.text ? h('div.nb-text', null, card.text) : null));
+  }
+  box.scrollTop = keep;
 }
 
 /* ------------------------------------------------------------ alterações (aba Atividade) */

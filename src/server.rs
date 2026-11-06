@@ -130,6 +130,10 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/slots/{*rest}", any(proxy))
         .route("/api/kvcache/prune", post(kv_prune))
         .route("/api/checkpoints", post(cp_list))
+        .route("/api/projmap", post(projmap_get))
+        .route("/api/projmap/summary", post(projmap_summary))
+        .route("/api/notebook", post(nb_get))
+        .route("/api/notebook/save", post(nb_put))
         .route("/api/checkpoints/undo", post(cp_undo))
         .route("/api/checkpoints/diff", post(cp_diff))
         .route("/api/img", post(img_data))
@@ -753,7 +757,7 @@ async fn tools_search(State(app): S, b: Bytes) -> Res {
 
 async fn context(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
-    ok(json!({"text": tools::build_context(&app, &ws_of(&app, st(&v, "ws")), &strs(&v, "skills"), &groups_of(&v), &strs(&v, "refs"), st(&v, "now"), v.get("lazy").and_then(Value::as_bool).unwrap_or(false))}))
+    ok(json!({"text": tools::build_context(&app, &ws_of(&app, st(&v, "ws")), &strs(&v, "skills"), &groups_of(&v), &strs(&v, "refs"), st(&v, "now"), v.get("lazy").and_then(Value::as_bool).unwrap_or(false), v.get("map").and_then(Value::as_bool).unwrap_or(false))}))
 }
 
 async fn tools_call(State(app): S, b: Bytes) -> Res {
@@ -950,6 +954,30 @@ async fn engines_cancel(State(app): S, b: Bytes) -> Res {
 // ---------------------------------------------------------------- cache das conversas em disco
 
 /// Apaga os caches de conversa mais antigos (mantém `keep`) e os de `drop` (conversas apagadas).
+async fn projmap_get(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let ws = ws_of(&app, st(&v, "ws"));
+    let refresh = v["refresh"] == true;
+    let r = tokio::task::spawn_blocking({ let app = app.clone(); move || crate::projmap::get(&app, &ws, refresh) }).await.map_err(|e| bad(e.to_string()))?;
+    ok(r)
+}
+
+async fn projmap_summary(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    ok(crate::projmap::set_summary(&app, &ws_of(&app, st(&v, "ws")), st(&v, "summary")))
+}
+
+async fn nb_get(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    ok(crate::projmap::nb_load(&app, st(&v, "key")))
+}
+
+async fn nb_put(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    crate::projmap::nb_save(&app, st(&v, "key"), &json!({"cards": v["cards"], "next": v["next"]})).map_err(bad)?;
+    ok(json!({"ok": true}))
+}
+
 async fn cp_list(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     ok(crate::checkpoint::list(&app, st(&v, "conv")))

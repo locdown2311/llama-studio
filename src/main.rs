@@ -20,6 +20,7 @@ mod engines;
 mod hf;
 mod mcp;
 mod models;
+mod projmap;
 mod server;
 mod skills;
 mod tools;

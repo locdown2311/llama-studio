@@ -58,6 +58,9 @@ O instalador não pede administrador: instala em `%LOCALAPPDATA%\Programs\Llama 
 - **Pontos de restauração**: antes de cada escrita ou edição, o arquivo é guardado. Dá para desfazer uma alteração pelo card da ferramenta ou usar "Voltar até aqui" numa mensagem, que desfaz tudo o que veio depois.
 - **Modo plano**: o modelo só investiga e propõe um plano, sem alterar nada. Um botão executa o plano quando você aprovar.
 - **Leituras em paralelo**: leituras pedidas no mesmo passo rodam juntas, no agente e nos subagentes.
+- **Correções viram regras**: ao negar uma ação ou desfazer uma alteração, o botão "Virar regra" propõe uma regra curta, que você guarda no prompt, no projeto ou na política do auditor.
+- **Caderno de investigação**: o modelo registra achados (funções, endereços, strings, hipóteses) em cartões por pasta de trabalho e consulta antes de repetir trabalho. Exporta em Markdown ou como script de rótulos do x64dbg.
+- **Habilidade a partir da conversa**: transforma uma conversa que deu certo num `SKILL.md` para revisar e salvar.
 - **Aprovação de ações** que alteram algo (sempre, só escrita ou nunca).
 - **Auditor de ações**: um subagente lê cada ação que pediria permissão junto com o seu pedido, avalia o risco segundo uma política editável e aprova sozinho o que é seguro. O resto chega para você com a análise dele.
 

@@ -78,6 +78,8 @@ const DEFS: &[Def] = &[
     // ---------------- busca
     d("recall_history", "history", false, true, "Procura nas conversas anteriores (ou só na atual) trechos sobre um assunto. Use quando o usuário se referir a algo já conversado.",
       r#"{"type":"object","properties":{"query":{"type":"string"},"scope":{"type":"string","enum":["todas","atual"]},"limit":{"type":"integer"}},"required":["query"]}"#),
+    d("notebook", "notebook", false, true, "Caderno do projeto com achados duradouros. list (query opcional), get (id), add (title), update (id + campos), remove (id).",
+      r#"{"type":"object","properties":{"action":{"type":"string","enum":["list","get","add","update","remove"]},"query":{"type":"string"},"id":{"type":"integer"},"title":{"type":"string"},"kind":{"type":"string","description":"função, endereço, string, hipótese..."},"addr":{"type":"string","description":"ex.: 0x401000"},"status":{"type":"string","enum":["hipótese","confirmado","descartado"]},"text":{"type":"string"}},"required":["action"]}"#),
     d("update_todos", "todo", false, true, "Mantém a lista de tarefas desta conversa, visível para o usuário. Use em tarefas com 3 ou mais passos: crie a lista no começo e atualize ao começar (in_progress) e terminar (done) cada item. Mande sempre a lista inteira; só um item in_progress por vez.",
       r#"{"type":"object","properties":{"todos":{"type":"array","items":{"type":"object","properties":{"text":{"type":"string","description":"O que fazer, curto e no imperativo"},"status":{"type":"string","enum":["pending","in_progress","done"]}},"required":["text","status"]}}},"required":["todos"]}"#),
     d("search_tools", "toolsearch", false, true, "Ativa ferramentas de conectores MCP para os próximos passos: passe os nomes exatos do catálogo em names, ou palavras-chave em query.",
@@ -260,7 +262,7 @@ pub fn search_tools(app: &App, q: &str, names: &[String]) -> Value {
     json!({"tools": found.into_iter().take(max).map(|(_, v)| v).collect::<Vec<_>>()})
 }
 
-pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[String], refs: &[String], now: &str, lazy: bool) -> String {
+pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[String], refs: &[String], now: &str, lazy: bool, map: bool) -> String {
     let has = |g: &str| groups.iter().any(|x| x == g);
     let mut parts = vec![];
     if !now.is_empty() {
@@ -295,6 +297,15 @@ pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[Strin
     }
     if has("todo") {
         parts.push("Tarefas com vários passos: comece criando a lista com update_todos e mantenha-a atualizada; ela mostra ao usuário o que já foi feito e o que falta. Não termine com itens pendentes sem explicar por quê.".into());
+    }
+    if has("notebook") {
+        parts.push("Caderno de investigação: registre com notebook o que descobrir de duradouro (endereços, funções, hipóteses e se foram confirmadas) e consulte com notebook list antes de refazer uma investigação.".into());
+    }
+    if map && (has("read") || has("shell")) {
+        let m = crate::projmap::context_text(app, ws);
+        if !m.is_empty() {
+            parts.push(m);
+        }
     }
     if has("explore") {
         parts.push("Para investigações longas, delegue a subagentes com a ferramenta explore (vários em paralelo, se fizer sentido) e trabalhe com os relatórios.".into());

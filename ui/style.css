@@ -1289,3 +1289,27 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .set-desc { margin: -8px 0 0; color: var(--muted); font-size: 13px; }
 .set-sec .tcard .tc-desc { white-space: normal; overflow: visible; display: block; }
 .set-sec .tgrid { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+
+/* caderno de investigação */
+.nb-top { display: flex; gap: 6px; align-items: center; position: sticky; top: 0; background: var(--side); padding: 4px 0 8px; z-index: 2; }
+.nb-search { height: 32px; font-size: 13px; flex: 1; }
+.nb-counts { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.nb-counts .nb-st { cursor: default; }
+.nb-card { background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--warn); border-radius: 9px; padding: 8px 10px; margin-bottom: 6px; cursor: pointer; }
+.nb-card:hover { border-color: var(--line-2); }
+.nb-card.st-confirmado { border-left-color: var(--ok); }
+.nb-card.st-descartado { border-left-color: var(--line-2); opacity: .7; }
+.nb-card.st-descartado .nb-title { text-decoration: line-through; }
+.nb-h { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); }
+.nb-st { border: 0; font: inherit; font-size: 11px; padding: 1px 7px; border-radius: 10px; background: var(--warn-soft); color: var(--warn); cursor: pointer; }
+.st-confirmado .nb-st, .nb-st.st-confirmado { background: var(--ok-soft); color: var(--ok); }
+.st-descartado .nb-st, .nb-st.st-descartado { background: var(--hover); color: var(--muted); }
+.nb-kind { color: var(--text-2); }
+.nb-addr { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
+.nb-id { margin-left: auto; font-variant-numeric: tabular-nums; }
+.nb-title { font-size: 13px; font-weight: 550; margin-top: 4px; }
+.nb-text { font-size: 12.5px; color: var(--text-2); margin-top: 3px; white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.map-text { font-family: var(--mono); font-size: 12px; background: var(--code-bg, var(--hover)); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; max-height: 340px; overflow: auto; white-space: pre-wrap; margin: 0; }
+.map-sum { font-size: 13.5px; white-space: pre-wrap; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.gen-wait { display: flex; align-items: center; gap: 10px; color: var(--text-2); padding: 8px 0; }
+.gen-wait svg { width: 18px; height: 18px; color: var(--accent); }
