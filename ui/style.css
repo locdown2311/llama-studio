@@ -1306,6 +1306,7 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
   .set-layout { grid-template-columns: minmax(0, 1fr); gap: 14px; }
   .set-nav { flex-direction: row; overflow-x: auto; scrollbar-width: none; background: var(--card); z-index: 5; padding: 4px 0 8px; border-bottom: 1px solid var(--line); }
   .set-nav button { flex: none; }
+  .set-nav-group { display: none; }
 }
 
 /* caderno de investigação */
@@ -1405,4 +1406,14 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .srv-load { display: flex; align-items: center; gap: 10px; padding: 8px 16px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--text-2); flex-wrap: wrap; }
 .srv-load .select.sm { height: 28px; font-size: 12.5px; padding: 0 26px 0 8px; width: auto; }
 .srv-load small { flex: 1; min-width: 200px; }
-.page.settings-page { max-width: 980px; }
+.page.settings-page { max-width: 1180px; }
+.set-nav-group { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 12px 10px 4px; }
+.set-nav-group:first-child { padding-top: 2px; }
+/* páginas de recursos dentro das configurações: sem a moldura de página própria */
+.set-pane .page { max-width: none; padding: 0; margin: 0; }
+.set-pane .page-head { margin-bottom: 18px; }
+.set-pane .page-head h1 { font-size: 18px; font-weight: 600; margin-bottom: 2px; }
+.set-pane .page-head .lead { font-size: 13px; }
+.set-pane .card-form { box-shadow: none; }
+.set-pane > [hidden] { display: none !important; }
+.set-pane .page-head .lead { max-width: none; }

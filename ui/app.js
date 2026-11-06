@@ -387,7 +387,14 @@ function setView(v) {
   S.view = v;
   if (S.sideDrawer) toggleSide(false);
   $$('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === v && v !== 'chat'));
-  $$('.view').forEach((s) => s.classList.toggle('active', s.id === 'view-' + v));
+  const inSet = v === 'settings' || SET_EMBED.some(([id]) => id === v);
+  $$('.view').forEach((s) => s.classList.toggle('active', s.id === (inSet ? 'view-settings' : 'view-' + v)));
+  if (inSet) {
+    $('#settings-form').hidden = v !== 'settings';
+    $$('.set-embed').forEach((e) => { e.hidden = e.dataset.v !== v; });
+    if (v !== 'settings') { if (!SET_PAGES.length) renderSettings(); drawSetNav('v:' + v); }
+    $('#set-pane').scrollTop = 0;
+  }
   if (v === 'skills') renderSkillsPage();
   if (v === 'mcp') renderMcpPage();
   if (v === 'settings') renderSettings();
@@ -4228,7 +4235,6 @@ function setupMcpPage() {
 
 /* ============================================================ configurações */
 function renderSettings() {
-  const f = $('#settings-form'); f.innerHTML = '';
   const st = S.settings;
   // tudo salva sozinho ao mudar; um aviso discreto confirma
   let saveT = 0;
@@ -4319,27 +4325,43 @@ function renderSettings() {
       await api('/api/config', { llamaUrl: v }); S.info.llamaUrl = v; checkHealth(); saved();
     }), 'Muda sozinho quando você salva a página Servidor. Ajuste só se o llama-server roda em outro lugar.'));
 
-  let cur = setPage && pages.some((p) => p.id === setPage) ? setPage : (store.get('setPage') || 'model');
+  SET_PAGES = pages;
+  let cur0 = setPage && pages.some((p) => p.id === setPage) ? setPage : (store.get('setPage') || 'model');
   setPage = null;
-  if (!pages.some((p) => p.id === cur)) cur = pages[0].id;
-  const pane = h('div.set-pane');
-  const nav = h('nav.set-nav', null, pages.map((p) => h('button', { type: 'button', 'data-id': p.id, onclick: () => show(p.id) }, ic(p.icon), h('span', null, p.title))));
-  function show(id) {
-    cur = id; store.set('setPage', id);
-    const p = pages.find((x) => x.id === id);
-    $$('button', nav).forEach((b) => b.classList.toggle('on', b.dataset.id === id));
-    pane.innerHTML = '';
-    pane.append(h('section.set-sec', { id: 'set-' + id }, h('h2.set-title', null, p.title), p.desc ? h('p.set-desc', null, p.desc) : null, ...p.body));
-    pane.scrollTop = 0;
-    $('button.on', nav)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }
-  f.classList.add('set-layout');
-  f.append(nav, pane);
-  show(cur);
+  if (!pages.some((p) => p.id === cur0)) cur0 = 'model';
+  showSetPage(cur0);
 }
-/** Abre as configurações já numa subpágina. */
+
+/* As configurações são um painel só: as subpáginas de ajuste e as páginas de recursos (servidor,
+   conectores, habilidades...) ficam no mesmo menu. Os itens da barra lateral são atalhos para elas. */
+const SET_EMBED = [['server', 'Servidor', 'server'], ['mcp', 'Conectores', 'plug'], ['skills', 'Habilidades', 'sparkles'], ['personas', 'Personalidades', 'user'], ['tools', 'Utilitários', 'wrench']];
+const SET_GROUPS = [['Geral', ['set:model', 'set:tools', 'set:auto', 'set:context']], ['Recursos', ['v:server', 'v:mcp', 'v:skills', 'v:personas', 'v:tools']], ['Segurança', ['set:safety', 'set:auditor']], ['Sistema', ['set:look', 'set:window', 'set:share', 'set:updates', 'set:advanced']]];
+let SET_PAGES = [];
 let setPage = null;
 function openSettings(page) { setPage = page; setView('settings'); }
+function showSetPage(id) {
+  const p = SET_PAGES.find((x) => x.id === id); if (!p) return;
+  store.set('setPage', id);
+  const f = $('#settings-form'); f.innerHTML = '';
+  f.append(h('section.set-sec', { id: 'set-' + id }, h('h2.set-title', null, p.title), p.desc ? h('p.set-desc', null, p.desc) : null, ...p.body));
+  $('#set-pane').scrollTop = 0;
+  drawSetNav('set:' + id);
+}
+function drawSetNav(active) {
+  const nav = $('#set-nav'); nav.innerHTML = '';
+  for (const [title, keys] of SET_GROUPS) {
+    const items = keys.map((key) => {
+      const [kind, id] = key.split(':');
+      if (kind === 'v') { const [, t, icon] = SET_EMBED.find(([v]) => v === id); return { key, t, icon, go: () => setView(id) }; }
+      const p = SET_PAGES.find((x) => x.id === id);
+      return p && { key, t: p.title, icon: p.icon, go: () => { if (S.view !== 'settings') openSettings(id); else showSetPage(id); } };
+    }).filter(Boolean);
+    if (!items.length) continue;
+    nav.append(h('div.set-nav-group', null, title));
+    for (const it of items) nav.append(h('button', { type: 'button', class: it.key === active ? 'on' : '', dataset: { id: it.key }, onclick: it.go }, ic(it.icon), h('span', null, it.t)));
+  }
+  $('button.on', nav)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
 
 /* ============================================================ servidor (llama-server) */
 async function startLlama() {
@@ -5840,6 +5862,12 @@ function initWsTabs() {
 
 async function init() {
   applyTheme();
+  for (const [v] of SET_EMBED) {
+    const sec = $('#view-' + v); const page = sec?.querySelector('.page');
+    if (!page) continue;
+    $('#set-pane').append(h('div.set-embed', { dataset: { v }, hidden: true }, page));
+    sec.remove();
+  }
   const navIcons = { chat: 'chat', skills: 'sparkles', mcp: 'plug', personas: 'user', tools: 'wrench', server: 'server', settings: 'gear', calendar: 'calendar' };
   const navLabels = { chat: 'Nova conversa', skills: 'Habilidades', mcp: 'Conectores', personas: 'Personalidades', tools: 'Utilitários', server: 'Servidor', settings: 'Configurações', calendar: 'Calendário' };
   $$('.nav-item').forEach((b) => {
