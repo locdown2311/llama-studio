@@ -5,9 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>llama studio</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%235b5bd6'/%3E%3Cpath d='M11 23V9h3v11h7v3z' fill='white'/%3E%3C/svg%3E">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
 <script src="/vendor/marked.js"></script>
 <script src="/vendor/purify.js"></script>
@@ -15,6 +12,8 @@
 </head>
 <body>
 <div id="app">
+  <button class="square-btn" id="side-btn" title="Menu" aria-label="Abrir o menu"></button>
+  <div id="scrim" hidden></div>
   <aside id="side">
     <div class="side-top">
       <div class="logo"><span class="logo-mark">L</span>llama studio</div>
@@ -120,6 +119,7 @@
         <div class="ws-actions">
           <button class="icon-btn sm" id="ws-refresh" title="Atualizar" aria-label="Atualizar"></button>
           <button class="icon-btn sm" id="ws-open" title="Abrir no Explorer" aria-label="Abrir no Explorer"></button>
+          <button class="icon-btn sm" id="ws-close" title="Fechar" aria-label="Fechar o painel"></button>
         </div>
       </div>
       <button class="ws-path" id="ws-path" title="Trocar a pasta"></button>

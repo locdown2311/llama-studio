@@ -47,6 +47,7 @@ const ICONS = {
   braces: '<path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1M16 21h1a2 2 0 0 0 2-2v-5a2 2 0 0 1 2-2 2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"/>',
   home: '<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   ban: '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
+  menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   tag: '<path d="M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
   shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>',
   book: '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>',
@@ -377,6 +378,7 @@ function applyTheme() {
 /* ============================================================ navegação */
 function setView(v) {
   S.view = v;
+  if (S.sideDrawer) toggleSide(false);
   $$('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === v && v !== 'chat'));
   $$('.view').forEach((s) => s.classList.toggle('active', s.id === 'view-' + v));
   if (v === 'skills') renderSkillsPage();
@@ -437,6 +439,7 @@ function newConv(projectId) {
 }
 
 function selectConv(id) {
+  if (S.sideDrawer) toggleSide(false);
   const prev = kitModelId();
   S.curId = id; saveConvs(); closeMention?.();
   const next = kitModelId();
@@ -3580,87 +3583,65 @@ function setupMcpPage() {
 function renderSettings() {
   const f = $('#settings-form'); f.innerHTML = '';
   const st = S.settings;
-  const llama = h('input.input.mono', { value: S.info.llamaUrl || '' });
-  const sys = h('textarea.textarea', { rows: 5, value: st.systemPrompt, placeholder: 'Ex.: Responda sempre em português do Brasil, de forma direta.' });
-  const temp = h('input.input', { value: st.temperature, placeholder: 'padrão do servidor', inputmode: 'decimal' });
-  const topP = h('input.input', { value: st.topP, placeholder: 'padrão do servidor', inputmode: 'decimal' });
-  const maxT = h('input.input', { value: st.maxTokens, placeholder: 'sem limite', inputmode: 'numeric' });
-  const steps = h('input.input', { value: st.maxSteps, inputmode: 'numeric' });
-  let approval = st.approval; let theme = st.theme;
-  const seg = (opts, get, set) => {
-    const el = h('div.seg', null, opts.map(([v, l]) => h('button', { type: 'button', class: get() === v ? 'on' : '', onclick: () => { set(v); $$('button', el).forEach((b, i) => b.classList.toggle('on', opts[i][0] === v)); } }, l)));
+  // tudo salva sozinho ao mudar; um aviso discreto confirma
+  let saveT = 0;
+  const saved = () => { clearTimeout(saveT); saveT = setTimeout(() => toast('Salvo'), 250); };
+  const put = (patch) => { Object.assign(S.settings, patch); store.set('settings', S.settings); saved(); };
+  const input = (cls, attrs, onSave) => { const x = h(cls, attrs); x.addEventListener('change', () => onSave(x)); return x; };
+  const seg = (opts, cur0, set) => {
+    let cur1 = cur0;
+    const el = h('div.seg', null, opts.map(([v, l]) => h('button', { type: 'button', class: cur1 === v ? 'on' : '', onclick: () => { cur1 = v; set(v); $$('button', el).forEach((b, i) => b.classList.toggle('on', opts[i][0] === v)); } }, l)));
     return el;
   };
-  const think = h('input', { type: 'checkbox', checked: st.showThinking });
-  const gpu = h('input', { type: 'checkbox', checked: !!S.info.windowGpu });
-  const tray = h('input', { type: 'checkbox', checked: S.info.closeToTray !== false });
-  for (const c of [gpu, tray]) c.addEventListener('change', () => { c.nextElementSibling.style.background = c.checked ? 'var(--accent)' : ''; });
+  const sw = (title, desc, checked, onChange) => {
+    const i = h('input', { type: 'checkbox', checked: !!checked });
+    i.addEventListener('change', () => onChange(i.checked));
+    return h('label.tcard', null, h('span.tc-main', null, h('span.tc-title', null, title), desc ? h('span.tc-desc', { title: desc }, desc) : null), h('span.switch', null, i, h('span')));
+  };
+  const field = (label, ctl, hint) => h('div.field', null, h('label', null, label), ctl, hint ? h('small', null, hint) : null);
+  const sections = [];
+  const section = (id, title, desc, ...body) => { sections.push([id, title]); return h('section.set-sec', { id: 'set-' + id }, h('div.section-title' + (id === 'tools' ? '#tools-section' : ''), null, title), desc ? h('p.set-desc', null, desc) : null, ...body.flat().filter(Boolean)); };
 
+  // ferramentas
   const groupsBySec = {};
   for (const g of ['browser', 'computer', 'read', 'edit', 'write', 'shell', 'code', 'history', 'toolsearch', 'explore']) (groupsBySec[TOOL_INFO[g].sec] ||= []).push(g);
-  const toolCards = Object.entries(groupsBySec).map(([sec, gs]) => [
-    h('div.tsec', null, sec),
-    h('div.tgrid', null, gs.map((g) => {
-      const i = h('input', { type: 'checkbox', checked: !!S.settings.tools[g] });
-      i.addEventListener('change', () => { S.settings.tools[g] = i.checked; store.set('settings', S.settings); saveKit(); updatePickers(); });
-      return h('label.tcard', { title: TOOL_INFO[g].desc }, h('span.tc-main', null, h('span.tc-title', null, TOOL_INFO[g].title), h('span.tc-desc', null, TOOL_INFO[g].desc)), h('span.switch', null, i, h('span')));
-    })),
-  ]);
-  let vision = st.vision;
-  f.append(
-    h('div.section-title#tools-section', null, 'Ferramentas'),
-    h('p.muted', { style: { margin: '-4px 0 0', fontSize: '13px' } }, 'O que o modelo pode usar. Ações que mudam algo pedem permissão, conforme a opção mais abaixo.'),
-    ...toolCards.flat(),
-    h('div.field', null, h('label', null, 'Enviar imagens (capturas) ao modelo'), seg([['auto', `Automático (${S.vision ? 'o modelo tem visão' : 'sem visão detectada'})`], ['on', 'Sempre'], ['off', 'Nunca']], () => vision, (v) => { vision = v; S.settings.vision = v; store.set('settings', S.settings); })),
-    h('div.field', null, h('label', null, 'Passos de cada subagente'), (() => { const x = h('input.input', { value: st.explorerSteps, inputmode: 'numeric', style: { maxWidth: '120px' } }); x.addEventListener('change', () => { S.settings.explorerSteps = Number(x.value) || 20; store.set('settings', S.settings); }); return x; })()),
-    h('div.section-title', null, 'Atualizações'),
-    updateSection(),
-    h('div.section-title', null, 'Contexto'),
-    (() => {
-      const i = h('input', { type: 'checkbox', checked: !!st.autoCompact });
-      i.addEventListener('change', () => { S.settings.autoCompact = i.checked; store.set('settings', S.settings); });
-      return h('label.tcard', null, h('span.tc-main', null, h('span.tc-title', null, 'Compactar automaticamente'), h('span.tc-desc', null, `Resume a conversa quando passar de ${st.compactAt}% do contexto${S.nCtx ? ` (${S.nCtx.toLocaleString('pt-BR')} tokens)` : ''}.`)), h('span.switch', null, i, h('span')));
-    })(),
-    h('div.row', null,
-      h('div.field', null, h('label', null, 'Compactar ao chegar em'), (() => {
-        const sl = slider({ min: 30, max: 95, step: 5, fmt: (v) => v + '% do contexto' }, st.compactAt, { optional: false });
-        sl.el.addEventListener('change', () => { S.settings.compactAt = Number(sl.get()); store.set('settings', S.settings); });
-        return sl.el;
-      })()),
-      h('div.field', null, h('label', null, 'O que resumir'), (() => {
-        const x = h('select.select', null, h('option', { value: 'meio' }, 'O meio: mantém o primeiro pedido e o final'), h('option', { value: 'inicio' }, 'O começo: mantém só o final'));
-        x.value = st.compactMode || 'meio';
-        x.addEventListener('change', () => { S.settings.compactMode = x.value; store.set('settings', S.settings); });
-        return x;
-      })(), h('small', null, 'No modo "meio" o pedido que abriu a conversa nunca é resumido, então o modelo não perde o objetivo.'))),
-    h('div.section-title', null, 'Servidor'),
-    h('div.field', null, h('label', null, 'Endereço do llama-server'), llama, h('small', null, 'Muda sozinho quando você salva a página Servidor. Ajuste aqui só se o llama-server roda em outro lugar.')),
-    h('div.section-title', null, 'Modelo'),
-    h('div.field', null, h('label', null, 'Prompt de sistema'), sys, h('small', null, 'Vai antes das informações do espaço de trabalho e das habilidades.')),
-    h('div.row', null,
-      h('div.field', null, h('label', null, 'Temperatura'), temp),
-      h('div.field', null, h('label', null, 'Top P'), topP),
-      h('div.field', null, h('label', null, 'Máximo de tokens'), maxT)),
-    h('div.section-title', null, 'Ferramentas'),
-    h('div.field', null, h('label', null, 'Pedir confirmação antes de'), seg([['writes', 'Alterar arquivos'], ['all', 'Qualquer ferramenta'], ['never', 'Nunca perguntar']], () => approval, (v) => { approval = v; })),
-    auditorSection(),
-    h('div.field', null, h('label', null, 'Passos com ferramentas por resposta'), steps, h('small', null, 'Limite de rodadas de ferramenta antes de o modelo parar.')),
-    S.info.native ? h('div.section-title', null, 'Janela') : null,
-    S.info.native ? h('label.opt', { style: { padding: '4px 0' } }, gpu, h('span.check', { html: svg('check'), style: { background: gpu.checked ? 'var(--accent)' : '' } }), h('span.opt-main', null, h('span.opt-title', null, 'Usar a placa de vídeo para desenhar a janela'), h('span.opt-desc', null, 'Desligado, a janela não ocupa VRAM do modelo. Vale na próxima vez que a janela abrir.'))) : null,
-    S.info.native ? h('label.opt', { style: { padding: '4px 0' } }, tray, h('span.check', { html: svg('check'), style: { background: tray.checked ? 'var(--accent)' : '' } }), h('span.opt-main', null, h('span.opt-title', null, 'Fechar a janela deixa o studio na bandeja'), h('span.opt-desc', null, 'A janela é destruída e a memória dela volta para o sistema.'))) : null,
-    h('div.section-title', null, 'Aparência'),
-    h('div.field', null, h('label', null, 'Tema'), seg([['auto', 'Automático'], ['dark', 'Escuro'], ['light', 'Claro']], () => theme, (v) => { theme = v; S.settings.theme = v; applyTheme(); })),
-    h('label.opt', { style: { padding: '4px 0' } }, think, h('span.check', { html: svg('check'), style: { background: think.checked ? 'var(--accent)' : '' } }), h('span.opt-main', null, h('span.opt-title', null, 'Mostrar o raciocínio do modelo'))),
-    h('div.form-foot', null, h('button.btn.primary', { type: 'button', onclick: async () => {
-      Object.assign(S.settings, { systemPrompt: sys.value, temperature: temp.value.trim(), topP: topP.value.trim(), maxTokens: maxT.value.trim(), maxSteps: Number(steps.value) || 30, approval, theme, showThinking: think.checked });
-      store.set('settings', S.settings);
-      if (S.info.native) { await api('/api/config', { windowGpu: gpu.checked, closeToTray: tray.checked }); S.info.windowGpu = gpu.checked; S.info.closeToTray = tray.checked; }
-      if (llama.value.trim() && llama.value.trim() !== S.info.llamaUrl) {
-        await api('/api/config', { llamaUrl: llama.value.trim() }); S.info.llamaUrl = llama.value.trim(); checkHealth();
-      }
-      applyTheme(); toast('Configurações salvas');
-    } }, 'Salvar configurações')));
-  think.addEventListener('change', () => { think.nextElementSibling.style.background = think.checked ? 'var(--accent)' : ''; });
+  const toolGrid = h('div.tgrid', null, Object.values(groupsBySec).flat().map((g) => sw(TOOL_INFO[g].title, TOOL_INFO[g].desc, S.settings.tools[g], (v) => { S.settings.tools[g] = v; store.set('settings', S.settings); saveKit(); updatePickers(); saved(); })));
+
+  const body = [
+    section('model', 'Modelo', 'Como o modelo responde em todas as conversas.',
+      field('Prompt de sistema', input('textarea.textarea', { rows: 4, value: st.systemPrompt, placeholder: 'Ex.: Responda sempre em português do Brasil, de forma direta.' }, (x) => put({ systemPrompt: x.value })), 'Vai antes das informações do espaço de trabalho e das habilidades.'),
+      h('div.row', null,
+        field('Temperatura', input('input.input', { value: st.temperature, placeholder: 'padrão do servidor', inputmode: 'decimal' }, (x) => put({ temperature: x.value.trim() }))),
+        field('Top P', input('input.input', { value: st.topP, placeholder: 'padrão do servidor', inputmode: 'decimal' }, (x) => put({ topP: x.value.trim() }))),
+        field('Máximo de tokens', input('input.input', { value: st.maxTokens, placeholder: 'sem limite', inputmode: 'numeric' }, (x) => put({ maxTokens: x.value.trim() })))),
+      field('Enviar imagens ao modelo', seg([['auto', `Automático (${S.vision ? 'tem visão' : 'sem visão'})`], ['on', 'Sempre'], ['off', 'Nunca']], st.vision, (v) => put({ vision: v })), 'Capturas de tela e imagens coladas na mensagem.')),
+    section('tools', 'Ferramentas', 'O que o modelo pode usar. Também dá para ligar e desligar pela barra do chat.',
+      toolGrid,
+      h('div.row', null,
+        field('Passos com ferramentas por resposta', input('input.input', { value: st.maxSteps, inputmode: 'numeric' }, (x) => put({ maxSteps: Number(x.value) || 30 })), 'O modelo para depois disso e pede para continuar.'),
+        field('Passos de cada subagente', input('input.input', { value: st.explorerSteps, inputmode: 'numeric' }, (x) => put({ explorerSteps: Number(x.value) || 20 }))))),
+    section('safety', 'Segurança', 'Quando o studio pede sua permissão antes de agir.',
+      field('Pedir confirmação antes de', seg([['writes', 'Alterar arquivos'], ['all', 'Qualquer ferramenta'], ['never', 'Nunca perguntar']], st.approval, (v) => put({ approval: v }))),
+      auditorSection()),
+    section('context', 'Contexto', 'O que fazer quando a conversa fica longa demais para o modelo.',
+      sw('Compactar automaticamente', `Resume a conversa quando passar do limite abaixo${S.nCtx ? ` (contexto de ${S.nCtx.toLocaleString('pt-BR')} tokens)` : ''}.`, st.autoCompact, (v) => put({ autoCompact: v })),
+      h('div.row', null,
+        field('Compactar ao chegar em', (() => { const sl = slider({ min: 30, max: 95, step: 5, fmt: (v) => v + '% do contexto' }, st.compactAt, { optional: false }); sl.el.addEventListener('change', () => put({ compactAt: Number(sl.get()) })); return sl.el; })()),
+        field('O que resumir', (() => { const x = h('select.select', null, h('option', { value: 'meio' }, 'O meio (guarda início e fim)'), h('option', { value: 'inicio' }, 'O começo (guarda só o fim)')); x.value = st.compactMode || 'meio'; x.addEventListener('change', () => put({ compactMode: x.value })); return x; })()))),
+    section('look', 'Aparência', null,
+      field('Tema', seg([['auto', 'Automático'], ['dark', 'Escuro'], ['light', 'Claro']], st.theme, (v) => { put({ theme: v }); applyTheme(); })),
+      sw('Mostrar o raciocínio do modelo', 'Os blocos de "pensando" aparecem na conversa, recolhidos.', st.showThinking, (v) => { put({ showThinking: v }); renderMessages(); }),
+      S.info.native ? sw('Usar a placa de vídeo para desenhar a janela', 'Desligado, a janela não ocupa VRAM do modelo. Vale na próxima vez que a janela abrir.', S.info.windowGpu, async (v) => { await api('/api/config', { windowGpu: v }); S.info.windowGpu = v; saved(); }) : null,
+      S.info.native ? sw('Fechar a janela deixa o studio na bandeja', 'A janela é destruída e a memória dela volta para o sistema.', S.info.closeToTray !== false, async (v) => { await api('/api/config', { closeToTray: v }); S.info.closeToTray = v; saved(); }) : null),
+    section('updates', 'Atualizações', null, updateSection()),
+    section('advanced', 'Avançado', null,
+      field('Endereço do llama-server', input('input.input.mono', { value: S.info.llamaUrl || '' }, async (x) => {
+        const v = x.value.trim(); if (!v || v === S.info.llamaUrl) return;
+        await api('/api/config', { llamaUrl: v }); S.info.llamaUrl = v; checkHealth(); saved();
+      }), 'Muda sozinho quando você salva a página Servidor. Ajuste só se o llama-server roda em outro lugar.')),
+  ];
+  const nav = h('nav.set-nav', null, sections.map(([id, title]) => h('button', { type: 'button', onclick: () => $('#set-' + id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, title)));
+  f.append(nav, ...body);
 }
 
 /* ============================================================ servidor (llama-server) */
@@ -4739,11 +4720,29 @@ function drawActivity() {
   box.scrollTop = atEnd ? box.scrollHeight : keep;
 }
 
-function toggleWs() {
-  const hid = $('#ws').classList.toggle('hidden');
+/* ------------------------------------------------------------ telas estreitas */
+// Até 1100 px o painel da direita vira gaveta por cima do chat (fechada por padrão);
+// até 860 px a barra lateral também, aberta pelo botão de menu.
+const MQ_WS = matchMedia('(max-width: 1100px)');
+const MQ_SIDE = matchMedia('(max-width: 860px)');
+S.wsDrawer = false; S.sideDrawer = false;
+function applyLayout() {
+  const narrow = MQ_WS.matches;
+  const hid = narrow ? !S.wsDrawer : store.get('wsHidden', false);
+  $('#ws').classList.toggle('hidden', hid);
   $('#toggle-ws').classList.toggle('on', !hid);
-  store.set('wsHidden', hid);
+  if (!MQ_SIDE.matches) S.sideDrawer = false;
+  document.body.classList.toggle('side-open', S.sideDrawer);
+  document.body.classList.toggle('ws-drawer', narrow && S.wsDrawer);
+  $('#scrim').hidden = !((narrow && S.wsDrawer) || S.sideDrawer);
 }
+function toggleWs() {
+  if (MQ_WS.matches) S.wsDrawer = !S.wsDrawer;
+  else store.set('wsHidden', !store.get('wsHidden', false));
+  applyLayout();
+}
+function toggleSide(open) { S.sideDrawer = open ?? !S.sideDrawer; if (S.sideDrawer) S.wsDrawer = false; applyLayout(); }
+function closeDrawers() { if (S.sideDrawer || S.wsDrawer) { S.sideDrawer = false; S.wsDrawer = false; applyLayout(); } }
 
 function initWsTabs() {
   initScrollFollow();
@@ -4776,10 +4775,15 @@ async function init() {
   $('#ws-open').innerHTML = svg('external');
   $('.drop-icon').innerHTML = svg('pin');
   $('#plus-btn').innerHTML = svg('plus');
-  const wsHidden = store.get('wsHidden', false);
-  $('#ws').classList.toggle('hidden', wsHidden);
   initWsTabs();
-  $('#toggle-ws').classList.toggle('on', !wsHidden);
+  applyLayout();
+  MQ_WS.addEventListener('change', applyLayout); MQ_SIDE.addEventListener('change', applyLayout);
+  $('#scrim').addEventListener('click', closeDrawers);
+  $('#side-btn').innerHTML = svg('menu');
+  $('#side-btn').addEventListener('click', () => toggleSide());
+  $('#ws-close').innerHTML = svg('x');
+  $('#ws-close').addEventListener('click', closeDrawers);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && (S.sideDrawer || S.wsDrawer) && !$('.modal-back')) closeDrawers(); });
   $('#toggle-ws').addEventListener('click', toggleWs);
   $('#ws-refresh').addEventListener('click', () => { S.ws.fresh.clear(); refreshTree(); });
   $('#ws-open').addEventListener('click', () => api('/api/reveal', { path: '.', ws: S.ws.path }));
