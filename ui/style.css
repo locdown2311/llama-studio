@@ -889,3 +889,18 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .hnote { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--muted); }
 .hnote svg { width: 12px; height: 12px; }
 .chat-sub:empty { display: none; }
+
+/* fila de mensagens */
+.queue { max-width: 920px; margin: 0 auto 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); padding: 6px; box-shadow: var(--shadow-sm, none); }
+.queue[hidden] { display: none; }
+.q-head { display: flex; align-items: center; gap: 6px; padding: 3px 6px 6px; font-size: 12.5px; font-weight: 600; color: var(--text-2); }
+.q-head > svg { width: 14px; height: 14px; color: var(--accent); }
+.q-head .muted { font-weight: 400; font-size: 12px; }
+.q-item { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 8px; font-size: 13px; }
+.q-item:hover { background: var(--hover); }
+.q-n { flex: none; width: 18px; height: 18px; border-radius: 50%; background: var(--hover); color: var(--muted); font-size: 10.5px; font-weight: 700; display: grid; place-items: center; }
+.q-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.q-item .icon-btn { opacity: .6; }
+.q-item:hover .icon-btn { opacity: 1; }
+.send.queue { background: var(--accent); }
+.q-head .spacer { flex: 1; }

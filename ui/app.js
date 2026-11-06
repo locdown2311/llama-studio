@@ -1094,14 +1094,22 @@ document.addEventListener('mousedown', (e) => {
 });
 
 function renderComposer() {
-  const send = $('#send');
-  const busy = running(cur());
-  send.innerHTML = svg(busy ? 'stop' : 'send');
-  send.classList.toggle('stop', busy);
-  send.title = busy ? 'Parar (Esc)' : 'Enviar (Enter)';
-  send.setAttribute('aria-label', send.title);
+  updateSendBtn();
+  drawQueue();
   updatePickers();
   drawCtxMeter();
+}
+
+function updateSendBtn() {
+  const send = $('#send');
+  const busy = running(cur());
+  // respondendo + texto na caixa: o botão enfileira (Esc continua parando)
+  const queueMode = busy && !editorEmpty();
+  send.innerHTML = svg(queueMode ? 'list' : busy ? 'stop' : 'send');
+  send.classList.toggle('stop', busy && !queueMode);
+  send.classList.toggle('queue', queueMode);
+  send.title = queueMode ? 'Pôr na fila (Enter) · Esc para parar a resposta' : busy ? 'Parar (Esc)' : 'Enviar (Enter)';
+  send.setAttribute('aria-label', send.title);
 }
 
 function activeSel(conv) {
@@ -1371,25 +1379,104 @@ function setupDrop() {
 }
 
 /* ============================================================ envio e ciclo do agente */
-async function send() {
-  if (running(cur())) { stop(); return; }
-  if (S.refs.some((r) => r.status === 'loading' && refPillEls(r).length)) { toast('Aguarde: ainda localizando os arquivos arrastados.'); return; }
+/** Lê o editor como uma mensagem pronta para enviar (ou null). */
+function takeEditor() {
+  if (S.refs.some((r) => r.status === 'loading' && refPillEls(r).length)) { toast('Aguarde: ainda localizando os arquivos arrastados.'); return null; }
   const parts = readEditor();
-  if (!parts.length) return;
+  if (!parts.length) return null;
   const content = partsToContent(parts);
   const refs = parts.filter((p) => p.kind === 'file').map((p) => ({ name: p.name, path: p.path, dir: p.dir }));
   if (S.refs.some((r) => r.status === 'missing' && refPillEls(r).length)) toast('Arquivos não localizados ficaram de fora.');
+  editor().innerHTML = ''; S.refs = []; savedRange = null;
+  return { content, parts, refs };
+}
+
+async function send() {
+  const busy = running(cur());
+  if (busy && editorEmpty()) { stop(); return; }
+  const item = takeEditor();
+  if (!item) return;
   const conv = cur() || newConv();
+  if (busy) { enqueue(conv, item); return; }
+  await submit(conv, item);
+}
+
+/** Recria o conteúdo de uma mensagem (texto e etiquetas) para a caixa de texto. */
+function partsToNodes(parts) {
+  const out = [];
+  for (const p of parts) {
+    if (p.t === 'text') {
+      p.v.split('\n').forEach((line, i) => { if (i) out.push(document.createElement('br')); if (line) out.push(document.createTextNode(line)); });
+    } else if (p.kind === 'file') {
+      const r = { id: uid(), name: p.name, path: p.path, dir: !!p.dir, status: 'ok' };
+      S.refs.push(r);
+      out.push(makePill({ kind: 'file', ref: r.id, name: p.name }), document.createTextNode(' '));
+    } else out.push(makePill(p), document.createTextNode(' '));
+  }
+  return out;
+}
+
+function editorEmpty() { return !readEditor().length; }
+
+async function submit(conv, item) {
+  const { content, parts, refs } = item;
   conv.messages.push({ role: 'user', content, parts, refs, ts: Date.now() });
   if (conv.title === 'Nova conversa') {
     const plain = parts.filter((p) => p.t === 'text').map((p) => p.v).join(' ').replace(/\s+/g, ' ').trim();
     conv.title = (plain || parts.map((p) => p.name).filter(Boolean).join(', ')).slice(0, 60);
   }
   conv.updatedAt = Date.now();
-  editor().innerHTML = ''; S.refs = []; savedRange = null;
-  saveConvs(); renderConvList(); renderChatTitle();
-  renderMessages(false);
+  saveConvs(); renderConvList();
+  if (conv.id === S.curId) { renderChatTitle(); renderMessages(false); }
   await runAgent(conv);
+}
+
+/* ============================================================ fila de mensagens */
+function enqueue(conv, item) {
+  (conv.queue ||= []).push({ ...item, id: uid(), ts: Date.now() });
+  conv.queuePaused = false;
+  saveConvs(); drawQueue(); renderComposer();
+}
+
+/** Chamado quando uma resposta termina: manda a próxima da fila. */
+function nextInQueue(conv, aborted) {
+  if (!conv.queue?.length) return;
+  if (aborted) { conv.queuePaused = true; saveConvs(); drawQueue(); return; }
+  const item = conv.queue.shift();
+  conv.queuePaused = false;
+  saveConvs(); drawQueue();
+  setTimeout(() => submit(conv, item), 0);
+}
+
+function drawQueue() {
+  const box = $('#queue'); if (!box) return;
+  const c = cur();
+  const q = c?.queue || [];
+  box.innerHTML = '';
+  box.hidden = !q.length;
+  if (!q.length) return;
+  const busy = running(c);
+  box.append(h('div.q-head', null, ic('list'),
+    h('span', null, c.queuePaused && !busy ? `Fila pausada (${q.length})` : `Na fila (${q.length})`),
+    h('span.muted', null, c.queuePaused && !busy ? ' · a resposta foi interrompida' : busy ? ' · enviadas quando a resposta atual terminar' : ''),
+    h('span.spacer'),
+    c.queuePaused && !busy ? h('button.btn.sm.primary', { onclick: () => nextInQueue(c, false) }, ic('send'), 'Retomar') : null,
+    q.length > 1 ? h('button.btn.ghost.sm', { onclick: () => { c.queue = []; saveConvs(); drawQueue(); renderComposer(); } }, 'Limpar') : null));
+  q.forEach((it, i) => {
+    const text = (it.content || '').replace(/\s+/g, ' ').trim() || it.parts.map((p) => p.name).filter(Boolean).join(', ');
+    box.append(h('div.q-item', null,
+      h('span.q-n', null, String(i + 1)),
+      h('span.q-text', { title: it.content }, text),
+      i > 0 ? h('button.icon-btn.sm', { title: 'Subir', 'aria-label': 'Subir', html: svg('up'), onclick: () => { [q[i - 1], q[i]] = [q[i], q[i - 1]]; saveConvs(); drawQueue(); } }) : null,
+      h('button.icon-btn.sm', { title: 'Editar (volta para a caixa de texto)', 'aria-label': 'Editar', html: svg('edit'), onclick: () => {
+        q.splice(i, 1); saveConvs(); drawQueue();
+        const ed = editor();
+        if (editorEmpty()) { ed.innerHTML = ''; ed.append(...partsToNodes(it.parts)); }
+        else ed.append(document.createElement('br'), ...partsToNodes(it.parts));
+        ed.focus(); renderComposer();
+      } }),
+      h('button.icon-btn.sm', { title: 'Tirar da fila', 'aria-label': 'Tirar da fila', html: svg('x'), onclick: () => { q.splice(i, 1); saveConvs(); drawQueue(); renderComposer(); } })));
+  });
 }
 
 function stop() {
@@ -1787,7 +1874,9 @@ async function runAgent(conv) {
     conv.updatedAt = Date.now();
     saveConvs(); renderConvList();
     if (conv.id === S.curId) { renderMessages(false); renderComposer(); renderChatTitle(); }
-    else if (!conv.messages.some((m) => m.role === 'error' && m === conv.messages[conv.messages.length - 1])) toast(`"${conv.title}" terminou de responder`);
+    else if (!conv.queue?.length && !conv.messages.some((m) => m.role === 'error' && m === conv.messages[conv.messages.length - 1])) toast(`"${conv.title}" terminou de responder`);
+    const last2 = conv.messages[conv.messages.length - 1];
+    nextInQueue(conv, ac.signal.aborted || last2?.role === 'error');
   }
 }
 
@@ -3079,7 +3168,7 @@ async function init() {
   });
   ed.addEventListener('input', () => {
     if (!ed.textContent.trim() && !ed.querySelector('.pill')) ed.innerHTML = '';
-    saveRange(); checkMention(); updatePickers();
+    saveRange(); checkMention(); updatePickers(); updateSendBtn();
   });
   ed.addEventListener('keyup', saveRange);
   ed.addEventListener('mouseup', saveRange);
