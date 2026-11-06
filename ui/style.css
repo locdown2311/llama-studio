@@ -329,7 +329,7 @@ svg { display: block; flex: none; width: 16px; height: 16px; }
 }
 .tool.s-ok::before { border-color: var(--ok); background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
 .tool.s-error::before, .tool.s-denied::before { border-color: var(--err); background: var(--err); box-shadow: 0 0 0 3px var(--err-soft); }
-.tool.s-running::before, .tool.s-pending::before { border-color: var(--accent); animation: pulse 1s ease-in-out infinite; }
+.tool.s-running::before, .tool.s-pending::before, .tool.s-audit::before { border-color: var(--accent); animation: pulse 1s ease-in-out infinite; }
 .tool.s-approval::before { border-color: var(--warn); background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
 .tool-card { border-radius: 10px; background: var(--card); border: 1px solid var(--line); overflow: hidden; }
 .tool.s-approval .tool-card { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); box-shadow: 0 0 0 3px var(--warn-soft); }
@@ -346,7 +346,7 @@ svg { display: block; flex: none; width: 16px; height: 16px; }
 .tool-state svg { width: 13px; height: 13px; }
 .tool.s-ok .tool-state { color: var(--ok); }
 .tool.s-error .tool-state, .tool.s-denied .tool-state { color: var(--err); }
-.tool.s-running .tool-state { color: var(--accent); }
+.tool.s-running .tool-state, .tool.s-audit .tool-state { color: var(--accent); }
 .tool.s-approval .tool-state { color: var(--warn); }
 .tool-head .chev { width: 14px; height: 14px; color: var(--muted); transition: transform .15s; flex: none; }
 .tool.open .tool-head .chev { transform: rotate(90deg); }
@@ -375,6 +375,17 @@ svg { display: block; flex: none; width: 16px; height: 16px; }
 :root[data-theme="dark"] .diff .add { background: rgba(46, 160, 67, .15); color: #7ee787; }
 .approval { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px; background: var(--warn-soft); border-top: 1px solid var(--line); font-size: 13px; }
 .approval span { flex: 1; min-width: 180px; }
+.audit { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-top: 1px solid var(--line); font-size: 13px; background: var(--card); }
+.audit + .approval { border-top: 0; }
+.audit-ico { width: 24px; height: 24px; border-radius: 6px; flex: none; display: grid; place-items: center; background: var(--warn-soft); color: var(--warn); }
+.audit-ico svg { width: 14px; height: 14px; }
+.audit.ok .audit-ico { background: var(--ok-soft); color: var(--ok); }
+.audit.r-alto:not(.ok) .audit-ico { background: var(--err-soft); color: var(--err); }
+.audit-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.audit-main b { font-weight: 600; font-size: 12.5px; }
+.audit-main span { color: var(--muted); }
+.audit-chip { display: grid; place-items: center; color: var(--ok); flex: none; }
+.audit-chip svg { width: 14px; height: 14px; }
 
 .err-box { max-width: 820px; margin: 0 auto 22px; display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 12px; background: var(--err-soft); border: 1px solid color-mix(in srgb, var(--err) 25%, transparent); color: var(--err); font-size: 13.5px; }
 .err-box svg { width: 17px; height: 17px; flex: none; margin-top: 2px; }
@@ -1059,7 +1070,7 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .k-tool.s-ok .tl-node { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 55%, transparent); background: var(--ok-soft); }
 .k-tool.s-error .tl-node, .k-tool.s-denied .tl-node { color: var(--err); border-color: color-mix(in srgb, var(--err) 55%, transparent); background: var(--err-soft); }
 .k-tool.s-approval .tl-node { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
-.k-tool.s-running .tl-node, .k-tool.s-pending .tl-node, .tl-item.now .tl-node { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.k-tool.s-running .tl-node, .k-tool.s-pending .tl-node, .k-tool.s-audit .tl-node, .tl-item.now .tl-node { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 .k-tool.s-running .tl-node::after, .k-tool.s-pending .tl-node::after, .tl-item.now .tl-node::after { content: ''; position: absolute; inset: -5px; border-radius: 50%; border: 2px solid var(--accent); opacity: 0; animation: tl-ping 1.4s ease-out infinite; }
 @keyframes tl-ping { 0% { transform: scale(.7); opacity: .6; } 100% { transform: scale(1.25); opacity: 0; } }
 .tl-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
