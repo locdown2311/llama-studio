@@ -63,15 +63,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $rel = gh api repos/ggml-org/llama.cpp/releases/latest | ConvertFrom-Json
+          # a "latest" do llama.cpp pode ser só um marcador (v0.x com nightly-tag.txt);
+          # pega a release mais nova que tenha os pacotes do Windows
+          $all = gh api "repos/ggml-org/llama.cpp/releases?per_page=40" | ConvertFrom-Json
+          $rel = $all | Where-Object { $_.assets | Where-Object { $_.name -match '-bin-win-.*vulkan.*x64\.zip$' } } | Select-Object -First 1
+          if (-not $rel) { $rel = $all[0]; Write-Host "Releases vistas:"; $all | Select-Object -First 5 | ForEach-Object { "$($_.tag_name): $(($_.assets | ForEach-Object { $_.name }) -join ', ')" } }
           $names = $rel.assets | ForEach-Object { $_.name }
+          Write-Host "llama.cpp: $($rel.tag_name)"
           function Url($pat) { ($rel.assets | Where-Object { $_.name -match $pat } | Select-Object -First 1).browser_download_url }
           $cuda = $rel.assets | Where-Object { $_.name -match '^llama-.*-bin-win-cuda-([\d.]+)-x64\.zip$' } | Sort-Object { [version]($_.name -replace '^.*-cuda-([\d.]+)-x64\.zip$', '$1') } -Descending | Select-Object -First 1
           $cv = if ($cuda) { $cuda.name -replace '^.*-cuda-([\d.]+)-x64\.zip$', '$1' } else { '' }
           $o = @{
             LlamaTag  = $rel.tag_name
-            UrlVulkan = Url '^llama-.*-bin-win-vulkan-x64\.zip$'
-            UrlCpu    = Url '^llama-.*-bin-win-cpu-x64\.zip$'
+            UrlVulkan = Url '-bin-win-vulkan-x64\.zip$'
+            UrlCpu    = Url '-bin-win-cpu-x64\.zip$'
             UrlHip    = Url '^llama-.*-bin-win-hip.*-x64\.zip$'
             UrlCuda   = if ($cuda) { $cuda.browser_download_url } else { '' }
             UrlCudart = if ($cv) { Url "^cudart-llama-bin-win-cuda-$([regex]::Escape($cv))-x64\.zip$" } else { '' }
@@ -107,9 +112,7 @@ jobs:
             dist/ui.zip
             dist/SHA256SUMS.txt
           generate_release_notes: true
-          body: |
-            **Instalar pela primeira vez:** baixe `llama-studio-setup-${{ env.STUDIO_VERSION }}.exe`. Ele instala o Llama Studio e o llama.cpp ${{ steps.llama.outputs.LlamaTag }} (Vulkan, CUDA, HIP ou CPU, à escolha), sem pedir administrador.
-            **Já tem instalado:** o programa avisa e se atualiza sozinho (Procurar atualizações).
+          body: ${{ steps.setup.outcome == 'success' && format('**Instalar pela primeira vez:** baixe `llama-studio-setup-{0}.exe`. Ele instala o Llama Studio e o llama.cpp {1} (Vulkan, CUDA, HIP ou CPU, à escolha), sem pedir administrador.<br>**Já tem instalado:** o programa avisa e se atualiza sozinho (Procurar atualizações).', env.STUDIO_VERSION, steps.llama.outputs.LlamaTag) || '' }}
 
       - name: Guardar artefatos (sem versão nova)
         if: steps.ver.outputs.publicar != 'true'

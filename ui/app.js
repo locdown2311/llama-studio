@@ -659,8 +659,24 @@ function blocksOf(conv) {
   return out;
 }
 
-function nearBottom() { const el = $('#messages'); return el.scrollHeight - el.scrollTop - el.clientHeight < 140; }
-function toBottom() { const el = $('#messages'); el.scrollTop = el.scrollHeight; }
+// Rolagem durante a resposta: segue o fim só enquanto a pessoa estiver lá embaixo.
+// Qualquer gesto dela (roda, toque, teclas, arrastar a barra) decide se continua seguindo.
+let followBottom = true;
+let userScrollAt = 0;
+function nearBottom() { const el = $('#messages'); return el.scrollHeight - el.scrollTop - el.clientHeight < 60; }
+function toBottom() { const el = $('#messages'); el.scrollTop = el.scrollHeight; followBottom = true; }
+function initScrollFollow() {
+  const el = $('#messages');
+  const mark = () => { userScrollAt = Date.now(); };
+  el.addEventListener('wheel', (e) => { mark(); if (e.deltaY < 0) followBottom = false; }, { passive: true });
+  el.addEventListener('touchmove', mark, { passive: true });
+  el.addEventListener('pointerdown', mark);
+  el.addEventListener('keydown', mark);
+  el.addEventListener('scroll', () => {
+    // só gestos da pessoa mudam o modo; as rolagens do próprio app não contam
+    if (Date.now() - userScrollAt < 800) followBottom = nearBottom();
+  }, { passive: true });
+}
 
 let rafPending = false;
 function scheduleRender() {
@@ -677,11 +693,14 @@ function renderChat() { syncWsRoot(); renderChatTitle(); renderMessages(false); 
 function renderMessages(onlyLast) {
   const box = $('#messages');
   const conv = cur();
-  const stick = nearBottom();
+  const stick = onlyLast ? followBottom : true;
+  const top = box.scrollTop;
   if (!conv || !conv.messages.length) { box.innerHTML = ''; box.append(renderEmpty()); return; }
   const blocks = blocksOf(conv);
   if (onlyLast && box.lastElementChild?.dataset.start == blocks[blocks.length - 1].start && box.children.length === blocks.length) {
     box.lastElementChild.replaceWith(renderBlock(blocks[blocks.length - 1], conv, true));
+    // trocar o bloco não pode mexer na posição de quem está lendo mais acima
+    if (!stick) box.scrollTop = top;
   } else {
     box.innerHTML = '';
     const cut = conv.compactCut || 0; let marked = false;
@@ -690,7 +709,7 @@ function renderMessages(onlyLast) {
       box.append(renderBlock(b, conv, i === blocks.length - 1));
     });
   }
-  if (stick || !onlyLast) toBottom();
+  if (stick) toBottom();
   drawActivitySoon();
 }
 
@@ -3766,6 +3785,7 @@ function toggleWs() {
 }
 
 function initWsTabs() {
+  initScrollFollow();
   $$('.ws-tabs button').forEach((b) => b.addEventListener('click', () => setWsTab(b.dataset.tab)));
   setWsTab(store.get('wsTab', 'files'));
 }
