@@ -2954,27 +2954,28 @@ const ARG_GROUPS = [
   ['vision', 'Visão', 'eye'],
 ];
 const ARG_DEFS = [
-  { k: 'ngl', f: ['-ngl', '--gpu-layers', '--n-gpu-layers'], g: 'gpu', t: 'num', l: 'Camadas na GPU', d: 'Quantas camadas do modelo vão para a placa de vídeo. 99 = todas (mais rápido, se couber na VRAM).' },
+  { k: 'ngl', f: ['-ngl', '--gpu-layers', '--n-gpu-layers'], g: 'gpu', t: 'num', min: 0, max: 99, def: 99, l: 'Camadas na GPU', d: 'Quantas camadas do modelo vão para a placa de vídeo. 99 = todas (mais rápido, se couber na VRAM).' },
   { k: 'fa', f: ['-fa', '--flash-attn'], g: 'gpu', t: 'sel', o: ['on', 'off', 'auto'], l: 'Flash attention', d: 'Atenção otimizada: menos memória e mais velocidade. Deixe ligada se a placa suportar.' },
   { k: 'ctk', f: ['-ctk', '--cache-type-k'], g: 'gpu', t: 'sel', o: ['f16', 'q8_0', 'q4_0', 'q5_0', 'q5_1', 'q4_1', 'bf16', 'f32'], l: 'Cache K', d: 'Precisão da memória do contexto (chaves). q8_0 usa metade da memória de f16 quase sem perda.' },
   { k: 'ctv', f: ['-ctv', '--cache-type-v'], g: 'gpu', t: 'sel', o: ['f16', 'q8_0', 'q4_0', 'q5_0', 'q5_1', 'q4_1', 'bf16', 'f32'], l: 'Cache V', d: 'Precisão da memória do contexto (valores). Com q8_0/q4_0 é preciso flash attention ligada.' },
-  { k: 'b', f: ['-b', '--batch-size'], g: 'gpu', t: 'num', l: 'Lote (batch)', d: 'Tokens processados por vez ao ler o prompt. Maior = leitura mais rápida, mais memória. Padrão 2048.' },
-  { k: 'ub', f: ['-ub', '--ubatch-size'], g: 'gpu', t: 'num', l: 'Microlote (ubatch)', d: 'Pedaço físico do lote. 512 é um bom valor; maior pode acelerar em GPUs grandes.' },
-  { k: 'np', f: ['-np', '--parallel'], g: 'gpu', t: 'num', l: 'Conversas em paralelo', d: 'Quantas respostas o servidor gera ao mesmo tempo (slots). Cada uma divide o contexto, a não ser com contexto unificado.' },
+  { k: 'b', f: ['-b', '--batch-size'], g: 'gpu', t: 'num', opts: [64, 128, 256, 512, 1024, 2048, 4096, 8192], def: 2048, l: 'Lote (batch)', d: 'Tokens processados por vez ao ler o prompt. Maior = leitura mais rápida, mais memória. Padrão 2048.' },
+  { k: 'ub', f: ['-ub', '--ubatch-size'], g: 'gpu', t: 'num', opts: [32, 64, 128, 256, 512, 1024, 2048, 4096], def: 512, l: 'Microlote (ubatch)', d: 'Pedaço físico do lote. 512 é um bom valor; maior pode acelerar em GPUs grandes.' },
+  { k: 'np', f: ['-np', '--parallel'], g: 'gpu', t: 'num', min: 1, max: 8, def: 1, l: 'Conversas em paralelo', d: 'Quantas respostas o servidor gera ao mesmo tempo (slots). Cada uma divide o contexto, a não ser com contexto unificado.' },
   { k: 'kvu', f: ['--kv-unified', '-kvu'], g: 'gpu', t: 'bool', l: 'Contexto unificado', d: 'Os slots paralelos compartilham o mesmo contexto em vez de dividi-lo. Recomendado com mais de 1 em paralelo.' },
-  { k: 'ckpt', f: ['--ctx-checkpoints'], g: 'gpu', t: 'num', l: 'Checkpoints de contexto', d: 'Pontos salvos do contexto para reaproveitar o prompt entre mensagens em modelos híbridos/SWA. Mais = menos reprocessamento, mais RAM.' },
+  { k: 'ckpt', f: ['--ctx-checkpoints'], g: 'gpu', t: 'num', min: 0, max: 64, def: 8, l: 'Checkpoints de contexto', d: 'Pontos salvos do contexto para reaproveitar o prompt entre mensagens em modelos híbridos/SWA. Mais = menos reprocessamento, mais RAM.' },
   { k: 'mlock', f: ['--mlock'], g: 'gpu', t: 'bool', l: 'Travar na RAM (mlock)', d: 'Impede o sistema de mandar o modelo para o disco. Use só se sobrar RAM.' },
   { k: 'nommap', f: ['--no-mmap'], g: 'gpu', t: 'bool', l: 'Não mapear o arquivo (no-mmap)', d: 'Carrega o modelo inteiro na memória em vez de ler do disco sob demanda. Carrega mais devagar, pode rodar mais estável.' },
   { k: 'jinja', f: ['--jinja'], g: 'think', t: 'bool', l: 'Template Jinja', d: 'Usa o template de chat do próprio modelo. Necessário para ferramentas (tool calling). Deixe ligado.' },
-  { k: 'rbudget', f: ['--reasoning-budget'], g: 'think', t: 'num', l: 'Limite de raciocínio (tokens)', d: 'Quantos tokens o modelo pode pensar antes de responder. -1 = sem limite, 0 = sem raciocínio.' },
+  { k: 'rbudget', f: ['--reasoning-budget'], g: 'think', t: 'num', opts: [-1, 0, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768], def: -1, fmt: (v) => (v == -1 ? 'sem limite' : v == 0 ? 'desligado' : v), l: 'Limite de raciocínio (tokens)', d: 'Quantos tokens o modelo pode pensar antes de responder. -1 = sem limite, 0 = sem raciocínio.' },
   { k: 'rmsg', f: ['--reasoning-budget-message'], g: 'think', t: 'text', l: 'Mensagem ao estourar o limite', d: 'Texto inserido quando o raciocínio atinge o limite, para o modelo partir para a resposta.' },
+  { k: 'tkw', f: ['--chat-template-kwargs'], g: 'think', t: 'text', l: 'Parâmetros do template (JSON)', d: 'Opções passadas ao template de chat. Ex.: {"enable_thinking":true} liga o raciocínio nos Qwen3.5 pequenos, que vêm com ele desligado.' },
   { k: 'rformat', f: ['--reasoning-format'], g: 'think', t: 'sel', o: ['auto', 'deepseek', 'none'], l: 'Formato do raciocínio', d: 'Como separar o pensamento da resposta. auto funciona para a maioria.' },
-  { k: 'temp', f: ['--temp', '--temperature'], g: 'sample', t: 'num', step: 0.05, l: 'Temperatura', d: 'Criatividade. Baixa (0,2-0,6) = mais preciso e repetível; alta (0,8+) = mais variado.' },
-  { k: 'topk', f: ['--top-k'], g: 'sample', t: 'num', l: 'Top-K', d: 'Considera só os K tokens mais prováveis. 20-40 é comum; 0 desliga.' },
-  { k: 'topp', f: ['--top-p'], g: 'sample', t: 'num', step: 0.05, l: 'Top-P', d: 'Considera os tokens até somar essa probabilidade. 0,9-0,95 é comum; 1 desliga.' },
-  { k: 'minp', f: ['--min-p'], g: 'sample', t: 'num', step: 0.01, l: 'Min-P', d: 'Descarta tokens muito menos prováveis que o melhor. 0,05 é um bom valor; 0 desliga.' },
-  { k: 'rpen', f: ['--repeat-penalty'], g: 'sample', t: 'num', step: 0.05, l: 'Penalidade de repetição', d: 'Evita repetir texto. 1,0 = desligada (recomendado para modelos novos).' },
-  { k: 'ppen', f: ['--presence-penalty'], g: 'sample', t: 'num', step: 0.1, l: 'Penalidade de presença', d: 'Incentiva assuntos novos. 0 = desligada; alguns modelos recomendam 1,5.' },
+  { k: 'temp', f: ['--temp', '--temperature'], g: 'sample', t: 'num', min: 0, max: 2, def: 0.8, step: 0.05, l: 'Temperatura', d: 'Criatividade. Baixa (0,2-0,6) = mais preciso e repetível; alta (0,8+) = mais variado.' },
+  { k: 'topk', f: ['--top-k'], g: 'sample', t: 'num', min: 0, max: 100, def: 40, l: 'Top-K', d: 'Considera só os K tokens mais prováveis. 20-40 é comum; 0 desliga.' },
+  { k: 'topp', f: ['--top-p'], g: 'sample', t: 'num', min: 0, max: 1, step: 0.01, def: 0.95, step: 0.05, l: 'Top-P', d: 'Considera os tokens até somar essa probabilidade. 0,9-0,95 é comum; 1 desliga.' },
+  { k: 'minp', f: ['--min-p'], g: 'sample', t: 'num', min: 0, max: 1, def: 0.05, step: 0.01, l: 'Min-P', d: 'Descarta tokens muito menos prováveis que o melhor. 0,05 é um bom valor; 0 desliga.' },
+  { k: 'rpen', f: ['--repeat-penalty'], g: 'sample', t: 'num', min: 0.8, max: 2, step: 0.01, def: 1, step: 0.05, l: 'Penalidade de repetição', d: 'Evita repetir texto. 1,0 = desligada (recomendado para modelos novos).' },
+  { k: 'ppen', f: ['--presence-penalty'], g: 'sample', t: 'num', min: 0, max: 2, def: 0, step: 0.1, l: 'Penalidade de presença', d: 'Incentiva assuntos novos. 0 = desligada; alguns modelos recomendam 1,5.' },
   { k: 'mmproj', f: ['--mmproj', '-mm'], g: 'vision', t: 'file', l: 'Projetor de visão (mmproj)', d: 'Arquivo mmproj-*.gguf que permite ao modelo ver imagens. Vem no mesmo repositório do modelo.' },
 ];
 
@@ -3016,6 +3017,42 @@ function buildArgs(vals, restStr) {
   return [parts.join(' '), rest].filter(Boolean).join(' ');
 }
 
+/**
+ * Controle deslizante com limites. Sem valor = "padrão" do llama-server (apagado);
+ * mexer define o valor, e o x volta ao padrão. opts = lista de valores permitidos.
+ */
+function slider(d, value, { optional = true } = {}) {
+  const opts = d.opts;
+  const min = opts ? 0 : d.min; const max = opts ? opts.length - 1 : d.max;
+  const step = opts ? 1 : (d.step || (Number.isInteger(d.min) && Number.isInteger(d.max) && d.max > 4 ? 1 : 0.05));
+  const toPos = (v) => {
+    if (!opts) return Math.min(max, Math.max(min, Number(v)));
+    const n = Number(v); let best = 0;
+    opts.forEach((o, i) => { if (Math.abs(o - n) < Math.abs(opts[best] - n)) best = i; });
+    return best;
+  };
+  const decimals = String(step).split('.')[1]?.length || 0;
+  const fromPos = (p) => (opts ? opts[p] : Number((Math.round(Number(p) / step) * step).toFixed(decimals)));
+  const show = (v) => (d.fmt ? d.fmt(v) : decimals ? Number(v).toFixed(decimals).replace('.', ',') : Number(v).toLocaleString('pt-BR'));
+  let set = value !== undefined && value !== null && String(value).trim() !== '' && !isNaN(Number(String(value).replace(',', '.')));
+  const start = set ? Number(String(value).replace(',', '.')) : (d.def ?? (opts ? opts[0] : min));
+  const range = h('input', { type: 'range', min, max, step, value: toPos(start) });
+  const out = h('output.sld-v');
+  const reset = optional ? h('button.sld-x', { type: 'button', title: 'Voltar ao padrão do llama-server', 'aria-label': 'Voltar ao padrão', html: svg('x') }) : null;
+  const el = h('div.sld', null, range, out, reset);
+  const paint = () => {
+    const pct = (Number(range.value) - min) / (max - min || 1) * 100;
+    range.style.setProperty('--p', pct + '%');
+    el.classList.toggle('unset', !set);
+    out.textContent = set ? show(fromPos(Number(range.value))) : 'padrão';
+    out.title = set ? '' : `Não definido: o llama-server usa o próprio padrão${d.def !== undefined ? ' (' + show(d.def) + ')' : ''}`;
+  };
+  range.addEventListener('input', () => { set = true; paint(); });
+  reset?.addEventListener('click', () => { set = false; range.value = toPos(d.def ?? min); paint(); });
+  paint();
+  return { el, get: () => (set ? String(fromPos(Number(range.value))) : ''), set: (v) => { set = true; range.value = toPos(v); paint(); } };
+}
+
 /** Editor visual dos argumentos extras, com troca para texto. */
 function argsEditor(initial) {
   let raw = initial || '';
@@ -3049,10 +3086,14 @@ function argsEditor(initial) {
           input.value = v ?? '';
         } else if (d.t === 'file') {
           input = h('input.input.mono', { value: v ?? '', placeholder: 'nenhum' });
+        } else if (d.t === 'num' && (d.opts || d.max !== undefined)) {
+          const sl = slider(d, v);
+          input = sl.el;
+          getters.push(() => [d.k, sl.get()]);
         } else {
           input = h('input.input' + (d.t === 'num' ? '.mono' : ''), { value: v ?? '', placeholder: 'padrão', inputmode: d.t === 'num' ? 'decimal' : undefined });
         }
-        getters.push(() => [d.k, input.value.trim().replace(/,/g, d.t === 'num' ? '.' : ',')]);
+        if (!input.classList.contains('sld')) getters.push(() => [d.k, input.value.trim().replace(/,/g, d.t === 'num' ? '.' : ',')]);
         const pick = d.t === 'file' ? h('button.btn.sm', { type: 'button', onclick: async () => {
           const p = await pickPath({ title: 'Escolher o mmproj (.gguf)', mode: 'file', start: input.value ? input.value.replace(/[\\/][^\\/]*$/, '') : S.info.home });
           if (p) input.value = p;
@@ -3202,7 +3243,10 @@ function editModel(m, path) {
   const inp = (v, extra = {}) => h('input.input.mono', { value: v ?? '', ...extra });
   const name = h('input.input', { value: base.name, placeholder: 'ex.: Qwen 35B rápido' });
   const file = inp(base.model, { placeholder: 'C:\\modelos\\modelo.gguf' });
-  const ctx = inp(base.context, { inputmode: 'numeric' }); const moe = inp(base.cpuMoe, { inputmode: 'numeric' }); const thr = inp(base.threads, { inputmode: 'numeric' });
+  const CTX_OPTS = [2048, 4096, 8192, 16384, 24576, 32768, 49152, 65536, 98304, 131072, 196608, 262144];
+  const ctx = slider({ opts: CTX_OPTS, fmt: (v) => (v >= 1024 ? v / 1024 + 'k' : v) }, base.context || 32768, { optional: false });
+  const moe = slider({ min: 0, max: 99, fmt: (v) => (v == 0 ? 'nenhuma' : v) }, base.cpuMoe || 0, { optional: false });
+  const thr = slider({ min: 0, max: Math.max(4, navigator.hardwareConcurrency || 16), fmt: (v) => (v == 0 ? 'automático' : v) }, base.threads || 0, { optional: false });
   const extra = argsEditor(base.extraArgs);
   const pick = h('button.btn', { type: 'button', onclick: async () => {
     const p = await pickPath({ title: 'Escolher o modelo (.gguf)', mode: 'file', start: file.value ? file.value.replace(/[\\/][^\\/]*$/, '') : S.info.home });
@@ -3214,11 +3258,10 @@ function editModel(m, path) {
     body: [h('div.form', null,
       field('Nome', name),
       h('div.field', null, h('label', null, 'Arquivo (.gguf)'), h('div.inline', null, file, pick)),
-      h('div.row', null, field('Contexto', ctx), field('Camadas MoE na CPU', moe, '0 = nenhuma'), field('Threads', thr, '0 = automático')),
+      h('div.row.sld-row', null, field('Contexto (tokens)', ctx.el, 'Mais contexto = conversas mais longas, mais memória.'), field('Camadas MoE na CPU', moe.el, 'Só para modelos MoE: tira camadas de especialistas da GPU.'), field('Threads', thr.el, 'Núcleos da CPU usados.')),
       extra.el)],
     foot: [h('button.btn', { onclick: () => md.close() }, 'Cancelar'), h('button.btn.primary', { onclick: async () => {
-      const num = (x) => Math.max(0, parseInt(x.value, 10) || 0);
-      const p = { ...base, name: name.value.trim() || 'Modelo', model: file.value.trim().replace(/^"|"$/g, ''), context: num(ctx), cpuMoe: num(moe), threads: num(thr), extraArgs: extra.get() };
+      const p = { ...base, name: name.value.trim() || 'Modelo', model: file.value.trim().replace(/^"|"$/g, ''), context: Number(ctx.get()), cpuMoe: Number(moe.get()), threads: Number(thr.get()), extraArgs: extra.get() };
       if (!p.model) { toast('Escolha o arquivo do modelo.', 'err'); return; }
       const list = S.models.models.filter((x) => x.id !== p.id);
       const at = S.models.models.findIndex((x) => x.id === p.id);
@@ -3254,8 +3297,10 @@ function drawServerForm() {
   const inp = (v, mono = true, extra = {}) => h('input.input' + (mono ? '.mono' : ''), { value: v ?? '', ...extra });
   const exe = inp(c.ServerExe); const model = inp(c.Model);
   const host = inp(c.BindHost); const port = inp(c.Port, true, { inputmode: 'numeric' });
-  const ctx = inp(c.Context, true, { inputmode: 'numeric' }); const moe = inp(c.CpuMoe, true, { inputmode: 'numeric' });
-  const thr = inp(c.Threads, true, { inputmode: 'numeric' }); const hip = inp(c.HipDevices);
+  const ctx = slider({ opts: [2048, 4096, 8192, 16384, 24576, 32768, 49152, 65536, 98304, 131072, 196608, 262144], fmt: (v) => (v >= 1024 ? v / 1024 + 'k' : v) }, c.Context || 32768, { optional: false });
+  const moe = slider({ min: 0, max: 99, fmt: (v) => (v == 0 ? 'nenhuma' : v) }, c.CpuMoe || 0, { optional: false });
+  const thr = slider({ min: 0, max: Math.max(4, navigator.hardwareConcurrency || 16), fmt: (v) => (v == 0 ? 'automático' : v) }, c.Threads || 0, { optional: false });
+  const hip = inp(c.HipDevices);
   const extra = argsEditor(c.ExtraArgs || '');
   const auto = h('input', { type: 'checkbox', checked: !!c.AutoStart });
   const browse = (target, title, mode) => h('button.btn', { type: 'button', onclick: async () => {
@@ -3267,7 +3312,7 @@ function drawServerForm() {
   f.append(
     h('div.form-sec', null, act ? `Modelo carregado: ${act.name}` : 'Modelo', h('small', null, 'Arquivo, contexto, MoE, threads e argumentos extras valem só para este modelo.')),
     row('Modelo (.gguf)', model, browse(model, 'Escolher o modelo (.gguf)', 'file')),
-    h('div.row', null, row('Contexto', ctx), row('Camadas MoE na CPU', moe, null, '0 = nenhuma'), row('Threads', thr, null, '0 = automático')),
+    h('div.row.sld-row', null, row('Contexto (tokens)', ctx.el), row('Camadas MoE na CPU', moe.el), row('Threads', thr.el)),
     extra.el,
     h('div.form-sec', null, 'Servidor', h('small', null, 'Vale para todos os modelos.')),
     row('llama-server', exe, browse(exe, 'Escolher o llama-server', 'file')),
@@ -3276,7 +3321,7 @@ function drawServerForm() {
     h('div.form-foot', null, h('button.btn.primary', { type: 'button', onclick: async () => {
       const num = (x) => Math.max(0, parseInt(x.value, 10) || 0);
       try {
-        S.llama = await api('/api/llama/config', { config: { ServerExe: exe.value.trim().replace(/^"|"$/g, ''), Model: model.value.trim().replace(/^"|"$/g, ''), BindHost: host.value.trim() || '127.0.0.1', Port: num(port) || 1235, Context: num(ctx), CpuMoe: num(moe), Threads: num(thr), HipDevices: hip.value.trim(), ExtraArgs: extra.get(), AutoStart: auto.checked } });
+        S.llama = await api('/api/llama/config', { config: { ServerExe: exe.value.trim().replace(/^"|"$/g, ''), Model: model.value.trim().replace(/^"|"$/g, ''), BindHost: host.value.trim() || '127.0.0.1', Port: num(port) || 1235, Context: Number(ctx.get()), CpuMoe: Number(moe.get()), Threads: Number(thr.get()), HipDevices: hip.value.trim(), ExtraArgs: extra.get(), AutoStart: auto.checked } });
         S.info.llamaUrl = S.llama.url; lastHealth = '';
         toast(S.llama.running ? 'Salvo. Reinicie o servidor para aplicar.' : 'Configuração salva');
         drawServerStatus(); checkHealth(); loadModels();
