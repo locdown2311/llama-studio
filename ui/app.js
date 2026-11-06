@@ -296,7 +296,33 @@ const saveConvs = debounce(() => {
   store.set('convs', S.convs.map((c) => ({ ...c, messages: c.messages.map(strip) })));
   store.set('cur', S.curId);
 }, 400);
-function saveSel() { store.set('sel', S.sel); }
+function saveSel() { store.set('sel', S.sel); saveKit(); }
+
+/* ------------------------------------------------------------ seleção salva por modelo */
+// Cada modelo guarda as habilidades, conectores e ferramentas internas que estavam marcados.
+// Trocar o modelo de uma conversa (ou abrir uma conversa de outro modelo) traz a seleção dele.
+function kitModelId() { return convModel(cur())?.id || null; }
+function saveKit(id = kitModelId()) {
+  if (!id) return;
+  const kits = store.get('modelKits', {});
+  kits[id] = { skills: [...S.sel.skills], mcp: [...S.sel.mcp], builtin: S.sel.builtin, tools: { ...S.settings.tools } };
+  store.set('modelKits', kits);
+}
+function applyKit(id, announce) {
+  const k = id && store.get('modelKits', {})[id];
+  if (!k) return false;
+  const same = JSON.stringify([k.skills, k.mcp, k.tools]) === JSON.stringify([S.sel.skills, S.sel.mcp, S.settings.tools]);
+  S.sel.skills = [...(k.skills || [])]; S.sel.mcp = [...(k.mcp || [])];
+  if (k.builtin !== undefined) S.sel.builtin = k.builtin;
+  if (k.tools) S.settings.tools = { ...S.settings.tools, ...k.tools };
+  store.set('sel', S.sel); store.set('settings', S.settings);
+  updatePickers();
+  if (announce && !same) {
+    const n = S.sel.skills.length; const m = S.sel.mcp.length;
+    toast(`Seleção de ${modelById(id)?.name || 'modelo'}: ${n} habilidade${n === 1 ? '' : 's'}, ${m} conector${m === 1 ? '' : 'es'}`);
+  }
+  return true;
+}
 
 function applyTheme() {
   let t = S.settings.theme;
@@ -350,6 +376,7 @@ function syncWsRoot(force) {
 
 /* ============================================================ conversas */
 function newConv(projectId) {
+  const prevKit = kitModelId();
   const proj = projectId ? S.projects.find((p) => p.id === projectId) : null;
   const personaId = S.draftPersona !== undefined ? S.draftPersona : (proj?.personaId || S.settings.defaultPersona || null);
   S.draftPersona = undefined;
@@ -360,11 +387,16 @@ function newConv(projectId) {
   S.curId = c.id;
   saveConvs();
   renderConvList(); renderChat();
+  const nk = kitModelId();
+  if (nk && nk !== prevKit) applyKit(nk, true);
   return c;
 }
 
 function selectConv(id) {
+  const prev = kitModelId();
   S.curId = id; saveConvs(); closeMention?.();
+  const next = kitModelId();
+  if (next && next !== prev) applyKit(next, true);
   if (S.view !== 'chat') setView('chat');
   renderConvList(); renderChat();
 }
@@ -1242,7 +1274,11 @@ async function ensureModel(conv, signal) {
 
 function chooseModel(id) {
   const c = cur();
+  const prev = kitModelId();
+  if (prev && prev !== id) saveKit(prev);
   if (c) { c.modelId = id; saveConvs(); } else S.draftModel = id;
+  // o modelo novo traz a seleção dele; se ainda não tiver, herda a atual
+  if (!applyKit(id, true)) saveKit(id);
   updatePickers();
   // ninguém respondendo: já carrega, para a próxima mensagem não esperar
   if (id !== S.models.active && !S.runs.size) activateModel(id).catch((e) => toast(e.message, 'err'));
@@ -1262,7 +1298,7 @@ function fillModelPop() {
       want?.id === m.id ? ic('check') : null));
   }
   pop.append(...[h('div.menu-sep'),
-    h('div.mi-note', null, 'Só um modelo fica carregado por vez. Trocar descarrega o atual; conversas que estiverem respondendo terminam antes.'),
+    h('div.mi-note', null, 'Só um modelo fica carregado por vez. Cada modelo lembra as habilidades, conectores e ferramentas que estavam marcados com ele.'),
     S.llama && !S.llama.running && S.health.status === 'offline' ? h('button.menu-item', { onclick: () => { closePops(); startLlama(); } }, ic('play'), 'Iniciar o servidor') : null,
     S.llama?.running ? h('button.menu-item', { onclick: () => { closePops(); stopLlama(); } }, ic('stop'), 'Parar o servidor') : null,
     h('button.menu-item', { onclick: () => { closePops(); setView('server'); } }, ic('server'), 'Gerenciar modelos e servidor')].filter(Boolean));
@@ -2836,7 +2872,7 @@ function renderSettings() {
     h('div.tsec', null, sec),
     h('div.tgrid', null, gs.map((g) => {
       const i = h('input', { type: 'checkbox', checked: !!S.settings.tools[g] });
-      i.addEventListener('change', () => { S.settings.tools[g] = i.checked; store.set('settings', S.settings); updatePickers(); });
+      i.addEventListener('change', () => { S.settings.tools[g] = i.checked; store.set('settings', S.settings); saveKit(); updatePickers(); });
       return h('label.tcard', { title: TOOL_INFO[g].desc }, h('span.tc-main', null, h('span.tc-title', null, TOOL_INFO[g].title), h('span.tc-desc', null, TOOL_INFO[g].desc)), h('span.switch', null, i, h('span')));
     })),
   ]);

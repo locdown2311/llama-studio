@@ -1,6 +1,6 @@
 [package]
 name = "llama-studio"
-version = "2.8.2"
+version = "2.8.3"
 edition = "2021"
 description = "Interface local para o llama-server com pasta de trabalho, habilidades e conectores MCP"
 
