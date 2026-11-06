@@ -338,9 +338,10 @@ const S = {
 function running(c) { return !!c && S.runs.has(c.id); }
 function cur() { return S.convs.find((c) => c.id === S.curId) || null; }
 const saveConvs = debounce(() => {
-  // campos que começam com _ (imagens, progresso) não vão para o disco
+  // campos que começam com _ (imagens, progresso, estado da sessão) não vão para o disco,
+  // nem nas mensagens nem na conversa (um Map salvo vira {} e quebra ao recarregar)
   const strip = (m) => Object.fromEntries(Object.entries(m).filter(([k]) => !k.startsWith('_')));
-  store.set('convs', S.convs.map((c) => ({ ...c, messages: c.messages.map(strip) })));
+  store.set('convs', S.convs.map((c) => ({ ...strip(c), messages: c.messages.map(strip) })));
   store.set('cur', S.curId);
 }, 400);
 function saveSel() { store.set('sel', S.sel); saveKit(); }
@@ -3030,6 +3031,8 @@ function shouldAudit(info, conv) {
   return needsApproval(info, conv);
 }
 
+// aprovações já dadas nesta sessão (fora do objeto da conversa: ele é salvo como JSON)
+const AUDITS = new WeakMap();
 async function auditCall(tc, info, conv, signal) {
   const t0 = performance.now();
   const name = tc.function.name;
@@ -3037,7 +3040,8 @@ async function auditCall(tc, info, conv, signal) {
   const key = name + '\n' + JSON.stringify(args);
   const ws = wsOf(conv);
   const done = (v) => ({ ...v, ms: Math.round(performance.now() - t0) });
-  const prev = (conv._audits ||= new Map()).get(key);
+  if (!AUDITS.has(conv)) AUDITS.set(conv, new Map());
+  const prev = AUDITS.get(conv).get(key);
   if (prev) return done({ ...prev, reason: prev.reason + ' (mesma ação já aprovada nesta conversa)' });
   // leitura dentro da pasta: nem precisa perguntar ao modelo
   if (info.source === 'builtin' && !info.mutating && insideWs(args?.path, ws)) return done({ risk: 'baixo', approve: true, reason: 'Só leitura, dentro da pasta de trabalho.', rule: true });
@@ -3081,7 +3085,7 @@ async function auditCall(tc, info, conv, signal) {
   const max = RISK_RANK[S.settings.auditMax || 'baixo'] ?? 0;
   const approve = /^aprov/i.test(String(v.decisao || '')) && RISK_RANK[risk] <= max;
   const out = { risk, approve, reason: String(v.motivo || '').trim().slice(0, 400) || (approve ? 'Sem observações.' : 'Sem motivo informado.') };
-  if (approve) conv._audits.set(key, out);
+  if (approve) AUDITS.get(conv).set(key, out);
   return done(out);
 }
 
@@ -3237,7 +3241,9 @@ async function runAgent(conv) {
   } catch (e) {
     if (!(e.name === 'AbortError' || ac.signal.aborted)) conv.messages.push({ role: 'error', content: e.message || String(e) });
   } finally {
-    for (const m of conv.messages) if (m.role === 'tool' && ['pending', 'running', 'approval', 'audit'].includes(m.status)) { m.status = 'denied'; m.content = m.content || 'Cancelado pelo usuário.'; }
+    // só diz "cancelado pelo usuário" se foi o usuário; erro interno não é cancelamento
+    const why = ac.signal.aborted ? 'Cancelado pelo usuário.' : 'Não executada: a resposta parou por um erro do studio (veja a mensagem abaixo).';
+    for (const m of conv.messages) if (m.role === 'tool' && ['pending', 'running', 'approval', 'audit'].includes(m.status)) { m.status = ac.signal.aborted ? 'denied' : 'error'; m.isError = true; m.content = m.content || why; }
     setTimeout(() => maybeSummarizeMap(conv), 1500); // pré-leitura: só quando o servidor ficar livre
     const last = conv.messages[conv.messages.length - 1];
     if (last?.role === 'assistant' && !last.content && !last.reasoning && !last.tool_calls?.length) conv.messages.pop();
