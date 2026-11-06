@@ -31,6 +31,7 @@
       <button class="nav-item" data-view="personas"></button>
       <button class="nav-item" data-view="tools"></button>
       <button class="nav-item" data-view="server"></button>
+      <button class="nav-item" data-view="calendar"></button>
       <button class="nav-item" data-view="settings"></button>
     </nav>
     <div class="side-scroll" id="conv-list"></div>
@@ -219,6 +220,9 @@
       <div class="tgrid" id="ctx-opts"></div>
       <h2 class="sec-title">Programas</h2>
       <div class="grid bins" id="bins-grid"></div>
+      <h2 class="sec-title">Arrumar pastas</h2>
+      <p class="lead small">Regras que movem arquivos para subpastas (por tipo, nome, data). Rodam sem o modelo, com prévia e desfazer; as automáticas olham a pasta a cada 5 minutos.</p>
+      <div id="arr-box"></div>
     </div>
   </section>
 
@@ -252,6 +256,19 @@
   </section>
 
   <!-- ===================== CONFIG ===================== -->
+  <section class="view" id="view-calendar">
+    <div class="page">
+      <header class="page-head">
+        <div>
+          <h1>Calendário</h1>
+          <p class="lead">Posts planejados por dia. Cada post pode ter a própria conversa com o modelo.</p>
+        </div>
+        <div class="page-actions" id="cal-actions"></div>
+      </header>
+      <div id="cal"></div>
+    </div>
+  </section>
+
   <section class="view" id="view-settings">
     <div class="page narrow">
       <header class="page-head"><div><h1>Configurações</h1></div></header>

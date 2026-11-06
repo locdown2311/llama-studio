@@ -47,6 +47,7 @@ const ICONS = {
   braces: '<path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1M16 21h1a2 2 0 0 0 2-2v-5a2 2 0 0 1 2-2 2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"/>',
   home: '<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   ban: '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
+  calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   tag: '<path d="M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
   shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>',
@@ -387,6 +388,7 @@ function setView(v) {
   if (v === 'personas') renderPersonasPage();
   if (v === 'tools') renderToolsPage();
   if (v === 'server') renderServerPage();
+  if (v === 'calendar') renderCalendar();
   if (v === 'chat') { renderConvList(); setTimeout(() => focusEditor(), 20); }
 }
 
@@ -2107,7 +2109,189 @@ function renderToolsPage() {
         h('span.tc-desc', null, 'Em vez de mandar o esquema de todas as ferramentas dos conectores e o texto inteiro das habilidades em todo pedido, manda só um catálogo com nome e uma linha. O modelo carrega o que for usar. Reduz muito o contexto fixo.')), h('span.switch', null, i, h('span')));
     })());
   drawBins();
+  drawArr();
   loadBins(false).then(() => { if (!S.bins?.items.some((b) => 'latest' in b)) loadBins(true); });
+}
+
+/* ------------------------------------------------------------ arrumar pastas */
+// O motor é do servidor (sem o modelo). O modelo só ajuda a montar a regra a partir de uma frase,
+// e só quando você pede (uma resposta curta em JSON).
+async function drawArr() {
+  const box = $('#arr-box'); if (!box) return;
+  let st;
+  try { st = await api('/api/arrumar', {}); } catch (e) { box.textContent = e.message; return; }
+  box.innerHTML = '';
+  const rules = st.rules || [];
+  const saveRules = async () => { await api('/api/arrumar/rules', { rules }); drawArr(); };
+  const list = h('div.arr-list');
+  for (const r of rules) {
+    const sw = (key, label) => { const i = h('input', { type: 'checkbox', checked: key === 'enabled' ? r.enabled !== false : !!r[key] }); i.addEventListener('change', () => { r[key] = i.checked; saveRules(); }); return h('label.arr-sw', null, h('span.switch', null, i, h('span')), label); };
+    list.append(h('div.arr-rule' + (r.enabled === false ? '.off' : ''), null,
+      h('div.arr-main', null, h('b', null, r.name || 'Regra'),
+        h('div.arr-path', null, h('code', null, r.src || '?'), ' → ', h('code', null, r.dest || '?')),
+        h('small.muted', null, [r.patterns || '*', r.contains ? `contém "${r.contains}"` : '', r.minAgeDays ? `com mais de ${r.minAgeDays} dia(s)` : ''].filter(Boolean).join(' · '))),
+      h('div.arr-acts', null, sw('enabled', 'Ativa'), sw('auto', 'Automática'),
+        h('button.btn.sm', { onclick: () => arrPreview(r) }, 'Prévia'),
+        h('button.icon-btn.sm', { title: 'Editar', 'aria-label': 'Editar', html: svg('edit'), onclick: () => arrEdit(r, rules, saveRules) }),
+        h('button.icon-btn.sm', { title: 'Apagar', 'aria-label': 'Apagar', html: svg('trash'), onclick: async () => { if (await confirmBox(`Apagar a regra "${r.name}"? Os arquivos já movidos ficam onde estão.`, 'Apagar', true)) { rules.splice(rules.indexOf(r), 1); saveRules(); } } }))));
+  }
+  if (!rules.length) list.append(h('div.side-empty', null, 'Nenhuma regra ainda. Ex.: "prints da pasta Imagens vão para Capturas/ano/mês".'));
+  box.append(list, h('div', { style: { margin: '10px 0 18px' } }, h('button.btn', { onclick: () => arrEdit(null, rules, saveRules) }, ic('plus'), 'Nova regra')));
+  const runs = (st.runs || []).slice(0, 8);
+  if (runs.length) {
+    box.append(h('div.tsec', null, 'Últimas execuções'), h('div.arr-runs', null, runs.map((x) => h('div.arr-run', null,
+      h('span', null, `${new Date(x.at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })} · ${x.name || 'regra'}${x.auto ? ' (automática)' : ''}`),
+      h('small.muted', null, `${x.moves.length} arquivo(s)${x.errors?.length ? `, ${x.errors.length} erro(s)` : ''}`),
+      x.moves.length ? h('button.btn.sm', { onclick: async () => { const r = await api('/api/arrumar/undo', { run: x.id }); toast(`${r.back} arquivo(s) voltaram${r.errors.length ? `, ${r.errors.length} não` : ''}`); drawArr(); } }, 'Desfazer') : null))));
+  }
+}
+async function arrPreview(r) {
+  let p;
+  try { p = await api('/api/arrumar/plan', { rule: r }); } catch (e) { toast(e.message, 'err'); return; }
+  const rel = (x) => String(x).replace(r.src.replace(/[\\/]+$/, ''), '…');
+  const m = modal({ title: `Prévia: ${r.name}`, wide: true, body: h('div.form', null,
+    h('p.muted', { style: { margin: 0 } }, p.count ? `${p.count} arquivo(s) seriam movidos agora.` : 'Nada para mover agora.'),
+    p.count ? h('div.arr-moves', null, p.moves.map(([a, b]) => h('div', null, h('span', null, basename(a)), h('span.muted', null, ' → '), h('code', null, rel(b).replace(/[\\/][^\\/]*$/, '')))), p.count > p.moves.length ? h('div.muted', null, `... e mais ${p.count - p.moves.length}`) : null) : null),
+  foot: [h('button.btn', { onclick: () => m.close() }, 'Fechar'), p.count ? h('button.btn.primary', { onclick: async () => { const x = await api('/api/arrumar/apply', { rule: r }); m.close(); toast(`${x.moves.length} arquivo(s) movidos${x.errors.length ? `, ${x.errors.length} erro(s)` : ''}. Dá para desfazer em Últimas execuções.`); drawArr(); } }, `Mover ${p.count}`) : null] });
+}
+function arrEdit(r, rules, saveRules) {
+  const isNew = !r; r = r || { id: uid(), enabled: true, auto: false };
+  const desc = h('textarea.textarea', { rows: 2, placeholder: 'Ex.: capturas de tela da pasta Imagens vão para Capturas, separadas por ano e mês' });
+  const f = {
+    name: h('input.input', { value: r.name || '' }),
+    src: h('input.input.mono', { value: r.src || '' }),
+    patterns: h('input.input.mono', { value: r.patterns || '', placeholder: '*.png;*.jpg' }),
+    contains: h('input.input', { value: r.contains || '', placeholder: 'opcional' }),
+    minAgeDays: h('input.input', { value: r.minAgeDays || '', placeholder: '0', inputmode: 'numeric' }),
+    dest: h('input.input.mono', { value: r.dest || '', placeholder: 'Capturas\\{ano}\\{mesnome}' }),
+  };
+  const auto = h('input', { type: 'checkbox', checked: !!r.auto });
+  const ask = h('button.btn', { type: 'button', onclick: async () => {
+    if (!desc.value.trim()) { toast('Descreva a regra.'); return; }
+    ask.disabled = true; ask.textContent = 'Montando...';
+    try {
+      const out = await sideAsk(null, 'Converta o pedido do usuário numa regra para mover arquivos. Responda só JSON: {"name": "nome curto", "src": "pasta de origem (caminho absoluto do Windows)", "patterns": "curingas separados por ;", "contains": "texto no nome ou vazio", "minAgeDays": número, "dest": "destino relativo à origem ou absoluto; pode usar {ano} {mes} {mesnome} {dia} {ext}"}.',
+        `Pasta do usuário: ${S.info.home}\nPastas comuns: Downloads, Documents (Documentos), Pictures (Imagens), Desktop (Área de Trabalho), Videos, Music.\nPedido: ${desc.value.trim()}`, { maxTokens: 160 });
+      const j = JSON.parse(out.match(/\{[\s\S]*\}/)?.[0] || '{}');
+      for (const k of Object.keys(f)) if (j[k] != null && j[k] !== '') f[k].value = j[k];
+    } catch (e) { toast('Não consegui montar: ' + e.message, 'err'); }
+    ask.disabled = false; ask.textContent = 'Montar com o modelo';
+  } }, 'Montar com o modelo');
+  const m = modal({ title: isNew ? 'Nova regra' : 'Editar regra', wide: true, body: h('div.form', null,
+    h('div.field', null, h('label', null, 'Descreva (opcional)'), desc, h('div', { style: { marginTop: '6px' } }, ask)),
+    h('div.field', null, h('label', null, 'Nome'), f.name),
+    h('div.field', null, h('label', null, 'Pasta de origem'), h('div', { style: { display: 'flex', gap: '8px' } }, f.src, h('button.btn', { type: 'button', onclick: async () => { const p = await pickPath({ title: 'Pasta de origem', mode: 'dir', start: f.src.value || S.info.home }); if (p) f.src.value = p; } }, 'Procurar'))),
+    h('div.row', null, h('div.field', null, h('label', null, 'Arquivos'), f.patterns), h('div.field', null, h('label', null, 'Nome contém'), f.contains), h('div.field', null, h('label', null, 'Idade mínima (dias)'), f.minAgeDays)),
+    h('div.field', null, h('label', null, 'Destino'), f.dest, h('small', null, 'Relativo à origem ou caminho completo. {ano}, {mes}, {mesnome}, {dia} e {ext} vêm da data e do tipo do arquivo. Só a própria pasta é lida (sem subpastas).')),
+    h('label.tcard', null, h('span.tc-main', null, h('span.tc-title', null, 'Automática'), h('span.tc-desc', null, 'Roda sozinha a cada 5 minutos enquanto o studio estiver aberto.')), h('span.switch', null, auto, h('span')))),
+  foot: [h('button.btn', { onclick: () => m.close() }, 'Cancelar'), h('button.btn.primary', { onclick: async () => {
+    for (const k of Object.keys(f)) r[k] = k === 'minAgeDays' ? Number(f[k].value) || 0 : f[k].value.trim();
+    r.auto = auto.checked;
+    if (!r.src || !r.dest) { toast('Preencha a origem e o destino.', 'err'); return; }
+    if (!r.name) r.name = basename(r.src) + ' → ' + r.dest;
+    if (isNew) rules.push(r);
+    m.close(); await saveRules(); arrPreview(r);
+  } }, 'Salvar e ver prévia')] });
+}
+
+/* ------------------------------------------------------------ calendário de conteúdo */
+// Posts guardados no servidor (mesma estrutura do caderno, chave "calendario").
+// O modelo só entra quando você pede: escrever um post (na conversa dele) ou sugerir temas.
+const CAL_KEY = 'calendario';
+const CAL_ST = [['ideia', 'Ideia'], ['rascunho', 'Rascunho'], ['pronto', 'Pronto'], ['publicado', 'Publicado']];
+S.calMonth = (() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); })();
+const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+async function calData() { return nbLoad(CAL_KEY); }
+async function calSave() { await nbSave(CAL_KEY); if (S.view === 'calendar') renderCalendar(); }
+async function renderCalendar() {
+  const box = $('#cal'); const acts = $('#cal-actions'); if (!box) return;
+  const nb = await calData();
+  const mo = S.calMonth;
+  acts.innerHTML = '';
+  acts.append(
+    h('button.btn', { onclick: () => { S.calMonth = new Date(mo.getFullYear(), mo.getMonth() - 1, 1); renderCalendar(); } }, '‹'),
+    h('b.cal-month', null, ((t) => t[0].toUpperCase() + t.slice(1))(mo.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }))),
+    h('button.btn', { onclick: () => { S.calMonth = new Date(mo.getFullYear(), mo.getMonth() + 1, 1); renderCalendar(); } }, '›'),
+    h('button.btn', { onclick: (e) => calSuggest(e.currentTarget) }, ic('sparkles'), 'Sugerir temas'));
+  box.innerHTML = '';
+  const grid = h('div.cal-grid');
+  for (const d of ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']) grid.append(h('div.cal-dow', null, d));
+  const start = new Date(mo.getFullYear(), mo.getMonth(), 1 - mo.getDay());
+  const today = isoDay(new Date());
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+    if (i >= 35 && d.getMonth() !== mo.getMonth()) break;
+    const key = isoDay(d);
+    const posts = nb.cards.filter((p) => p.date === key);
+    grid.append(h('div.cal-day' + (d.getMonth() !== mo.getMonth() ? '.out' : '') + (key === today ? '.today' : ''), { onclick: (e) => { if (e.target === e.currentTarget || e.target.classList.contains('cal-n')) editPost(null, key); } },
+      h('span.cal-n', null, String(d.getDate())),
+      posts.map((p) => h('button.cal-post.st-' + (p.status || 'ideia'), { title: p.caption || p.title, onclick: () => editPost(p) }, p.good ? '★ ' : '', p.title))));
+  }
+  box.append(grid, h('div.cal-legend', null, CAL_ST.map(([v, l]) => h('span.cal-post.st-' + v, null, l)), h('span.muted', null, 'Clique num dia para criar um post.')));
+}
+async function editPost(p, date) {
+  const nb = await calData();
+  const isNew = !p; p = p || { id: nb.next++, date, status: 'ideia', at: Date.now() };
+  const title = h('input.input', { value: p.title || '', placeholder: 'Tema do post' });
+  const day = h('input.input', { type: 'date', value: p.date || isoDay(new Date()) });
+  const st = h('select.select', null, CAL_ST.map(([v, l]) => h('option', { value: v }, l))); st.value = p.status || 'ideia';
+  const cap = h('textarea.textarea', { rows: 6, value: p.caption || '', placeholder: 'Legenda' });
+  const tags = h('input.input', { value: p.hashtags || '', placeholder: '#hashtags' });
+  const img = h('input.input.mono', { value: p.image || '', placeholder: 'Caminho da imagem' });
+  const good = h('input', { type: 'checkbox', checked: !!p.good });
+  const thumb = h('div.cal-thumb');
+  const showThumb = async () => { thumb.innerHTML = ''; const v = img.value.trim(); if (!v || !IMG_RE.test(v)) return; const d = await loadImg(v); if (d) thumb.append(h('img', { src: d })); };
+  img.addEventListener('change', showThumb);
+  const conv = p.conv && S.convs.find((c) => c.id === p.conv);
+  const lastAnswer = conv && [...conv.messages].reverse().find((m) => m.role === 'assistant' && splitThink(m.content || '').text.trim());
+  const collect = () => Object.assign(p, { title: title.value.trim() || 'Post', date: day.value, status: st.value, caption: cap.value, hashtags: tags.value.trim(), image: img.value.trim(), good: good.checked, at: Date.now() });
+  const persist = async () => { collect(); if (isNew && !nb.cards.includes(p)) nb.cards.push(p); await calSave(); };
+  const m = modal({ title: isNew ? 'Novo post' : p.title, wide: true, body: h('div.form', null,
+    h('div.row', null, h('div.field', null, h('label', null, 'Tema'), title), h('div.field', null, h('label', null, 'Dia'), day), h('div.field', null, h('label', null, 'Situação'), st)),
+    h('div.field', null, h('label', null, 'Legenda'), cap, lastAnswer ? h('div', { style: { marginTop: '6px' } }, h('button.btn.sm', { type: 'button', onclick: () => { cap.value = splitThink(lastAnswer.content).text.trim(); if (st.value === 'ideia') st.value = 'rascunho'; } }, ic('download'), 'Usar a última resposta da conversa')) : null),
+    h('div.field', null, h('label', null, 'Hashtags'), tags),
+    h('div.field', null, h('label', null, 'Imagem'), h('div', { style: { display: 'flex', gap: '8px' } }, img, h('button.btn', { type: 'button', onclick: async () => { const x = await pickPath({ title: 'Imagem do post', mode: 'file', start: img.value ? img.value.replace(/[\\/][^\\/]*$/, '') : S.info.home }); if (x) { img.value = x; showThumb(); } } }, 'Procurar')), thumb),
+    h('label.tcard', null, h('span.tc-main', null, h('span.tc-title', null, '★ Foi bem'), h('span.tc-desc', null, 'As sugestões de temas se baseiam nos posts marcados.')), h('span.switch', null, good, h('span')))),
+  foot: [
+    !isNew ? h('button.btn.danger', { style: { marginRight: 'auto' }, onclick: async () => { nb.cards = nb.cards.filter((x) => x !== p); m.close(); await calSave(); } }, 'Apagar') : null,
+    h('button.btn', { onclick: async () => { await persist(); m.close(); writePost(p); } }, ic('chat'), conv ? 'Abrir a conversa' : 'Escrever com o modelo'),
+    h('button.btn', { onclick: () => m.close() }, 'Cancelar'),
+    h('button.btn.primary', { onclick: async () => { await persist(); m.close(); } }, 'Salvar')] });
+  showThumb();
+}
+async function writePost(p) {
+  const old = p.conv && S.convs.find((c) => c.id === p.conv);
+  if (old) { selectConv(old.id); setView('chat'); return; }
+  const c = newConv(null);
+  c.title = `Post ${p.date.split('-').reverse().slice(0, 2).join('/')}: ${p.title}`.slice(0, 60);
+  p.conv = c.id; await calSave();
+  setView('chat');
+  const good = (await calData()).cards.filter((x) => x.good && x.caption).slice(-2);
+  const text = [`Escreva a legenda de um post de Instagram sobre: ${p.title} (para ${p.date.split('-').reverse().join('/')}).`,
+    p.caption ? `Rascunho atual:\n${p.caption}` : '',
+    good.length ? `Posts que foram bem, como referência de tom:\n${good.map((x) => '- ' + clipText(x.caption, 280)).join('\n')}` : '',
+    'Entregue só a legenda pronta e, na última linha, até 8 hashtags.'].filter(Boolean).join('\n\n');
+  const refs = p.image ? [{ name: basename(p.image), path: p.image, dir: false }] : [];
+  await submit(c, { content: text, parts: [{ t: 'text', v: text }, ...refs.map((r) => ({ t: 'pill', kind: 'file', ...r }))], refs });
+}
+async function calSuggest(btn) {
+  const nb = await calData();
+  const today = new Date(); const days = [];
+  for (let i = 0; i < 21 && days.length < 7; i++) { const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i); const k = isoDay(d); if (!nb.cards.some((p) => p.date === k)) days.push(k); }
+  if (!days.length) { toast('As próximas três semanas já têm posts.'); return; }
+  const recent = nb.cards.slice(-30).map((p) => `- ${p.date} ${p.good ? '★ ' : ''}${p.title}`).join('\n') || '(nenhum ainda)';
+  btn.disabled = true;
+  try {
+    const out = await sideAsk(null, 'Você sugere temas de posts para o Instagram do usuário. Mantenha o assunto e o tom dos posts anteriores (os com ★ foram bem), sem repetir temas. Responda uma linha por dia, no formato AAAA-MM-DD | tema curto. Nada além disso.',
+      `Posts anteriores:\n${recent}\n\nDias sem post: ${days.join(', ')}`, { maxTokens: 220, temperature: 0.7 });
+    let n = 0;
+    for (const line of out.split('\n')) {
+      const mm = line.match(/(\d{4}-\d{2}-\d{2})\s*\|\s*(.+)/);
+      if (mm && days.includes(mm[1]) && !nb.cards.some((p) => p.date === mm[1])) { nb.cards.push({ id: nb.next++, date: mm[1], title: mm[2].trim().slice(0, 120), status: 'ideia', at: Date.now(), suggested: true }); n++; }
+    }
+    await calSave(); toast(n ? `${n} temas sugeridos` : 'O modelo não sugeriu nada utilizável.');
+  } catch (e) { toast('Não consegui sugerir: ' + e.message, 'err'); }
+  btn.disabled = false;
 }
 
 function drawBins() {
@@ -4731,7 +4915,10 @@ async function editCard(conv, card) {
     h('div.field', null, h('label', null, 'Título'), title),
     h('div.row', null, h('div.field', null, h('label', null, 'Tipo'), kind), h('div.field', null, h('label', null, 'Endereço ou local'), addr), h('div.field', null, h('label', null, 'Situação'), status)),
     h('div.field', null, h('label', null, 'Anotações'), text)),
-  foot: [h('button.btn', { onclick: () => m.close() }, 'Cancelar'), h('button.btn.primary', { onclick: async () => {
+  foot: [
+    card ? h('button.btn', { style: { marginRight: 'auto' }, title: 'Abre uma conversa que testa esta hipótese no debugger e atualiza o cartão com a evidência', onclick: () => { m.close(); testCard(conv, card); } }, ic('play'), 'Testar') : null,
+    card?.addr ? h('button.btn', { title: 'Guarda os bytes desta função para reconhecê-la em outros binários', onclick: () => { m.close(); sigDialog(conv, card); } }, ic('braces'), 'Criar assinatura') : null,
+    h('button.btn', { onclick: () => m.close() }, 'Cancelar'), h('button.btn.primary', { onclick: async () => {
     if (!title.value.trim()) { toast('Dê um título.', 'err'); return; }
     const c = card || { id: nb.next++, conv: conv.id };
     Object.assign(c, { title: title.value.trim(), kind: kind.value.trim(), addr: addr.value.trim(), status: status.value, text: text.value, at: Date.now() });
@@ -4763,6 +4950,102 @@ function nbExport(conv, nb, kind) {
     .then((r) => { toast(`Copiado e salvo em ${relOf(r.path)}`); refreshTree(); })
     .catch((e) => toast(e.message, 'err'));
 }
+/* ------------------------------------------------------------ hipótese testada */
+// Abre uma conversa que planeja e executa o teste no debugger e grava o veredito no cartão.
+// O pedido é curto e direto; as ferramentas do debugger entram pelo catálogo de conectores.
+async function testCard(conv, card) {
+  const dbg = S.mcp.filter((x) => x.status === 'connected' && /dbg|debug|ida|ghidra|binja|radare|r2/i.test(x.name)).map((x) => x.name);
+  const proj = projectOf(conv);
+  const c = newConv(proj?.id || null);
+  c.title = `Testar #${card.id}: ${card.title}`.slice(0, 60);
+  c.testCard = card.id;
+  if (dbg.length) { const sel = activeSel(c); for (const n of dbg) if (!sel.mcp.includes(n)) sel.mcp.push(n); S.sel.mcp = [...new Set([...S.sel.mcp, ...dbg])]; saveSel(); }
+  if (!S.settings.tools.notebook) { S.settings.tools.notebook = true; store.set('settings', S.settings); }
+  setView('chat'); updatePickers();
+  const text = [
+    `Teste a hipótese do cartão #${card.id} do caderno: "${card.title}"${card.kind ? ` (${card.kind}` + (card.addr ? ` em ${card.addr})` : ')') : card.addr ? ` (${card.addr})` : ''}.`,
+    card.text ? `Anotações: ${clipText(card.text, 600)}` : '',
+    'Faça assim: 1) diga em até 3 linhas o que, se for verdade, você vai observar; 2) execute o mínimo de passos no debugger para observar (breakpoint, executar, ler registradores ou memória); 3) atualize o cartão com notebook update: status "confirmado" ou "descartado" e no text a evidência (o que viu, com endereços e valores). Se não der para concluir, deixe "hipótese" e explique o que faltou.',
+    dbg.length ? '' : 'Observação: nenhum conector de debugger está conectado; diga isso e sugira como testar manualmente.',
+  ].filter(Boolean).join('\n\n');
+  card.testConv = c.id; card.at = Date.now(); nbSave(nbKey(conv));
+  await submit(c, { content: text, parts: [{ t: 'text', v: text }], refs: [] });
+}
+
+/* ------------------------------------------------------------ assinaturas de funções */
+// Montadas e procuradas pelo servidor, sem o modelo: zero tokens.
+function binKey(conv) { return 'nbBin:' + nbKey(conv); }
+async function sigDialog(conv, card) {
+  const file = h('input.input.mono', { value: card.module || store.get(binKey(conv), ''), placeholder: 'C:\\\\caminho\\\\programa.exe ou .dll' });
+  const addr = h('input.input.mono', { value: card.addr || '' });
+  const base = h('input.input.mono', { placeholder: 'só se o x64dbg carregou em outra base (ASLR)' });
+  const len = h('input.input', { value: '48', inputmode: 'numeric' });
+  const out = h('div.sig-out');
+  let made = null;
+  const gen = async () => {
+    out.innerHTML = ''; made = null;
+    try {
+      const r = await api('/api/sig/make', { file: file.value.trim().replace(/^"|"$/g, ''), addr: addr.value, base: base.value, len: Number(len.value) || 48, ws: wsOf(conv) });
+      made = r;
+      out.append(h('code.sig-pat', null, r.pattern),
+        h('small', null, `RVA ${r.rva} · base preferida ${r.imageBase} · ${r.is64 ? '64' : '32'} bits · `, r.unique ? h('b.ok', null, 'única no binário') : h('b.warn', null, `aparece ${r.hits}× no binário; aumente o tamanho`)));
+      saveBtn.disabled = !r.unique;
+    } catch (e) { out.append(h('div.chg-note', null, e.message)); saveBtn.disabled = true; }
+  };
+  const saveBtn = h('button.btn.primary', { disabled: true, onclick: async () => {
+    if (!made) return;
+    const all = (await api('/api/sig', {})).sigs || [];
+    all.push({ id: uid(), name: card.title, kind: card.kind || 'função', note: clipText(card.text || '', 300), pattern: made.pattern, is64: made.is64, from: basename(file.value.trim()), rva: made.rva, at: Date.now() });
+    await api('/api/sig/save', { sigs: all });
+    store.set(binKey(conv), file.value.trim());
+    card.module = file.value.trim(); card.sig = true; await nbSave(nbKey(conv));
+    m.close(); toast(`Assinatura salva (${all.length} no total)`);
+  } }, 'Salvar assinatura');
+  const m = modal({ title: `Assinatura de "${card.title}"`, wide: true, body: h('div.form', null,
+    h('p.muted', { style: { margin: 0 } }, 'Os primeiros bytes da função, com curingas onde o código muda entre versões (chamadas, saltos e endereços). Depois o studio reconhece a função em outros binários, sem o modelo.'),
+    h('div.field', null, h('label', null, 'Binário (exe ou dll)'), h('div', { style: { display: 'flex', gap: '8px' } }, file, h('button.btn', { type: 'button', onclick: async () => { const p = await pickPath({ title: 'Escolher o binário', mode: 'file', start: file.value ? file.value.replace(/[\\/][^\\/]*$/, '') : S.info.home }); if (p) { file.value = p; gen(); } } }, 'Procurar'))),
+    h('div.row', null, h('div.field', null, h('label', null, 'Endereço'), addr), h('div.field', null, h('label', null, 'Base do módulo'), base), h('div.field', null, h('label', null, 'Bytes'), len)),
+    out),
+  foot: [h('button.btn', { onclick: gen }, 'Gerar'), h('button.btn', { onclick: () => m.close() }, 'Cancelar'), saveBtn] });
+  if (file.value) gen();
+}
+async function sigScan(conv) {
+  const p = await pickPath({ title: 'Procurar assinaturas em qual binário?', mode: 'file', start: store.get(binKey(conv), '').replace(/[\\/][^\\/]*$/, '') || S.info.home });
+  if (!p) return;
+  let r;
+  try { r = await api('/api/sig/scan', { file: p, ws: wsOf(conv) }); } catch (e) { toast(e.message, 'err'); return; }
+  if (!r.total) { toast('Nenhuma assinatura salva ainda. Crie pelo cartão de uma função (botão Criar assinatura).'); return; }
+  const key = nbKey(conv); const nb = await nbLoad(key);
+  const addCard = (x) => {
+    if (x.hits.length !== 1) return false;
+    const va = x.hits[0].va;
+    if (nb.cards.some((c) => (c.addr || '').toLowerCase() === va.toLowerCase())) return false;
+    nb.cards.push({ id: nb.next++, title: x.name, kind: x.kind || 'função', addr: va, status: 'hipótese', module: p, text: `Reconhecida por assinatura (vinda de ${x.from || 'outro binário'}).${x.note ? '\n' + x.note : ''}`, at: Date.now(), conv: conv.id });
+    return true;
+  };
+  const list = h('div.sig-list', null, r.matches.length ? r.matches.map((x) => h('div.sig-row', null,
+    h('div', null, h('b', null, x.name), h('small.muted', null, ` · ${x.kind || 'função'} · de ${x.from || '?'}`)),
+    h('code', null, x.hits.length === 1 ? x.hits[0].va : `${x.hits.length} lugares`),
+    h('button.btn.sm', { disabled: x.hits.length !== 1, onclick: async (e) => { if (addCard(x)) { await nbSave(key); e.currentTarget.textContent = 'Criado'; } e.currentTarget.disabled = true; } }, 'Criar cartão'))) : h('p.muted', null, 'Nenhuma assinatura encontrada neste binário.'));
+  const m = modal({ title: `Assinaturas em ${basename(p)}`, wide: true, body: h('div.form', null,
+    h('p.muted', { style: { margin: 0 } }, `${r.matches.length} de ${r.total} assinaturas encontradas · base ${r.imageBase} · ${r.is64 ? '64' : '32'} bits. Endereços na base preferida do binário.`), list),
+  foot: [r.matches.some((x) => x.hits.length === 1) ? h('button.btn', { onclick: async () => { let n = 0; for (const x of r.matches) if (addCard(x)) n++; await nbSave(key); toast(`${n} cartões criados`); m.close(); } }, 'Criar todos') : null, h('button.btn.primary', { onclick: () => m.close() }, 'Fechar')] });
+}
+async function sigManage() {
+  const r = await api('/api/sig', {});
+  let sigs = r.sigs || [];
+  const list = h('div.sig-list');
+  const draw = () => {
+    list.innerHTML = '';
+    if (!sigs.length) list.append(h('p.muted', null, 'Nenhuma assinatura salva.'));
+    for (const x of sigs) list.append(h('div.sig-row', null,
+      h('div', null, h('b', null, x.name), h('small.muted', null, ` · de ${x.from || '?'} ${x.rva || ''}`), h('code.sig-pat.sm', null, x.pattern)),
+      h('button.icon-btn.sm', { title: 'Apagar', 'aria-label': 'Apagar', html: svg('trash'), onclick: async () => { sigs = sigs.filter((y) => y !== x); await api('/api/sig/save', { sigs }); draw(); } })));
+  };
+  draw();
+  const m = modal({ title: 'Assinaturas salvas', wide: true, body: list, foot: [h('button.btn.primary', { onclick: () => m.close() }, 'Fechar')] });
+}
+
 S.nbQuery = '';
 async function drawNotebook() {
   const box = $('#ws-notebook'); if (!box || box.hidden) return;
@@ -4776,7 +5059,12 @@ async function drawNotebook() {
   const search = h('input.input.nb-search', { value: S.nbQuery, placeholder: 'Filtrar cartões', oninput: (e) => { S.nbQuery = e.target.value; clearTimeout(drawNotebook._t); drawNotebook._t = setTimeout(() => { drawNotebook().then(() => { const i = $('.nb-search'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }); }, 150); } });
   box.append(h('div.nb-top', null, search,
     h('button.icon-btn.sm', { title: 'Novo cartão', 'aria-label': 'Novo cartão', html: svg('plus'), onclick: () => editCard(c) }),
-    h('button.icon-btn.sm', { title: 'Exportar', 'aria-label': 'Exportar', html: svg('download'), onclick: (e) => { const r = e.currentTarget.getBoundingClientRect(); floatMenu(r.left - 140, r.bottom + 4, [{ label: 'Markdown (caderno.md)', icon: 'fileText', onclick: () => nbExport(c, nb, 'md') }, { label: 'Script de rótulos do x64dbg', icon: 'terminal', onclick: () => nbExport(c, nb, 'x64dbg') }]); } })));
+    h('button.icon-btn.sm', { title: 'Mais', 'aria-label': 'Mais opções do caderno', html: svg('more'), onclick: (e) => { const r = e.currentTarget.getBoundingClientRect(); floatMenu(r.left - 200, r.bottom + 4, [
+      { label: 'Procurar assinaturas num binário', icon: 'search', onclick: () => sigScan(c) },
+      { label: 'Assinaturas salvas', icon: 'braces', onclick: sigManage },
+      'sep',
+      { label: 'Exportar em Markdown', icon: 'fileText', onclick: () => nbExport(c, nb, 'md') },
+      { label: 'Exportar rótulos para o x64dbg', icon: 'terminal', onclick: () => nbExport(c, nb, 'x64dbg') }]); } })));
   const list = nb.cards.filter((x) => !q || ['title', 'kind', 'addr', 'text', 'status'].some((f) => String(x[f] || '').toLowerCase().includes(q))).sort((a, b) => (b.at || 0) - (a.at || 0));
   if (!nb.cards.length) { box.append(h('div.act-empty', null, ic('book'), 'O caderno desta pasta está vazio. O modelo registra aqui o que descobrir (com a ferramenta Caderno ligada), e você também pode anotar.')); return; }
   const counts = NB_STATUS.map((st) => [st, nb.cards.filter((x) => (x.status || 'hipótese') === st).length]);
@@ -5029,8 +5317,8 @@ function initWsTabs() {
 
 async function init() {
   applyTheme();
-  const navIcons = { chat: 'chat', skills: 'sparkles', mcp: 'plug', personas: 'user', tools: 'wrench', server: 'server', settings: 'gear' };
-  const navLabels = { chat: 'Nova conversa', skills: 'Habilidades', mcp: 'Conectores', personas: 'Personalidades', tools: 'Utilitários', server: 'Servidor', settings: 'Configurações' };
+  const navIcons = { chat: 'chat', skills: 'sparkles', mcp: 'plug', personas: 'user', tools: 'wrench', server: 'server', settings: 'gear', calendar: 'calendar' };
+  const navLabels = { chat: 'Nova conversa', skills: 'Habilidades', mcp: 'Conectores', personas: 'Personalidades', tools: 'Utilitários', server: 'Servidor', settings: 'Configurações', calendar: 'Calendário' };
   $$('.nav-item').forEach((b) => {
     b.innerHTML = svg(navIcons[b.dataset.view]) + `<span>${navLabels[b.dataset.view]}</span>`;
     b.addEventListener('click', () => {

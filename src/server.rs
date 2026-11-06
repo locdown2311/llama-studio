@@ -133,6 +133,15 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/projmap", post(projmap_get))
         .route("/api/projmap/summary", post(projmap_summary))
         .route("/api/notebook", post(nb_get))
+        .route("/api/arrumar", post(arr_get))
+        .route("/api/arrumar/rules", post(arr_rules))
+        .route("/api/arrumar/plan", post(arr_plan))
+        .route("/api/arrumar/apply", post(arr_apply))
+        .route("/api/arrumar/undo", post(arr_undo))
+        .route("/api/sig", post(sig_list))
+        .route("/api/sig/save", post(sig_save))
+        .route("/api/sig/make", post(sig_make))
+        .route("/api/sig/scan", post(sig_scan))
         .route("/api/notebook/save", post(nb_put))
         .route("/api/checkpoints/undo", post(cp_undo))
         .route("/api/checkpoints/diff", post(cp_diff))
@@ -965,6 +974,61 @@ async fn projmap_get(State(app): S, b: Bytes) -> Res {
 async fn projmap_summary(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     ok(crate::projmap::set_summary(&app, &ws_of(&app, st(&v, "ws")), st(&v, "summary")))
+}
+
+async fn arr_get(State(app): S) -> Res {
+    ok(crate::arrumar::load(&app))
+}
+
+async fn arr_rules(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    crate::arrumar::save_rules(&app, &v["rules"]).map_err(bad)?;
+    ok(json!({"ok": true}))
+}
+
+async fn arr_plan(b: Bytes) -> Res {
+    let v = body(&b);
+    let rule = v["rule"].clone();
+    let moves = tokio::task::spawn_blocking(move || crate::arrumar::plan(&rule)).await.map_err(|e| bad(e.to_string()))?.map_err(bad)?;
+    ok(json!({"count": moves.len(), "moves": moves.iter().take(300).map(|(a, b)| json!([a, b])).collect::<Vec<_>>()}))
+}
+
+async fn arr_apply(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let rule = v["rule"].clone();
+    let r = tokio::task::spawn_blocking(move || crate::arrumar::apply(&app, &rule, false)).await.map_err(|e| bad(e.to_string()))?;
+    ok(r.map_err(bad)?)
+}
+
+async fn arr_undo(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    ok(crate::arrumar::undo(&app, st(&v, "run")).map_err(bad)?)
+}
+
+async fn sig_list(State(app): S) -> Res {
+    ok(crate::pe::load(&app))
+}
+
+async fn sig_save(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    crate::pe::save(&app, &json!({"sigs": v["sigs"]})).map_err(bad)?;
+    ok(json!({"ok": true}))
+}
+
+async fn sig_make(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let path = resolve(&ws_of(&app, st(&v, "ws")), st(&v, "file"));
+    let (addr, base, len) = (st(&v, "addr").to_string(), st(&v, "base").to_string(), v["len"].as_u64().unwrap_or(48) as usize);
+    let r = tokio::task::spawn_blocking(move || crate::pe::make(&path, &addr, &base, len)).await.map_err(|e| bad(e.to_string()))?;
+    ok(r.map_err(bad)?)
+}
+
+async fn sig_scan(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let path = resolve(&ws_of(&app, st(&v, "ws")), st(&v, "file"));
+    let app2 = app.clone();
+    let r = tokio::task::spawn_blocking(move || crate::pe::scan(&app2, &path)).await.map_err(|e| bad(e.to_string()))?;
+    ok(r.map_err(bad)?)
 }
 
 async fn nb_get(State(app): S, b: Bytes) -> Res {

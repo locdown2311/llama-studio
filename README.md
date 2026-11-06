@@ -60,6 +60,8 @@ O instalador não pede administrador: instala em `%LOCALAPPDATA%\Programs\Llama 
 - **Leituras em paralelo**: leituras pedidas no mesmo passo rodam juntas, no agente e nos subagentes.
 - **Correções viram regras**: ao negar uma ação ou desfazer uma alteração, o botão "Virar regra" propõe uma regra curta, que você guarda no prompt, no projeto ou na política do auditor.
 - **Caderno de investigação**: o modelo registra achados (funções, endereços, strings, hipóteses) em cartões por pasta de trabalho e consulta antes de repetir trabalho. Exporta em Markdown ou como script de rótulos do x64dbg.
+- **Hipótese testada**: o botão Testar de um cartão abre uma conversa que testa a hipótese no debugger e grava no cartão se foi confirmada ou descartada, com a evidência.
+- **Assinaturas de funções**: os bytes de uma função identificada (com curingas em chamadas, saltos e endereços) viram uma assinatura; num binário novo, o studio acha as funções conhecidas e cria os cartões. Sem o modelo.
 - **Habilidade a partir da conversa**: transforma uma conversa que deu certo num `SKILL.md` para revisar e salvar.
 - **Aprovação de ações** que alteram algo (sempre, só escrita ou nunca).
 - **Auditor de ações**: um subagente lê cada ação que pediria permissão junto com o seu pedido, avalia o risco segundo uma política editável e aprova sozinho o que é seguro. O resto chega para você com a análise dele.
@@ -83,6 +85,10 @@ O instalador não pede administrador: instala em `%LOCALAPPDATA%\Programs\Llama 
 - **Busca e download do Hugging Face**: lista as quantizações com o tamanho, inclui o projetor de visão, retoma downloads interrompidos e cria o modelo pronto para usar.
 - **Editor visual dos argumentos** do llama-server, com explicação de cada opção e sliders com limites.
 - **Cada modelo lembra** as habilidades, conectores e ferramentas que estavam marcados com ele.
+
+### Organização
+- **Arrumar pastas**: regras que movem arquivos para subpastas por tipo, nome e data (`Capturas\{ano}\{mesnome}`), com prévia, desfazer e modo automático. O modelo só ajuda a montar a regra a partir de uma frase.
+- **Calendário de conteúdo**: posts por dia com situação, legenda, hashtags e imagem; cada post pode ter a própria conversa, e o modelo sugere temas para os dias vazios com base nos posts que foram bem.
 
 ### Utilitários
 O programa baixa e mantém na pasta dele, sem mexer no sistema: **RTK**, **ripgrep**, **fd**, **uv**, **Bun** e **7-Zip**. Eles entram no PATH dos comandos do modelo e dos conectores.
