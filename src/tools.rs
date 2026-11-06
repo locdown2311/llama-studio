@@ -295,6 +295,9 @@ pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[Strin
         if !tips.is_empty() {
             parts.push(format!("Terminal: PowerShell; use comandos dele para o resto. Atalhos instalados: {}.", tips.join("; ")));
         }
+        if !app.mcp.status_json().is_empty() {
+            parts.push("Conectores MCP já estão rodando no studio: para o que um conector faz, chame as ferramentas dele (nome_do_conector__ferramenta, ou ache com search_tools). Nunca inicie o servidor de um conector pelo terminal (uvx, npx, python, node).".into());
+        }
     }
     if has("browser") {
         parts.push("Navegador: as ferramentas browser_* controlam uma janela própria do Edge que o usuário vê. Leia a página (browser_read) e use os números dos elementos para clicar e digitar.".into());
@@ -373,6 +376,9 @@ pub async fn call(app: &Arc<App>, ws: PathBuf, name: &str, args: Value, allow: &
     };
     if name == "run_command" {
         let timeout = args.get("timeout").and_then(Value::as_u64).unwrap_or(120);
+        if let Some(msg) = connector_launch(app, s(&args, "command")) {
+            return out(Err(msg));
+        }
         let fixed = fix_command(s(&args, "command"));
         let command = fixed.as_str();
         let rtk = if rtk_on { crate::compact::rtk_rewrite(command) } else { None };
@@ -572,6 +578,40 @@ fn resolve_read(app: &App, ws: &Path, p: &str, allow: &[PathBuf]) -> Result<Path
         return Ok(full);
     }
     Err(format!("Acesso negado: \"{p}\" está fora da pasta de trabalho ({}).", ws.display()))
+}
+
+/// O modelo às vezes tenta rodar pelo terminal o servidor de um conector (ex.: `uvx mcp-server-fetch`),
+/// que já está rodando no studio. Em vez de executar, aponta as ferramentas do conector.
+fn connector_launch(app: &App, cmd: &str) -> Option<String> {
+    let low = cmd.to_lowercase().replace('\\', "/");
+    let first = low.split_whitespace().next().unwrap_or("").rsplit('/').next().unwrap_or("").trim_end_matches(".exe").to_string();
+    let launcher = matches!(first.as_str(), "uvx" | "uv" | "npx" | "bunx" | "pnpx" | "python" | "python3" | "py" | "node" | "docker" | "pipx");
+    if !launcher {
+        return None;
+    }
+    let servers = app.mcp.status_json();
+    for sv in &servers {
+        let cfg = &sv["config"];
+        // pedaços que identificam o servidor: o pacote ou o script nos argumentos
+        let toks: Vec<String> = cfg["args"].as_array().into_iter().flatten().filter_map(|a| a.as_str()).map(|a| a.to_lowercase().replace('\\', "/"))
+            .filter(|a| !a.starts_with('-') && a.len() >= 5 && !matches!(a.as_str(), "--yes" | "run" | "tool" | "--from"))
+            .collect();
+        let hit = toks.iter().any(|t| low.contains(t.rsplit('/').next().unwrap_or(t)));
+        if hit {
+            let name = sv["name"].as_str().unwrap_or("");
+            let tools: Vec<String> = sv["tools"].as_array().into_iter().flatten().filter_map(|t| t["name"].as_str()).take(6).map(|t| format!("{}__{}", safe_name(name), safe_name(t))).collect();
+            return Some(match sv["status"].as_str().unwrap_or("") {
+                "connected" => format!("Não executei: esse comando inicia o conector \"{name}\", que já está rodando no studio. Chame as ferramentas dele diretamente ({}{}), ou use search_tools.", tools.join(", "), if tools.len() == 6 { ", ..." } else { "" }),
+                "disabled" => format!("Não executei: esse comando inicia o conector \"{name}\", que está desligado. Peça ao usuário para ligá-lo em Conectores e então use as ferramentas dele."),
+                st => format!("Não executei: esse comando inicia o conector \"{name}\" (situação: {st}). Use as ferramentas dele quando ele conectar, ou peça ao usuário para conferir em Conectores."),
+            });
+        }
+    }
+    // servidor MCP genérico que nem está cadastrado
+    if low.contains("modelcontextprotocol") || low.contains("mcp") && (low.contains("server") || low.contains("-mcp") || low.contains("mcp-")) {
+        return Some("Não executei: isso parece iniciar um servidor MCP, que fica esperando conexão e não responde pelo terminal. Use as ferramentas dos conectores que já estão no studio (search_tools ajuda a achar), ou peça ao usuário para cadastrar esse conector em Conectores.".into());
+    }
+    None
 }
 
 /// Ajusta comandos que costumam falhar no Windows: `python`/`pip` sem Python instalado
