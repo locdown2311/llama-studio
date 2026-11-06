@@ -150,8 +150,25 @@ pub fn build_tools(app: &App, groups: &[String], servers: &[String], with_skills
     }
     let mut index = HashMap::new();
     let mut catalog: Vec<(String, Vec<String>)> = vec![];
+    // "eager" = conector citado no pedido, que iria com as ferramentas completas. Mas um conector
+    // grande (REA/Ghidra tem dezenas de ferramentas) estoura o contexto, então só é completo se
+    // couber num orçamento; acima disso volta a ser catálogo (o modelo usa search_tools).
+    const EAGER_BUDGET: usize = 24_000; // ~6000 tokens por conector
+    let entries = if only.is_none() { mcp_entries(app, None) } else { vec![] };
+    let mut eager_fits: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for sname in eager {
+        if !servers.contains(sname) {
+            continue;
+        }
+        let size: usize = entries.iter().filter(|(_, s, _)| s == sname)
+            .map(|(name, _, t)| name.len() + t.get("description").and_then(Value::as_str).map(|d| d.len().min(700)).unwrap_or(0) + t.get("inputSchema").map(|x| x.to_string().len()).unwrap_or(0) + 40)
+            .sum();
+        if size <= EAGER_BUDGET {
+            eager_fits.insert(sname.clone());
+        }
+    }
     if only.is_none() {
-        for (name, sname, t) in mcp_entries(app, None) {
+        for (name, sname, t) in entries {
             let selected = servers.contains(&sname);
             if !selected && !extra.contains(&name) {
                 continue;
@@ -160,7 +177,7 @@ pub fn build_tools(app: &App, groups: &[String], servers: &[String], with_skills
             let desc = t.get("description").and_then(Value::as_str).unwrap_or("").to_string();
             index.insert(name.clone(), (sname.clone(), tname.clone()));
             // conector que o usuário citou no pedido: vai com as ferramentas completas, sem catálogo
-            if lazy_on && selected && !eager.contains(&sname) {
+            if lazy_on && selected && !eager_fits.contains(&sname) {
                 // o catálogo lista tudo (carregadas ou não) para o prompt não mudar entre passos
                 let line = format!("{name}: {}", first_sentence(&desc, 90));
                 match catalog.iter_mut().find(|(s, _)| *s == sname) {
@@ -188,11 +205,17 @@ pub fn build_tools(app: &App, groups: &[String], servers: &[String], with_skills
         }
     }
     app.mcp.set_index(index);
+    let big: Vec<&String> = eager.iter().filter(|n| servers.contains(*n) && !eager_fits.contains(*n)).collect();
     let catalog_text = if catalog.is_empty() {
         String::new()
     } else {
         let body: Vec<String> = catalog.iter().map(|(s, v)| format!("## {s}\n{}", v.join("\n"))).collect();
-        format!("Catálogo de ferramentas dos conectores ativos (ainda não carregadas). Para usar uma, chame antes search_tools com names=[...] e ela fica disponível no passo seguinte. Carregue só as que for usar.\n\n{}", body.join("\n\n"))
+        let hint = if big.is_empty() {
+            String::new()
+        } else {
+            format!("\n\nO conector {} tem ferramentas demais para carregar todas; escolha no catálogo as que precisa com search_tools.", big.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "))
+        };
+        format!("Catálogo de ferramentas dos conectores ativos (ainda não carregadas). Para usar uma, chame antes search_tools com names=[...] e ela fica disponível no passo seguinte. Carregue só as que for usar.\n\n{}{hint}", body.join("\n\n"))
     };
     json!({"tools": tools, "meta": meta, "catalog": catalog_text})
 }
