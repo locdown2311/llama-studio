@@ -110,6 +110,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/llama/stop", post(llama_stop))
         .route("/api/llama/restart", post(llama_restart))
         .route("/api/llama/log", get(llama_log))
+        .route("/api/models", get(models_list).post(models_save))
+        .route("/api/models/activate", post(models_activate))
         .route("/v1/{*rest}", any(proxy))
         .route("/props", any(proxy))
         .route("/health", any(proxy))
@@ -767,7 +769,9 @@ async fn llama_config(State(app): S, b: Bytes) -> Res {
     }
     let c: crate::llama::LlamaCfg = serde_json::from_value(merged).map_err(|e| bad(format!("Configuração inválida: {e}")))?;
     let url = c.base_url();
+    let old_model = app.llama.cfg().model;
     app.llama.save(c);
+    crate::models::sync_from_cfg(&app, &old_model);
     {
         app.config.write().unwrap().llama_url = url;
     }
@@ -825,4 +829,24 @@ async fn bins_remove(State(app): S, b: Bytes) -> Res {
         Ok(()) => ok(json!({"ok": true})),
         Err(e) => Err(bad(e)),
     }
+}
+
+// ---------------------------------------------------------------- vários modelos (um carregado por vez)
+
+async fn models_list(State(app): S) -> Res {
+    let a = app.clone();
+    ok(tokio::task::spawn_blocking(move || crate::models::list_json(&a)).await.map_err(|e| bad(e.to_string()))?)
+}
+
+async fn models_save(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let list: Vec<crate::models::Profile> = serde_json::from_value(v.get("models").cloned().unwrap_or(json!([]))).map_err(|e| bad(format!("Lista inválida: {e}")))?;
+    crate::models::save(&app, &list);
+    let a = app.clone();
+    ok(tokio::task::spawn_blocking(move || crate::models::list_json(&a)).await.map_err(|e| bad(e.to_string()))?)
+}
+
+async fn models_activate(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    crate::models::activate(&app, st(&v, "id")).await.map(ok).map_err(bad)?
 }

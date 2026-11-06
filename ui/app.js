@@ -272,6 +272,8 @@ const S = {
   projects: store.get('projects', []),
   personas: store.get('personas', null),
   draftPersona: undefined,
+  draftModel: undefined,
+  models: { models: [], active: null, found: [] },
   runs: new Map(), // id da conversa -> AbortController
   waiting: new Set(), // conversas esperando permissão
   approvals: new Map(),
@@ -349,7 +351,8 @@ function newConv(projectId) {
   const proj = projectId ? S.projects.find((p) => p.id === projectId) : null;
   const personaId = S.draftPersona !== undefined ? S.draftPersona : (proj?.personaId || S.settings.defaultPersona || null);
   S.draftPersona = undefined;
-  const c = { id: uid(), title: 'Nova conversa', messages: [], createdAt: Date.now(), updatedAt: Date.now(), autoApprove: false, projectId: proj ? proj.id : null, personaId };
+  const modelId = S.draftModel; S.draftModel = undefined;
+  const c = { id: uid(), title: 'Nova conversa', messages: [], createdAt: Date.now(), updatedAt: Date.now(), autoApprove: false, projectId: proj ? proj.id : null, personaId, modelId: modelId || null };
   if (proj) { proj.open = true; saveProjects(); }
   S.convs.unshift(c);
   S.curId = c.id;
@@ -758,7 +761,7 @@ function renderAI(b, conv, isLast) {
     if (sp.text.trim()) card.append(h('div.md', { html: md(sp.text) }));
     if (m.tool_calls?.length) card.append(h('div.trace', null, m.tool_calls.map((tc) => renderTool(tc, results.get(tc.id), live))));
   });
-  if (live && conv._waitingModel) card.append(h('div.ai-status', null, h('span', { html: svg('loader', 'spin'), style: { display: 'grid' } }), 'Esperando o modelo terminar de carregar. A resposta começa sozinha.'));
+  if (live && conv._waitingModel) card.append(h('div.ai-status', null, h('span', { html: svg('loader', 'spin'), style: { display: 'grid' } }), conv._waitText || 'Esperando o modelo terminar de carregar. A resposta começa sozinha.'));
   if (live && conv._compacting) card.append(h('div.ai-status', null, h('span', { html: svg('loader', 'spin'), style: { display: 'grid' } }), 'Compactando a conversa para caber no contexto...'));
   const waiting = live && !conv._compacting && !conv._waitingModel && (!card.childElementCount || (last && !last.content && !last.reasoning && !last.tool_calls?.length && toolMsgs.length));
   if (waiting) card.append(h('div.typing', null, h('i'), h('i'), h('i')));
@@ -1132,8 +1135,12 @@ function updatePickers() {
   const nMcp = new Set([...act.mcp, ...pills.filter((p) => p.kind === 'mcp').map((p) => p.id)]).size;
 
   const pm = $('#pick-model'); pm.innerHTML = '';
-  pm.append(h('span.dot.' + ({ ok: 'ok', loading: 'busy', offline: 'err' }[S.health.status] || '')), h('b', null, S.model ? shortModel(S.model).replace(/[-_.](I?Q\d[\w]*|BF16|F16|F32)$/i, '') : (S.health.status === 'loading' ? 'carregando...' : 'llama-server')), h('span', { html: svg('chev', 'caret'), style: { display: 'contents' } }));
-  pm.title = S.model || S.info.llamaUrl || '';
+  const want = convModel(c);
+  const pending = want && S.models.active && want.id !== S.models.active;
+  const dot = pending ? 'idle' : ({ ok: 'ok', loading: 'busy', offline: 'err' }[S.health.status] || '');
+  const label = want ? want.name : S.model ? shortModel(S.model) : (S.health.status === 'loading' ? 'carregando...' : 'llama-server');
+  pm.append(h('span.dot.' + dot), h('b', null, label.replace(/[-_.](I?Q\d[\w]*|BF16|F16|F32)$/i, '')), h('span', { html: svg('chev', 'caret'), style: { display: 'contents' } }));
+  pm.title = pending ? `${want.name}: será carregado no lugar de ${modelById(S.models.active)?.name || 'o atual'} quando você enviar` : (want?.model || S.model || S.info.llamaUrl || '');
   pm.querySelector('.caret').style.transform = 'rotate(90deg)';
 
   // só ícone; o nome aparece na dica e no menu ao clicar
@@ -1194,17 +1201,69 @@ function fillMcpPop() {
   pop.append(h('div.pop-foot', null, h('button.btn.ghost.sm.wide', { onclick: () => { closePops(); setView('mcp'); } }, ic('gear'), 'Gerenciar conectores')));
 }
 
+function modelById(id) { return S.models.models.find((m) => m.id === id) || null; }
+/** Modelo escolhido para a conversa (ou o carregado agora). */
+function convModel(c) {
+  const id = c ? c.modelId : S.draftModel;
+  return modelById(id) || modelById(S.models.active);
+}
+
+async function loadModels() {
+  try { S.models = await api('/api/models'); } catch { return; }
+  updatePickers();
+  if (S.view === 'server') drawModels();
+}
+
+async function activateModel(id, quiet) {
+  const m = modelById(id);
+  if (!quiet) toast(`Carregando ${m?.name || 'modelo'}...`);
+  S.llama = noteLlama(await api('/api/models/activate', { id }));
+  S.models.active = id; S.model = ''; S.nCtx = 0;
+  updatePickers();
+  if (S.view === 'server') { drawServerStatus(); drawServerForm(); drawModels(); }
+}
+
+/** Antes de responder: carrega o modelo da conversa (esperando outras conversas terminarem). */
+async function ensureModel(conv, signal) {
+  const want = conv.modelId && modelById(conv.modelId);
+  if (!want || want.id === S.models.active) return;
+  const others = () => [...S.runs.keys()].some((id) => id !== conv.id && !S.convs.find((x) => x.id === id)?._waitingModel);
+  if (others()) {
+    conv._waitingModel = true; conv._waitText = `Esperando outra conversa terminar para trocar para ${want.name}.`; scheduleRender();
+    try { while (others() && !signal.aborted) await new Promise((r) => setTimeout(r, 700)); }
+    finally { conv._waitingModel = false; conv._waitText = ''; }
+  }
+  if (signal.aborted || want.id === S.models.active) return;
+  conv._waitingModel = true; conv._waitText = `Trocando para ${want.name}...`; scheduleRender();
+  try { await activateModel(want.id, true); } finally { conv._waitingModel = false; conv._waitText = ''; }
+}
+
+function chooseModel(id) {
+  const c = cur();
+  if (c) { c.modelId = id; saveConvs(); } else S.draftModel = id;
+  updatePickers();
+  // ninguém respondendo: já carrega, para a próxima mensagem não esperar
+  if (id !== S.models.active && !S.runs.size) activateModel(id).catch((e) => toast(e.message, 'err'));
+}
+
 function fillModelPop() {
   const pop = $('#pop-model'); pop.innerHTML = '';
   const st = { ok: 'Pronto', loading: 'Carregando o modelo', offline: 'Desligado ou inacessível' }[S.health.status] || 'Verificando';
-  pop.append(h('div.pop-head', null, h('span', null, 'Modelo no llama-server')),
-    h('div.pop-path', null, S.model || 'Nenhum modelo carregado'),
-    h('div.menu-item', { style: { cursor: 'default' } }, h('span.dot.' + ({ ok: 'ok', loading: 'busy', offline: 'err' }[S.health.status] || '')), h('span.mi-main', null, st, h('span.mi-sub', null, S.info.llamaUrl))),
-    h('div.menu-sep'),
+  const want = convModel(cur());
+  pop.append(h('div.pop-head', null, h('span', null, 'Modelo desta conversa')));
+  if (!S.models.models.length) pop.append(h('div.pop-path', null, S.model || 'Nenhum modelo cadastrado'));
+  for (const m of S.models.models) {
+    const loaded = m.id === S.models.active;
+    pop.append(h('button.menu-item.model-item' + (want?.id === m.id ? '.sel' : ''), { onclick: () => { closePops(); chooseModel(m.id); } },
+      h('span.dot.' + (loaded ? ({ ok: 'ok', loading: 'busy', offline: 'err' }[S.health.status] || '') : 'idle')),
+      h('span.mi-main', null, m.name, h('span.mi-sub', null, loaded ? `${st} · contexto ${fmtK(m.context)}` : `contexto ${fmtK(m.context)} · troca ao escolher`)),
+      want?.id === m.id ? ic('check') : null));
+  }
+  pop.append(...[h('div.menu-sep'),
+    h('div.mi-note', null, 'Só um modelo fica carregado por vez. Trocar descarrega o atual; conversas que estiverem respondendo terminam antes.'),
     S.llama && !S.llama.running && S.health.status === 'offline' ? h('button.menu-item', { onclick: () => { closePops(); startLlama(); } }, ic('play'), 'Iniciar o servidor') : null,
     S.llama?.running ? h('button.menu-item', { onclick: () => { closePops(); stopLlama(); } }, ic('stop'), 'Parar o servidor') : null,
-    h('button.menu-item', { onclick: () => { closePops(); setView('server'); } }, ic('server'), 'Servidor e log'),
-    h('button.menu-item', { onclick: () => { closePops(); setView('settings'); } }, ic('gear'), 'Parâmetros e prompt de sistema'));
+    h('button.menu-item', { onclick: () => { closePops(); setView('server'); } }, ic('server'), 'Gerenciar modelos e servidor')].filter(Boolean));
 }
 
 function fillWsPop() {
@@ -1803,7 +1862,7 @@ async function runAgent(conv) {
       const msg = { role: 'assistant', content: '', reasoning: '', tool_calls: [], t0: step === 0 ? t0 : Date.now() };
       conv.messages.push(msg);
       scheduleRender();
-      if (step === 0) await waitModel(conv, ac.signal);
+      if (step === 0) { await ensureModel(conv, ac.signal); await waitModel(conv, ac.signal); }
       if (ac.signal.aborted) throw new DOMException('abort', 'AbortError');
       await maybeCompact(conv, system, tools, ac.signal);
       try {
@@ -2838,7 +2897,8 @@ async function stopLlama() {
 let srvTimer = null; let logNext = 0;
 async function renderServerPage() {
   try { S.llama = await api('/api/llama'); } catch (e) { toast(e.message, 'err'); return; }
-  drawServerStatus(); drawServerForm();
+  await loadModels();
+  drawServerStatus(); drawServerForm(); drawModels();
   $('#srv-log').textContent = ''; logNext = 0;
   await pollLog();
   clearInterval(srvTimer);
@@ -2847,6 +2907,76 @@ async function renderServerPage() {
     await pollLog();
     try { const n = await api('/api/llama'); const changed = n.state !== S.llama.state || n.running !== S.llama.running; S.llama = n; if (changed) drawServerStatus(); } catch { /* ok */ }
   }, 1000);
+}
+
+/* ------------------------------------------------------------ lista de modelos */
+function drawModels() {
+  const box = $('#models-list'); if (!box) return;
+  box.innerHTML = '';
+  const { models, active, found } = S.models;
+  for (const m of models) {
+    const on = m.id === active;
+    const used = S.convs.filter((c) => c.modelId === m.id).length;
+    box.append(h('div.mdl' + (on ? '.on' : ''), null,
+      h('div.mdl-ico', { html: svg('cpu' in ICONS ? 'cpu' : 'server') }),
+      h('div.mdl-main', null,
+        h('div.mdl-name', null, m.name, on ? h('span.tag.ok', null, S.llama?.state === 'ready' ? 'carregado' : S.llama?.state?.includes('loading') ? 'carregando' : 'ativo') : null),
+        h('div.mdl-path', { title: m.model }, m.model),
+        h('div.mdl-meta', null, `contexto ${fmtK(m.context)}`, m.cpuMoe ? ` · ${m.cpuMoe} camadas MoE na CPU` : '', m.threads ? ` · ${m.threads} threads` : '', used ? ` · ${used} conversa${used > 1 ? 's' : ''}` : '')),
+      h('div.mdl-acts', null,
+        on ? null : h('button.btn.sm', { onclick: async () => { try { await activateModel(m.id); } catch (e) { toast(e.message, 'err'); } } }, ic('play'), 'Carregar'),
+        h('button.icon-btn.sm', { title: 'Editar', 'aria-label': 'Editar', html: svg('edit'), onclick: () => editModel(m) }),
+        on ? null : h('button.icon-btn.sm', { title: 'Remover da lista', 'aria-label': 'Remover', html: svg('trash'), onclick: async () => {
+          if (!(await confirmBox(`Tirar "${m.name}" da lista? O arquivo não é apagado.`, 'Remover', true))) return;
+          await saveModels(models.filter((x) => x.id !== m.id));
+        } }))));
+  }
+  box.append(h('button.mdl.add', { onclick: () => editModel(null) }, ic('plus'), 'Adicionar modelo'));
+  if (found?.length) {
+    box.append(h('div.mdl-found-t', null, 'Encontrados perto do llama-server'));
+    const wrap = h('div.mdl-found');
+    for (const f of found.slice(0, 12)) wrap.append(h('button.chip', { title: f.path, onclick: () => editModel(null, f.path) }, ic('plus'), f.name, h('span.muted', null, fmtBytes(f.size))));
+    box.append(wrap);
+  }
+}
+
+async function saveModels(list) {
+  try { S.models = await api('/api/models', { models: list }); } catch (e) { toast(e.message, 'err'); return; }
+  drawModels(); updatePickers();
+}
+
+function editModel(m, path) {
+  const d = S.models.defaults || {};
+  const base = m || { id: 'm' + Date.now().toString(36), name: path ? path.split(/[\\/]/).pop().replace(/\.gguf$/i, '').replace(/-\d{5}-of-\d{5}$/, '') : '', model: path || '', context: d.context || 32768, cpuMoe: d.cpuMoe || 0, threads: d.threads || 0, extraArgs: d.extraArgs || '' };
+  const inp = (v, extra = {}) => h('input.input.mono', { value: v ?? '', ...extra });
+  const name = h('input.input', { value: base.name, placeholder: 'ex.: Qwen 35B rápido' });
+  const file = inp(base.model, { placeholder: 'C:\\modelos\\modelo.gguf' });
+  const ctx = inp(base.context, { inputmode: 'numeric' }); const moe = inp(base.cpuMoe, { inputmode: 'numeric' }); const thr = inp(base.threads, { inputmode: 'numeric' });
+  const extra = h('textarea.textarea.mono', { rows: 4, value: base.extraArgs });
+  const pick = h('button.btn', { type: 'button', onclick: async () => {
+    const p = await pickPath({ title: 'Escolher o modelo (.gguf)', mode: 'file', start: file.value ? file.value.replace(/[\\/][^\\/]*$/, '') : S.info.home });
+    if (p) { file.value = p; if (!name.value.trim()) name.value = p.split(/[\\/]/).pop().replace(/\.gguf$/i, ''); }
+  } }, 'Procurar');
+  const field = (l, i, small) => h('div.field', null, h('label', null, l), i, small ? h('small', null, small) : null);
+  const md = modal({
+    title: m ? `Editar ${m.name}` : 'Adicionar modelo', wide: true,
+    body: [h('div.form', null,
+      field('Nome', name),
+      h('div.field', null, h('label', null, 'Arquivo (.gguf)'), h('div.inline', null, file, pick)),
+      h('div.row', null, field('Contexto', ctx), field('Camadas MoE na CPU', moe, '0 = nenhuma'), field('Threads', thr, '0 = automático')),
+      field('Argumentos extras', extra, 'Ex.: --mmproj para visão, -ngl, temperatura. Começa com os do modelo carregado.'))],
+    foot: [h('button.btn', { onclick: () => md.close() }, 'Cancelar'), h('button.btn.primary', { onclick: async () => {
+      const num = (x) => Math.max(0, parseInt(x.value, 10) || 0);
+      const p = { ...base, name: name.value.trim() || 'Modelo', model: file.value.trim().replace(/^"|"$/g, ''), context: num(ctx), cpuMoe: num(moe), threads: num(thr), extraArgs: extra.value.trim() };
+      if (!p.model) { toast('Escolha o arquivo do modelo.', 'err'); return; }
+      const list = S.models.models.filter((x) => x.id !== p.id);
+      const at = S.models.models.findIndex((x) => x.id === p.id);
+      list.splice(at < 0 ? list.length : at, 0, p);
+      md.close();
+      await saveModels(list);
+      if (p.id === S.models.active && S.llama?.running) toast('Salvo. Recarregue o modelo para aplicar.');
+    } }, m ? 'Salvar' : 'Adicionar')],
+  });
 }
 
 function drawServerStatus() {
@@ -2882,12 +3012,15 @@ function drawServerForm() {
     const p = await pickPath({ title, mode, start }); if (p) target.value = p;
   } }, 'Procurar');
   const row = (label, input, btn, small) => h('div.field', null, h('label', null, label), btn ? h('div.inline', null, input, btn) : input, small ? h('small', null, small) : null);
+  const act = modelById(S.models.active);
   f.append(
+    h('div.form-sec', null, act ? `Modelo carregado: ${act.name}` : 'Modelo', h('small', null, 'Arquivo, contexto, MoE, threads e argumentos extras valem só para este modelo.')),
     row('Modelo (.gguf)', model, browse(model, 'Escolher o modelo (.gguf)', 'file')),
-    row('llama-server', exe, browse(exe, 'Escolher o llama-server', 'file')),
-    h('div.row', null, row('Host', host), row('Porta', port), row('Contexto', ctx)),
-    h('div.row', null, row('Camadas MoE na CPU', moe, null, '0 = nenhuma'), row('Threads', thr, null, '0 = automático'), row('HIP_VISIBLE_DEVICES', hip)),
+    h('div.row', null, row('Contexto', ctx), row('Camadas MoE na CPU', moe, null, '0 = nenhuma'), row('Threads', thr, null, '0 = automático')),
     row('Argumentos extras', extra),
+    h('div.form-sec', null, 'Servidor', h('small', null, 'Vale para todos os modelos.')),
+    row('llama-server', exe, browse(exe, 'Escolher o llama-server', 'file')),
+    h('div.row', null, row('Host', host), row('Porta', port), row('HIP_VISIBLE_DEVICES', hip)),
     h('label.opt', { style: { padding: '2px 0' } }, auto, h('span.check', { html: svg('check'), style: { background: auto.checked ? 'var(--accent)' : '' } }), h('span.opt-main', null, h('span.opt-title', null, 'Iniciar o servidor quando o studio abrir'))),
     h('div.form-foot', null, h('button.btn.primary', { type: 'button', onclick: async () => {
       const num = (x) => Math.max(0, parseInt(x.value, 10) || 0);
@@ -2895,7 +3028,7 @@ function drawServerForm() {
         S.llama = await api('/api/llama/config', { config: { ServerExe: exe.value.trim().replace(/^"|"$/g, ''), Model: model.value.trim().replace(/^"|"$/g, ''), BindHost: host.value.trim() || '127.0.0.1', Port: num(port) || 1235, Context: num(ctx), CpuMoe: num(moe), Threads: num(thr), HipDevices: hip.value.trim(), ExtraArgs: extra.value.trim(), AutoStart: auto.checked } });
         S.info.llamaUrl = S.llama.url; lastHealth = '';
         toast(S.llama.running ? 'Salvo. Reinicie o servidor para aplicar.' : 'Configuração salva');
-        drawServerStatus(); checkHealth();
+        drawServerStatus(); checkHealth(); loadModels();
       } catch (e) { toast(e.message, 'err'); }
     } }, 'Salvar')));
   auto.addEventListener('change', () => { auto.nextElementSibling.style.background = auto.checked ? 'var(--accent)' : ''; });
@@ -3004,14 +3137,17 @@ function noteLlama(l) {
 async function waitModel(conv, signal) {
   const loading = () => S.llama && ['loading', 'external-loading'].includes(S.llama.state);
   if (!loading()) return;
-  conv._waitingModel = true; scheduleRender();
+  conv._waitingModel = true;
+  const nm = modelById(S.models.active)?.name;
+  conv._waitText = nm ? `Carregando ${nm}. A resposta começa sozinha.` : '';
+  scheduleRender();
   const t0 = Date.now();
   try {
     while (loading() && !signal.aborted && Date.now() - t0 < 20 * 60 * 1000) {
       await new Promise((r) => setTimeout(r, 1000));
       try { S.llama = noteLlama(await api('/api/llama')); } catch { /* ok */ }
     }
-  } finally { conv._waitingModel = false; scheduleRender(); }
+  } finally { conv._waitingModel = false; conv._waitText = ''; scheduleRender(); lastHealth = ''; checkHealth(); }
 }
 
 /* ============================================================ atualizações */
@@ -3210,7 +3346,7 @@ async function init() {
   renderConvList();
   renderChat();
   renderTree();
-  await Promise.all([loadSkills(), loadMcp(), checkHealth()]);
+  await Promise.all([loadSkills(), loadMcp(), checkHealth(), loadModels()]);
   // tela de abertura enquanto o modelo carrega (o servidor pode estar subindo agora)
   for (let i = 0; i < 4 && S.llama && S.llama.state === 'stopped' && S.llama.config?.AutoStart; i++) { await new Promise((r) => setTimeout(r, 400)); await checkHealth(); }
   if (S.llama && ['loading', 'external-loading'].includes(S.llama.state)) showSplash();

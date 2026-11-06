@@ -904,3 +904,34 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .q-item:hover .icon-btn { opacity: 1; }
 .send.queue { background: var(--accent); }
 .q-head .spacer { flex: 1; }
+
+/* modelos */
+.dot.idle { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
+.model-item.sel { background: var(--accent-soft); }
+.model-item > svg:last-child { margin-left: auto; color: var(--accent); }
+.mi-note { font-size: 11.5px; color: var(--muted); padding: 4px 10px 8px; max-width: 300px; line-height: 1.4; }
+
+.lead.small { font-size: 13px; margin: -4px 0 12px; }
+.models { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.mdl { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+.mdl.on { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
+.mdl-ico { width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center; background: var(--hover); color: var(--text-2); flex: none; }
+.mdl.on .mdl-ico { background: var(--accent-soft); color: var(--accent); }
+.mdl-ico svg { width: 18px; height: 18px; }
+.mdl-main { flex: 1; min-width: 0; }
+.mdl-name { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; }
+.mdl-path { font-family: var(--mono); font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
+.mdl-meta { font-size: 12px; color: var(--text-2); margin-top: 3px; }
+.mdl-acts { display: flex; align-items: center; gap: 4px; flex: none; }
+.mdl.add { justify-content: center; border-style: dashed; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; gap: 6px; padding: 10px; }
+.mdl.add:hover { color: var(--accent); border-color: var(--accent-line); }
+.mdl.add svg { width: 15px; height: 15px; }
+.mdl-found-t { font-size: 12px; color: var(--muted); margin: 6px 0 2px; }
+.mdl-found { display: flex; flex-wrap: wrap; gap: 6px; }
+.mdl-found .chip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); font: inherit; font-size: 12px; color: var(--text-2); cursor: pointer; }
+.mdl-found .chip:hover { border-color: var(--accent-line); color: var(--accent); }
+.mdl-found .chip svg { width: 12px; height: 12px; }
+.mdl-found .chip .muted { font-size: 11px; }
+.form-sec { font-weight: 600; font-size: 13px; color: var(--text); display: flex; flex-direction: column; gap: 2px; padding-top: 4px; }
+.form-sec small { font-weight: 400; color: var(--muted); font-size: 12px; }
+.form-sec:not(:first-child) { border-top: 1px solid var(--line); padding-top: 14px; margin-top: 4px; }

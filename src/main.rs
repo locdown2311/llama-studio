@@ -15,6 +15,7 @@ mod desktop;
 mod llama;
 mod locate;
 mod mcp;
+mod models;
 mod server;
 mod skills;
 mod tools;
