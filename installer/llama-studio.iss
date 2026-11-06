@@ -170,16 +170,16 @@ end;
 function FindHipUrl: String;
 var
   Code: Integer;
-  Out, Ps1: String;
+  OutFile, Ps1: String;
   Lines: TArrayOfString;
 begin
   Result := '';
-  Out := ExpandConstant('{tmp}\hip-url.txt');
+  OutFile := ExpandConstant('{tmp}\hip-url.txt');
   Ps1 := '$r = Invoke-RestMethod -UseBasicParsing -Headers @{''User-Agent''=''llama-studio-setup''} ''https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=40''; ' +
          '$a = $r | ForEach-Object { $_.assets } | Where-Object { $_.name -match ''-bin-win-(hip|rocm).*x64\.zip$'' } | Select-Object -First 1; ' +
-         'if ($a) { [IO.File]::WriteAllText(''' + Out + ''', $a.browser_download_url) }';
+         'if ($a) { [IO.File]::WriteAllText(''' + OutFile + ''', $a.browser_download_url) }';
   if Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' + Ps1 + '"', '', SW_HIDE, ewWaitUntilTerminated, Code)
-     and LoadStringsFromFile(Out, Lines) and (GetArrayLength(Lines) > 0) then
+     and LoadStringsFromFile(OutFile, Lines) and (GetArrayLength(Lines) > 0) then
     Result := Trim(Lines[0]);
 end;
 

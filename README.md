@@ -1,51 +1,110 @@
-# llama studio
+<p align="center">
+  <img src="assets/icon-256.png" width="96" alt="">
+</p>
 
-Interface local para o [llama.cpp](https://github.com/ggml-org/llama.cpp) (`llama-server`) no Windows:
-um executável só, com janela própria (WebView2), ícone na bandeja, pasta de trabalho, habilidades
-(`SKILL.md`), conectores MCP, ferramentas (arquivos, PowerShell, navegador, computador) e subagentes.
+<h1 align="center">Llama Studio</h1>
 
-Feito para atrapalhar o mínimo o modelo: roda com prioridade baixa, a janela não usa a GPU por padrão
-e é destruída ao fechar (o studio fica na bandeja).
+<p align="center">
+  Um <b>agent harness</b> leve e otimizado para modelos locais no Windows.<br>
+  Junta o <a href="https://github.com/ggml-org/llama.cpp">llama.cpp</a>, ferramentas, conectores MCP e habilidades numa janela só, sem roubar memória nem GPU do modelo.
+</p>
+
+<p align="center">
+  <a href="../../releases/latest"><b>Baixar o instalador</b></a> ·
+  <a href="#recursos">Recursos</a> ·
+  <a href="#como-ele-economiza">Como ele economiza</a> ·
+  <a href="#desenvolvimento">Desenvolvimento</a>
+</p>
+
+---
+
+O Llama Studio transforma o `llama-server` num agente que trabalha no seu computador: lê e edita arquivos, roda comandos, navega na web, controla aplicativos, chama conectores MCP e segue habilidades (`SKILL.md`), tudo com o modelo rodando localmente.
+
+É um único executável em Rust (cerca de 5 MB) com a interface embutida. Ele foi feito para atrapalhar o mínimo possível o modelo: roda com prioridade baixa e em modo de economia de energia do Windows, a janela não usa a GPU, e ao fechar ela é destruída de verdade (o programa fica só na bandeja).
 
 ## Instalação
 
-Baixe o `llama-studio.exe` da [última versão](../../releases/latest) e coloque em `llama\llama-studio\`
-(a pasta de cima deve ter o `llama-server.exe`). Depois disso o próprio app avisa quando houver versão nova.
+1. Baixe o `llama-studio-setup-X.Y.Z.exe` da [última versão](../../releases/latest).
+2. Na instalação, escolha o motor do llama.cpp. O instalador sugere um pela placa de vídeo detectada:
+   - **Vulkan**: AMD, NVIDIA e Intel (recomendado);
+   - **CUDA**: NVIDIA, já com as bibliotecas de runtime;
+   - **HIP/ROCm**: AMD Radeon compatíveis;
+   - **CPU**: sem placa de vídeo.
+3. Abra o programa, vá em **Servidor → Modelos → Buscar e baixar do Hugging Face** e escolha um modelo GGUF.
+
+O instalador não pede administrador: instala em `%LOCALAPPDATA%\Programs\Llama Studio`. Ele baixa o llama.cpp da release oficial e instala o WebView2 se faltar. Depois disso, o próprio programa avisa quando há versão nova e se atualiza sozinho.
+
+> Já tem o llama.cpp numa pasta? Coloque o `llama-studio.exe` numa subpasta dela (`llama\llama-studio\`) e ele encontra o `llama-server.exe` e o `llama-gui.json` sozinho.
+
+## Recursos
+
+### Agente
+- **Ferramentas internas**, ligadas e desligadas por grupo: ler, escrever e editar arquivos; PowerShell; executar código que combina várias ferramentas; navegador próprio (Edge/Chrome via CDP); controle do computador (UI Automation, cliques, teclado, capturas); busca no histórico; lista de tarefas do modelo.
+- **Subagentes exploradores**: investigações só de leitura, com contexto próprio, várias em paralelo.
+- **Conectores MCP**: stdio, Streamable HTTP e SSE antigo. Aceita a configuração do Claude Desktop, Cherry Studio e Cursor colada direto. Dá para esconder ferramentas específicas de cada conector.
+- **Habilidades** (`SKILL.md`), importadas de pasta, zip ou arquivo e escolhidas na barra do chat ou com `@`.
+- **Aprovação de ações** que alteram algo (sempre, só escrita ou nunca).
+
+### Conversas
+- **Projetos**: conversas que dividem a mesma pasta de trabalho, com instruções e personalidade padrão.
+- **Personalidades**: prompts de sistema com nome e cor, escolhidos por conversa.
+- **Respostas em segundo plano**: troque de conversa sem parar a que está respondendo.
+- **Fila de mensagens**: escreva enquanto o modelo responde, e as mensagens seguem em ordem.
+- **Linha do tempo**: raciocínio, falas e ferramentas num trilho único, e uma aba **Atividade** com a linha do tempo da conversa inteira.
+- **Arrastar arquivos**: entra o caminho absoluto, sem upload.
+- Exportar a conversa em Markdown, histórico pesquisável e medidor de contexto.
+
+### Modelos
+- **Vários modelos cadastrados, um carregado por vez.** Cada conversa escolhe o seu, e o studio troca quando precisa, esperando as respostas em andamento.
+- **Busca e download do Hugging Face**: lista as quantizações com o tamanho, inclui o projetor de visão, retoma downloads interrompidos e cria o modelo pronto para usar.
+- **Editor visual dos argumentos** do llama-server, com explicação de cada opção e sliders com limites.
+- **Cada modelo lembra** as habilidades, conectores e ferramentas que estavam marcados com ele.
+
+### Utilitários
+O programa baixa e mantém na pasta dele, sem mexer no sistema: **RTK**, **ripgrep**, **fd**, **uv**, **Bun** e **7-Zip**. Eles entram no PATH dos comandos do modelo e dos conectores.
+
+## Como ele economiza
+
+Modelo local tem contexto curto e processamento caro, então o harness foi pensado para gastar pouco:
+
+| | |
+|---|---|
+| **Prompt estável** | O prompt de sistema é idêntico entre mensagens (sem hora, sem listas que mudam). Assim o llama-server reaproveita o cache e não relê a conversa inteira. |
+| **Carregamento sob demanda** | Conectores entram como um catálogo de uma linha por ferramenta; o modelo carrega só as que vai usar. Habilidades longas entram só com o resumo. |
+| **Esquemas enxutos** | As definições das ferramentas MCP vêm sem títulos, exemplos e campos que não ajudam o modelo, e com descrições encurtadas. |
+| **Saídas compactadas** | As saídas de comandos e conectores perdem cores ANSI e barras de progresso, e linhas repetidas viram uma. Saídas longas mantêm começo e fim, e a saída completa fica salva para consulta. O RTK resume `git`, `cargo`, `pytest` e outros. |
+| **Compactação automática** | Perto do limite, o meio da conversa é resumido. O primeiro pedido e o final ficam intactos. |
+| **Imagens** | Imagens vão só na mensagem seguinte à captura, depois saem do histórico. |
+| **Busca rápida** | A busca por conteúdo usa o ripgrep quando ele está instalado e respeita o `.gitignore`. |
+
+No sistema, o programa roda com prioridade abaixo do normal e no modo EcoQoS do Windows. Os processos filhos ficam presos a um *job object* e morrem junto com ele.
 
 ## Atualizações
 
 Cada release publica:
 
-- `llama-studio.exe`: o programa inteiro. O app baixa, troca o executável e reinicia.
-- `ui.zip`: só a interface (`ui/`). O app instala em `dados\ui` e recarrega, sem reiniciar.
+- `llama-studio-setup-X.Y.Z.exe`: o instalador completo.
+- `llama-studio.exe`: o programa. O app baixa, troca o executável e reinicia.
+- `ui.zip`: só a interface. O app instala em `dados\ui` e recarrega, sem reiniciar.
 
-A interface só é aplicada se o executável for compatível: `ui/min-exe.txt` diz a versão mínima do
-programa que ela exige. Se a mudança for só visual, mantenha o número; se a interface passar a usar
-uma rota nova do servidor, suba para a versão em que a rota apareceu.
+Uma interface nova só é aplicada se o executável for compatível: o `ui/min-exe.txt` diz a versão mínima que ela exige.
 
-### Lançar uma versão
-
-Suba o `version` no `Cargo.toml` (ex.: `2.1.1`) e faça push no `main`. O workflow `Release`
-compila no Windows, cria o tag `v2.1.1`, gera os dois pacotes e publica a release. Pushes sem
-mudança de versão só compilam e guardam o resultado como artefato do workflow.
-
-(Enviar um tag `vX.Y.Z` à mão também publica.)
-
-## Estrutura
-
-| Pasta | O quê |
-|---|---|
-| `src/` | Servidor local (axum), cliente MCP, gerenciador do llama-server, ferramentas, janela e bandeja |
-| `ui/` | Interface (HTML, CSS e JS sem build); vai embutida no executável |
-| `.github/workflows/` | CI e publicação |
-
-## Compilar
+## Desenvolvimento
 
 ```
 cargo build --release
 ```
 
-Opções: `--navegador` (usa o navegador em vez da janela), `--bandeja` (começa minimizado),
-`--iniciar-servidor` (sobe o llama-server ao abrir).
+| Pasta | O quê |
+|---|---|
+| `src/` | Servidor local (axum), cliente MCP, gerenciador do llama-server, ferramentas, downloads, janela e bandeja |
+| `ui/` | Interface (HTML, CSS e JS sem build), embutida no executável |
+| `installer/` | Instalador (Inno Setup) |
+| `assets/` | Ícone |
+| `.github/workflows/` | CI e publicação |
 
-Bibliotecas de terceiros em `ui/vendor`: marked (MIT), DOMPurify (Apache-2.0/MPL-2.0), highlight.js (BSD-3-Clause).
+Opções de linha de comando: `--navegador` (abre no navegador em vez da janela), `--bandeja` (começa minimizado) e `--iniciar-servidor` (sobe o llama-server ao abrir).
+
+**Publicar uma versão:** suba o `version` no `Cargo.toml` e faça push no `main`. O workflow `Release` compila no Windows, gera o instalador com o llama.cpp mais recente, cria o tag e publica tudo. Pushes sem mudança de versão só compilam.
+
+Bibliotecas de terceiros em `ui/vendor`: marked (MIT), DOMPurify (Apache-2.0/MPL-2.0) e highlight.js (BSD-3-Clause).
