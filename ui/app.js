@@ -5172,7 +5172,7 @@ async function showMap(conv) {
 }
 
 /* ------------------------------------------------------------ caderno de investigação */
-// Cartões por pasta de trabalho (todas as conversas da mesma pasta dividem o caderno).
+// Cartões por projeto (todas as conversas dele dividem o caderno) ou, fora de projeto, por conversa.
 const NB = new Map();
 const NB_STATUS = ['hipótese', 'confirmado', 'descartado'];
 // O caderno é do projeto (todas as conversas dele) ou, fora de projeto, só da conversa.
