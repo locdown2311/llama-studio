@@ -1842,14 +1842,24 @@ function takeEditor() {
   return { content, parts, refs };
 }
 
-async function send() {
+async function send(now) {
   const busy = running(cur());
   if (busy && editorEmpty()) { stop(); return; }
   const item = takeEditor();
   if (!item) return;
   const conv = cur() || newConv();
-  if (busy) { enqueue(conv, item); return; }
+  if (busy) { enqueue(conv, { ...item, ...(now ? { now: true } : {}) }); return; }
   await submit(conv, item);
+}
+
+/** Mensagens da fila marcadas para entrar no próximo passo (sem esperar a resposta inteira acabar). */
+function takeUrgent(conv) {
+  const q = conv.queue || [];
+  const out = q.filter((it) => it.now);
+  if (!out.length) return [];
+  conv.queue = q.filter((it) => !it.now);
+  saveConvs(); drawQueue();
+  return out;
 }
 
 /** Recria o conteúdo de uma mensagem (texto e etiquetas) para a caixa de texto. */
@@ -2103,7 +2113,9 @@ function enqueue(conv, item) {
 function nextInQueue(conv, aborted) {
   if (!conv.queue?.length) return;
   if (aborted) { conv.queuePaused = true; saveConvs(); drawQueue(); return; }
-  const item = conv.queue.shift();
+  const ui = conv.queue.findIndex((it) => it.now);
+  const item = conv.queue.splice(ui >= 0 ? ui : 0, 1)[0];
+  delete item.now;
   conv.queuePaused = false;
   saveConvs(); drawQueue();
   setTimeout(() => submit(conv, item), 0);
@@ -2119,7 +2131,7 @@ function drawQueue() {
   const busy = running(c);
   box.append(h('div.q-head', null, ic('list'),
     h('span', null, c.queuePaused && !busy ? `Fila pausada (${q.length})` : `Na fila (${q.length})`),
-    h('span.muted', null, c.queuePaused && !busy ? ' · a resposta foi interrompida' : busy ? ' · enviadas quando a resposta atual terminar' : ''),
+    h('span.muted', null, c.queuePaused && !busy ? ' · a resposta foi interrompida' : busy ? ' · enviadas quando a resposta atual terminar (⚡ ou Ctrl+Enter: logo depois do passo atual)' : ''),
     h('span.spacer'),
     c.queuePaused && !busy ? h('button.btn.sm.primary', { onclick: () => nextInQueue(c, false) }, ic('send'), 'Retomar') : null,
     q.length > 1 ? h('button.btn.ghost.sm', { onclick: () => { c.queue = []; saveConvs(); drawQueue(); renderComposer(); } }, 'Limpar') : null));
@@ -2127,7 +2139,12 @@ function drawQueue() {
     const text = (it.content || '').replace(/\s+/g, ' ').trim() || it.parts.map((p) => p.name).filter(Boolean).join(', ');
     box.append(h('div.q-item', null,
       h('span.q-n', null, String(i + 1)),
+      it.now ? h('span.q-now', { title: 'Entra logo depois do passo atual' }, ic('zap'), 'próximo passo') : null,
       h('span.q-text', { title: it.content }, text),
+      h('button.icon-btn.sm' + (it.now ? '.on' : ''), { title: it.now ? 'Voltar a esperar a resposta terminar' : 'Executar logo depois do passo atual (sem esperar a resposta inteira)', 'aria-label': 'Executar no próximo passo', html: svg('zap'), onclick: () => {
+        it.now = !it.now; saveConvs(); drawQueue();
+        if (it.now && !running(c)) nextInQueue(c, false);
+      } }),
       i > 0 ? h('button.icon-btn.sm', { title: 'Subir', 'aria-label': 'Subir', html: svg('up'), onclick: () => { [q[i - 1], q[i]] = [q[i], q[i - 1]]; saveConvs(); drawQueue(); } }) : null,
       h('button.icon-btn.sm', { title: 'Editar (volta para a caixa de texto)', 'aria-label': 'Editar', html: svg('edit'), onclick: () => {
         q.splice(i, 1); saveConvs(); drawQueue();
@@ -3163,6 +3180,22 @@ async function runAgent(conv) {
       if (images.length && visionOn()) {
         for (const im of images) conv.messages.push({ role: 'user', hidden: true, content: `[Imagem devolvida pela ferramenta ${im.name}]`, _images: im.images });
       }
+      // mensagens marcadas na fila (⚡) entram agora, entre um passo e o próximo
+      const urgent = takeUrgent(conv);
+      for (const it of urgent) {
+        const um = { role: 'user', content: it.content, parts: it.parts, refs: it.refs, ts: Date.now(), steer: true, ...(conv.plan ? { plan: true } : {}) };
+        conv.messages.push(um);
+        const before = JSON.stringify(conv.auto || {});
+        if (autoLevelOf(conv) !== 'desligado') await autoRoute(conv, um);
+        if (JSON.stringify(conv.auto || {}) !== before) {
+          const au = conv.auto || {};
+          sel.groups = [...new Set([...sel.groups, ...(au.groups || [])])].filter((g) => TOOL_GROUPS.includes(g));
+          sel.mcp = [...new Set([...sel.mcp, ...(au.mcp || []).filter((n) => S.mcp.some((s) => s.name === n && s.status === 'connected'))])];
+          sel.skills = [...new Set([...sel.skills, ...(au.skills || [])])];
+          refetch = true;
+        }
+      }
+      if (urgent.length) { saveConvs(); scheduleRender(); }
       if (refetch) { ({ tools, meta } = await fetchTools()); conv.ctxParts = ctxBreakdown(system, ctx.text, catalog, tools, meta); }
       if (step === maxSteps - 1) conv.messages.push({ role: 'error', content: `Parei depois de ${maxSteps} rodadas de ferramentas. Envie "continue" para seguir ou aumente o limite nas configurações.` });
     }
@@ -5716,7 +5749,7 @@ async function init() {
       if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); chooseMention(mention.index); return; }
       if (e.key === 'Escape') { e.preventDefault(); closeMention(); return; }
     }
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); return; }
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(e.ctrlKey || e.metaKey); return; }
     if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); document.execCommand('insertLineBreak'); }
   });
   ed.addEventListener('input', () => {

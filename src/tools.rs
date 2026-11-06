@@ -280,13 +280,20 @@ pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[Strin
         }
     }
     if has("shell") {
-        let avail: Vec<&str> = [("rg", "rg (ripgrep, busca em texto)"), ("fd", "fd (acha arquivos por nome)"), ("uv", "uv/uvx (Python)"), ("bun", "bun/bunx (JavaScript)")]
-            .iter()
-            .filter(|(c, _)| crate::bins::which(c).is_some())
-            .map(|(_, d)| *d)
-            .collect();
-        if !avail.is_empty() {
-            parts.push(format!("Programas disponíveis no terminal: {}. Prefira-os a Get-ChildItem/Select-String por serem mais rápidos e com saída mais curta.", avail.join(", ")));
+        // o terminal é o PowerShell; os extras só para o que eles fazem melhor (antes o modelo
+        // via "uv/uvx" na lista e tentava rodar tudo com uvx)
+        let mut tips: Vec<&str> = vec![];
+        if crate::bins::which("rg").is_some() {
+            tips.push("buscar texto em arquivos: rg");
+        }
+        if crate::bins::which("fd").is_some() {
+            tips.push("achar arquivos pelo nome: fd");
+        }
+        if crate::bins::which("uv").is_some() {
+            tips.push("rodar um script Python: uv run script.py (não use uvx)");
+        }
+        if !tips.is_empty() {
+            parts.push(format!("Terminal: PowerShell; use comandos dele para o resto. Atalhos instalados: {}.", tips.join("; ")));
         }
     }
     if has("browser") {
@@ -366,7 +373,8 @@ pub async fn call(app: &Arc<App>, ws: PathBuf, name: &str, args: Value, allow: &
     };
     if name == "run_command" {
         let timeout = args.get("timeout").and_then(Value::as_u64).unwrap_or(120);
-        let command = s(&args, "command");
+        let fixed = fix_command(s(&args, "command"));
+        let command = fixed.as_str();
         let rtk = if rtk_on { crate::compact::rtk_rewrite(command) } else { None };
         let mut res = match &rtk {
             Some(rc) => crate::shell::run(&ws, rc, s(&args, "cwd"), timeout).await,
@@ -382,6 +390,15 @@ pub async fn call(app: &Arc<App>, ws: PathBuf, name: &str, args: Value, allow: &
             }
         }
         let res = res.map(|t| if compact_on { crate::compact::compact(&t, &crate::compact::saidas_dir(app), command, 12000).text } else { t });
+        let res = res.map(|t| {
+            let note = if fixed != s(&args, "command") { format!("[executado como: {fixed}]\n") } else { String::new() };
+            let hint = if command.trim_start().starts_with("uvx") && looks_failed(&t) {
+                "\n[dica: uvx baixa e roda um pacote Python pelo nome; se o pacote não existir ou não for preciso, use comandos do PowerShell]"
+            } else {
+                ""
+            };
+            format!("{note}{t}{hint}")
+        });
         return out(res.map(|t| (t, vec![])));
     }
     if def(name).is_some_and(|d| d.client) {
@@ -555,6 +572,30 @@ fn resolve_read(app: &App, ws: &Path, p: &str, allow: &[PathBuf]) -> Result<Path
         return Ok(full);
     }
     Err(format!("Acesso negado: \"{p}\" está fora da pasta de trabalho ({}).", ws.display()))
+}
+
+/// Ajusta comandos que costumam falhar no Windows: `python`/`pip` sem Python instalado
+/// (o "python" do Windows abre a Microsoft Store) passam a usar o uv, se ele estiver instalado.
+fn fix_command(cmd: &str) -> String {
+    let t = cmd.trim_start();
+    let first = t.split_whitespace().next().unwrap_or("").to_lowercase();
+    if !matches!(first.as_str(), "python" | "python3" | "py" | "pip" | "pip3") || crate::bins::which("uv").is_none() {
+        return cmd.to_string();
+    }
+    let real_python = ["python", "python3", "py"].iter().filter_map(|c| crate::bins::which(c)).any(|p| !p.to_string_lossy().to_lowercase().contains("windowsapps"));
+    if real_python {
+        return cmd.to_string();
+    }
+    let rest = t[first.len()..].trim_start();
+    match first.as_str() {
+        "pip" | "pip3" => format!("uv pip {rest}{}", if rest.starts_with("install") && !rest.contains("--system") { " --system" } else { "" }),
+        _ => format!("uv run python {rest}"),
+    }
+}
+
+fn looks_failed(t: &str) -> bool {
+    let l = t.to_lowercase();
+    ["error", "erro", "not found", "não encontrado", "no solution", "failed", "código de saída: 1", "exit code: 1"].iter().any(|w| l.contains(w))
 }
 
 pub(crate) fn resolve_write(ws: &Path, p: &str) -> Result<PathBuf, String> {

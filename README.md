@@ -71,7 +71,7 @@ O instalador não pede administrador: instala em `%LOCALAPPDATA%\Programs\Llama 
 - **Projetos**: conversas que dividem a mesma pasta de trabalho, com instruções e personalidade padrão.
 - **Personalidades**: prompts de sistema com nome e cor, escolhidos por conversa.
 - **Respostas em segundo plano**: troque de conversa sem parar a que está respondendo.
-- **Fila de mensagens**: escreva enquanto o modelo responde, e as mensagens seguem em ordem.
+- **Fila de mensagens**: escreva enquanto o modelo responde, e as mensagens seguem em ordem. Com Ctrl+Enter (ou o ⚡ na fila), a mensagem entra logo depois do passo atual, sem esperar a resposta inteira.
 - **Linha do tempo**: raciocínio, falas e ferramentas num trilho único, e uma aba **Atividade** com a linha do tempo da conversa inteira.
 - **Arrastar arquivos**: entra o caminho absoluto, sem upload.
 - **Alterações** na aba Atividade: os arquivos que a conversa mudou, com a diferença de cada um, desfazer por arquivo ou tudo.

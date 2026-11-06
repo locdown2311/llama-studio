@@ -1382,3 +1382,5 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 @media (max-width: 560px) { .share-secrets label { grid-template-columns: 1fr; } }
 .ws-scope { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); padding: 0 2px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ws-scope svg { width: 13px; height: 13px; flex: none; }
+.q-now { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: #d99a1e; background: color-mix(in srgb, #d99a1e 14%, transparent); border-radius: 8px; padding: 1px 6px; flex: none; }
+.q-now svg { width: 11px; height: 11px; }
