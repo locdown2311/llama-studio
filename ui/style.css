@@ -1302,17 +1302,6 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .set-choice input { margin-top: 3px; accent-color: var(--accent); }
 .set-choice span { display: flex; flex-direction: column; gap: 2px; }
 .set-choice small { color: var(--muted); font-size: 12.5px; }
-.set-mcp { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-.set-mcp-row { display: flex; align-items: center; gap: 14px; padding: 10px 13px; flex-wrap: wrap; }
-.set-mcp-row + .set-mcp-row { border-top: 1px solid var(--line); }
-.set-mcp-name { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 160px; }
-.set-mcp-name small { color: var(--muted); font-size: 12px; }
-.set-mini { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-2); }
-.set-mini .select { width: auto; padding-top: 4px; padding-bottom: 4px; font-size: 12.5px; }
-.set-trust input { accent-color: var(--accent); }
-.set-empty { margin: 0; padding: 14px; color: var(--muted); font-size: 13px; }
-.set-legend { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--muted); }
-.set-legend b { color: var(--text-2); font-weight: 600; }
 @media (max-width: 760px) {
   .set-layout { grid-template-columns: minmax(0, 1fr); gap: 14px; }
   .set-nav { flex-direction: row; overflow-x: auto; scrollbar-width: none; background: var(--card); z-index: 5; padding: 4px 0 8px; border-bottom: 1px solid var(--line); }

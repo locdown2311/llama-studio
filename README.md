@@ -92,7 +92,7 @@ O instalador não pede administrador: instala em `%LOCALAPPDATA%\Programs\Llama 
 - **Calendário de conteúdo**: posts por dia com situação, legenda, hashtags e imagem; cada post pode ter a própria conversa, e o modelo sugere temas para os dias vazios com base nos posts que foram bem.
 
 ### Configurações
-Divididas em subpáginas com menu lateral: Modelo, Ferramentas, Recursos automáticos, Conectores (modo de carregamento e confiança de cada um num lugar só), Segurança, Auditor, Contexto, Aparência, Janela, Compartilhar, Atualizações e Avançado. Tudo salva sozinho, e o studio volta na última subpágina aberta.
+Divididas em subpáginas com menu lateral: Modelo, Ferramentas, Recursos automáticos, Segurança, Auditor, Contexto, Aparência, Janela, Compartilhar, Atualizações e Avançado. Tudo salva sozinho, e o studio volta na última subpágina aberta. O que é de cada conector (confiança e carregamento) fica no próprio cartão, na página Conectores.
 
 ### Compartilhar
 - **Exportar e importar configurações** num arquivo `.studio.json`: configurações, personalidades, projetos, etiquetas, habilidades (com os arquivos), conectores, perfis de modelo, assinaturas e regras de pastas. Você escolhe o que vai.
