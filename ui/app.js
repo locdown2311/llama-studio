@@ -71,6 +71,13 @@ const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const PROPS = new Set(['value', 'checked', 'disabled', 'selected', 'hidden', 'draggable', 'open', 'type', 'rows', 'placeholder', 'title', 'spellcheck']);
 
+// eventos via um despachante por elemento: o morph() pode trocar a função sem recriar o elemento
+function listen(el, ev, fn) {
+  const hs = (el._h ||= {});
+  if (!hs[ev]) el.addEventListener(ev, (e) => el._h[ev]?.(e));
+  hs[ev] = fn;
+}
+
 function h(tag, attrs, ...kids) {
   // "tag.classe#id" (o #id pode vir em qualquer ponto)
   let id = '';
@@ -82,7 +89,7 @@ function h(tag, attrs, ...kids) {
   if (attrs) {
     for (const [k, v] of Object.entries(attrs)) {
       if (v == null || v === false) continue;
-      if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
+      if (k.startsWith('on') && typeof v === 'function') listen(el, k.slice(2).toLowerCase(), v);
       else if (k === 'html') el.innerHTML = v;
       else if (k === 'class') el.className = (el.className + ' ' + v).trim();
       else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
@@ -683,6 +690,26 @@ function splitThink(content) {
   return { think: '', text: c };
 }
 
+/**
+ * Transforma `a` em `b` mexendo só no que mudou. Elementos que continuam iguais não são
+ * recriados, então um clique ou rolagem no meio de uma atualização não se perde.
+ */
+function morph(a, b) {
+  if (a.nodeType !== b.nodeType || a.nodeName !== b.nodeName || (a.nodeType === 1 && a.dataset.id !== b.dataset.id)) { a.replaceWith(b); return; }
+  if (a.nodeType === 3 || a.nodeType === 8) { if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue; return; }
+  if (a.nodeType !== 1) return;
+  for (const { name } of [...a.attributes]) if (!b.hasAttribute(name)) a.removeAttribute(name);
+  for (const { name, value } of [...b.attributes]) if (a.getAttribute(name) !== value) a.setAttribute(name, value);
+  if (a.nodeName === 'DETAILS' && a.open !== b.open) a.open = b.open;
+  // nos elementos reaproveitados, os eventos passam a ser os do render novo
+  if (b._h) for (const [ev, fn] of Object.entries(b._h)) listen(a, ev, fn);
+  const ak = [...a.childNodes]; const bk = [...b.childNodes];
+  const n = Math.min(ak.length, bk.length);
+  for (let i = 0; i < n; i++) morph(ak[i], bk[i]);
+  for (let i = n; i < bk.length; i++) a.appendChild(bk[i]);
+  for (let i = n; i < ak.length; i++) ak[i].remove();
+}
+
 function blocksOf(conv) {
   const out = []; let ai = null;
   conv.messages.forEach((m, i) => {
@@ -732,7 +759,11 @@ function renderMessages(onlyLast) {
   if (!conv || !conv.messages.length) { box.innerHTML = ''; box.append(renderEmpty()); return; }
   const blocks = blocksOf(conv);
   if (onlyLast && box.lastElementChild?.dataset.start == blocks[blocks.length - 1].start && box.children.length === blocks.length) {
-    box.lastElementChild.replaceWith(renderBlock(blocks[blocks.length - 1], conv, true));
+    // rolagem interna (raciocínio, código) sobrevive à troca do bloco; no fim, segue o texto
+    const inner = new Map($$('.think-body', box.lastElementChild).map((e) => [e.dataset.key, e.scrollHeight - e.scrollTop - e.clientHeight < 24]));
+    // atualiza no lugar (sem trocar os elementos): cliques, seleção e rolagem continuam funcionando
+    morph(box.lastElementChild, renderBlock(blocks[blocks.length - 1], conv, true));
+    for (const e of $$('.think-body', box.lastElementChild)) if (inner.get(e.dataset.key) !== false) e.scrollTop = e.scrollHeight;
     // trocar o bloco não pode mexer na posição de quem está lendo mais acima
     if (!stick) box.scrollTop = top;
   } else {
@@ -844,10 +875,14 @@ function renderAI(b, conv, isLast) {
     const thinkingNow = live && m === last && !sp.text && !m.tool_calls?.length && (m.reasoning || sp.thinking);
     if (think.trim() && S.settings.showThinking) {
       const key = `think-${b.start}-${ai}`;
-      const d = h('details.think' + (thinkingNow ? '.live' : ''), { open: thinkingNow || S.openTools.has(key) },
-        h('summary', null, h('span', { html: svg('chev', 'chev'), style: { display: 'contents' } }), h('span.lbl', null, thinkingNow ? 'Pensando...' : `Raciocínio`), thinkingNow ? null : h('span.think-n', null, `${think.trim().split(/\s+/).length} palavras`)),
-        h('div.think-body', null, think.trim()));
-      d.addEventListener('toggle', () => { if (d.open) S.openTools.add(key); else S.openTools.delete(key); });
+      // enquanto pensa fica aberto, a não ser que a pessoa feche (aí respeita)
+      const d = h('details.think' + (thinkingNow ? '.live' : ''), { open: thinkingNow ? !S.closedThink.has(key) : S.openTools.has(key) },
+        // o estado é gravado no clique (antes do navegador abrir/fechar), para a próxima atualização já respeitar
+        h('summary', { onclick: (e) => {
+          const willOpen = !e.currentTarget.parentElement.open;
+          if (willOpen) { S.openTools.add(key); S.closedThink.delete(key); } else { S.openTools.delete(key); S.closedThink.add(key); }
+        } }, h('span', { html: svg('chev', 'chev'), style: { display: 'contents' } }), h('span.lbl', null, thinkingNow ? 'Pensando...' : `Raciocínio`), thinkingNow ? null : h('span.think-n', null, `${think.trim().split(/\s+/).length} palavras`)),
+        h('div.think-body', { dataset: { key } }, think.trim()));
       steps.push(tlItem('think' + (thinkingNow ? '.now' : ''), ic('brain'), d));
     }
     const isFinal = m === last && !m.tool_calls?.length;
@@ -892,7 +927,7 @@ function renderAI(b, conv, isLast) {
     !live ? h('div.chips', null,
       h('button.chip', { onclick: () => navigator.clipboard.writeText(finalText).then(() => toast('Resposta copiada')) }, ic('copy'), 'Copiar'),
       isLast ? h('button.chip', { onclick: () => { conv.messages.splice(b.start); runAgent(conv); } }, ic('refresh'), 'Tentar novamente') : null,
-      isLast && toolCount ? h('button.chip', { onclick: () => { $$('.tool', card).forEach((t) => { t.classList.add('open'); }); } }, ic('list'), 'Expandir ferramentas') : null) : null);
+      isLast && toolCount ? h('button.chip', { onclick: (e) => { $$('.tool', e.currentTarget.closest('.msg-ai')).forEach((t) => { t.classList.add('open'); S.openTools.add(t.dataset.id); }); } }, ic('list'), 'Expandir ferramentas') : null) : null);
 }
 
 function tlItem(kind, icon, content) {
@@ -947,7 +982,7 @@ function renderTool(tc, res, live) {
     denied: [h('span', { html: svg('ban') }), 'negada'],
   }[status];
 
-  const head = h('button.tool-head', { onclick: () => { el.classList.toggle('open'); if (el.classList.contains('open')) S.openTools.add(key); else S.openTools.delete(key); } },
+  const head = h('button.tool-head', { onclick: (e) => { const t = e.currentTarget.closest('.tool'); t.classList.toggle('open'); if (t.classList.contains('open')) S.openTools.add(key); else S.openTools.delete(key); } },
     h('span.tool-ico', { html: svg(toolIcon(name, source)) }),
     h('span.tool-name', null, displayName),
     server ? h('span.tool-server', null, server) : null,
@@ -1643,6 +1678,7 @@ async function updateTodos(conv, args, signal) {
   return { content: `Lista atualizada: ${done} de ${conv.todos.length} feitas.${now ? ' Em andamento: ' + now.text : ''}`, isError: false };
 }
 S.planWaits = new Map();
+S.closedThink = new Set();
 
 function drawTodos() {
   const box = $('#todos'); if (!box) return;

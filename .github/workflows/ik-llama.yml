@@ -44,7 +44,8 @@ jobs:
   build:
     needs: prepare
     if: needs.prepare.outputs.skip != 'true'
-    runs-on: windows-latest
+    # imagem com o Visual Studio 2022: o CUDA 12 não aceita o compilador do VS 2026
+    runs-on: windows-2022
     strategy:
       fail-fast: false
       matrix:
@@ -54,7 +55,7 @@ jobs:
           - name: vulkan
             cmake: -DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_VULKAN=ON
           - name: cuda-12.8
-            cmake: -DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89" -DCMAKE_CUDA_FLAGS="-allow-unsupported-compiler"
+            cmake: -DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89"
     steps:
       - uses: actions/checkout@v4
         with:
