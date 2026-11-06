@@ -99,8 +99,19 @@ pub fn list(app: &App) -> Vec<Skill> {
     out
 }
 
+/// Acha a skill pelo id; aceita também o nome ou o nome da pasta (modelos pequenos trocam um pelo outro).
 pub fn get(app: &App, id: &str) -> Option<Skill> {
-    list(app).into_iter().find(|s| s.id == id)
+    let all = list(app);
+    let want = id.trim().trim_matches(|c| c == '"' || c == '\'' || c == '/').to_lowercase();
+    if want.is_empty() {
+        return None;
+    }
+    let norm = |x: &str| x.to_lowercase().replace([' ', '_'], "-");
+    let pos = all.iter().position(|s| s.id == id)
+        .or_else(|| all.iter().position(|s| s.id.to_lowercase() == want || s.name.to_lowercase() == want))
+        .or_else(|| all.iter().position(|s| norm(&s.id) == norm(&want) || norm(&s.name) == norm(&want) || s.dir.file_name().is_some_and(|f| norm(&f.to_string_lossy()) == norm(&want))))
+        .or_else(|| all.iter().position(|s| norm(&s.id).ends_with(&norm(&want)) || norm(&want).ends_with(&norm(&s.id))));
+    pos.map(|i| all.into_iter().nth(i).unwrap())
 }
 
 pub fn write(app: &App, id: Option<&str>, name: &str, description: &str, body: &str) -> Result<String, String> {

@@ -620,7 +620,10 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
             }
         }
         "read_skill_file" => {
-            let sk = skills::get(app, s(a, "skill")).ok_or_else(|| format!("Skill não encontrada: {}", s(a, "skill")))?;
+            let sk = skills::get(app, s(a, "skill")).ok_or_else(|| {
+                let ids: Vec<String> = skills::list(app).iter().map(|k| format!("{} ({})", k.id, k.name)).collect();
+                format!("Skill não encontrada: \"{}\". Use um destes ids: {}", s(a, "skill"), ids.join(", "))
+            })?;
             let p = s(a, "path");
             let file = resolve(&sk.dir, if p.is_empty() { "SKILL.md" } else { p });
             if !is_inside(&sk.dir, &file) {
