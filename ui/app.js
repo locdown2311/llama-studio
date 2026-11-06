@@ -1899,8 +1899,8 @@ async function submit(conv, item) {
 // nunca desliga o que você escolheu. O que foi ligado aparece na mensagem, com "desfazer".
 const ROUTES = [
   // strong: um sinal basta; weak: precisa de dois sinais diferentes (evita "serial killer", "patch na moda")
-  { id: 're', label: 'Engenharia reversa', think: 'on', groups: ['notebook', 'explore', 'read'], mcp: /dbg|debug|ida\b|ghidra|binja|binary.?ninja|radare|r2|cheat.?engine/i, skills: /dbg|debug|revers|engenharia/i,
-    strong: /x(32|64)dbg|\bdbg\b|\bdebugger\b|breakpoint|\bbps?\b|\bdlls?\b|endere[cç]o\s+(0x)?[0-9a-f]{6,}|desassembl|disassembl|\bida\b|ghidra|radare|cheat.?engine|(?<!(erro|error|c[oó]digo|code)\s{0,3})\b0x[0-9a-f]{4,}\b|\.(exe|dll|sys)\b|anti.?debug|desempacot|unpack|\bupx\b|\bsub_[0-9a-f]{3,}|\bdump\b.{0,30}(m[oó]dulo|mem[oó]ria|processo)|\b[er](ax|bx|cx|dx|si|di)\b/i,
+  { id: 're', label: 'Engenharia reversa', think: 'on', groups: ['notebook', 'explore', 'read'], mcp: /dbg|debug|ida\b|ghidra|binja|binary.?ninja|radare|r2|cheat.?engine|^ce$|dnspy|ilspy|dotpeek|de4dot|\bjeb\b|^rea$|decompil|frida/i, skills: /dbg|debug|revers|engenharia/i,
+    strong: /x(32|64)dbg|\bdbg\b|\bdebugger\b|breakpoint|dnspy|ilspy|dotpeek|de4dot|descompil|decompil|\bassembl(y|ies) \.net|\.net assembl|\bil\b.{0,20}(patch|m[eé]todo)|\bbps?\b|\bdlls?\b|endere[cç]o\s+(0x)?[0-9a-f]{6,}|desassembl|disassembl|\bida\b|ghidra|radare|cheat.?engine|(?<!(erro|error|c[oó]digo|code)\s{0,3})\b0x[0-9a-f]{4,}\b|\.(exe|dll|sys)\b|anti.?debug|desempacot|unpack|\bupx\b|\bsub_[0-9a-f]{3,}|\bdump\b.{0,30}(m[oó]dulo|mem[oó]ria|processo)|\b[er](ax|bx|cx|dx|si|di)\b/i,
     weak: /debug|depura|engenharia reversa|reverse|assembly|registrador|\bpatch|offset|\bserial\b|licen[cç]a|execut[aá]vel|bin[aá]rio|mem[oó]ria|processo|\bstrings?\b|referen[cç]i|m[oó]dulo|\bdump\b|senha|compar[ae]|rotina|criptograf|\bimports?\b|\bexports?\b|endere[cç]o|ponteiro|\bhook|inje[cç]|\bjogo\b/gi },
   { id: 'code', label: 'Programação', groups: ['read', 'edit', 'write', 'shell', 'explore'],
     strong: /\.(rs|js|mjs|ts|tsx|jsx|py|cs|cpp|hpp|go|java|kt|php|rb|sh|ps1|lua|sql|html?|css|vue|svelte)\b|\b(sql|query|queries)\b|\b(cargo|npm|pnpm|yarn|pip|pytest|gradle|maven|dotnet|cmake)\b|stack.?trace|\bcommit|\bgit\b|pull request|\b(react|vue|svelte|django|flask|express|node\.?js)\b|typescript|javascript|python|\brust\b|c\+\+|\bc#|\bsrc\//i,
@@ -1986,6 +1986,25 @@ function fillAutoPop() {
   pop.append(h('div.pop-foot', null, h('button.link', { onclick: () => { closePops(); setView('settings'); setTimeout(() => $('#set-tools')?.scrollIntoView({ block: 'start' }), 60); } }, 'Padrão para novas conversas')));
 }
 
+// Qual conector de engenharia reversa o pedido quer: o citado (x64dbg, dnspy...) ou o indicado
+// pelo assunto (.NET -> dnspy, 32 bits -> x32dbg). Sem pista, só os que já estão conectados,
+// sem acordar os desligados.
+const RE_HINTS = [
+  [/\.net|assembl(y|ies)|\bc#|dnspy|ilspy|\bil\b/i, /dnspy|ilspy|dotpeek|de4dot/i],
+  [/x64|64.?bits?|\b(rax|rbx|rcx|rdx|rip|rsp)\b/i, /x64dbg/i],
+  [/x32|32.?bits?|\b(eax|ebx|ecx|edx|eip|esp)\b/i, /x32dbg/i],
+  [/ghidra|descompil|decompil|pseudo.?c[oó]digo/i, /^rea$|ghidra|decompil/i],
+  [/cheat.?engine|mem[oó]ria do jogo|valor .{0,30}jogo/i, /^ce$|cheat/i],
+];
+function pickConnectors(r, text, mcps) {
+  const cands = mcps.filter((s) => r.mcp.test(s.name));
+  const low = ' ' + norm(text).replace(/[^a-z0-9#.]+/g, ' ') + ' ';
+  const named = cands.filter((s) => { const k = norm(s.name).replace(/mcp|server/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim(); return k.length >= 2 && low.includes(' ' + k + ' '); });
+  const hinted = r.id === 're' ? cands.filter((s) => RE_HINTS.some(([q, c]) => q.test(text) && c.test(s.name))) : [];
+  const pick = named.length ? named : hinted; // citou um pelo nome: só ele
+  return (pick.length ? pick : cands.filter((s) => s.status === 'connected')).map((s) => s.name);
+}
+
 async function autoRoute(conv, msg) {
   const text = plainOf(msg) + ' ' + (msg.refs || []).map((r) => r.name).join(' ');
   const low = norm(text);
@@ -1997,7 +2016,7 @@ async function autoRoute(conv, msg) {
   for (const r of routeProfiles(text, level)) {
     added.profiles.push(r.label);
     for (const g of r.groups || []) add('groups', g);
-    if (r.mcp) for (const s of S.mcp) if (r.mcp.test(s.name)) add('mcp', s.name);
+    if (r.mcp) for (const n of pickConnectors(r, text, S.mcp)) add('mcp', n);
     if (r.skills) for (const sk of S.skills) if (r.skills.test(sk.name + ' ' + sk.id)) add('skills', sk.id);
     if (r.think && !conv.think && !conv.autoThink) conv.autoThink = r.think;
   }

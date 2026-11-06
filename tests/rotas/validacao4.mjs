@@ -18,6 +18,9 @@ export default [
   ['acha todas as fotos repetidas no meu pc', []],
   ['cria uma legenda com emoji pro post da promoção', ['social']],
   ['me dá uma ideia de bio pro meu perfil do instagram', ['social']],
+  ['descompila a classe LicenseManager do App.dll no dnspy', ['re']],
+  ['abre esse assembly .NET e acha onde valida a licença', ['re']],
+  ['faz um patch no IL do método CheckSerial', ['re']],
   // nada
   ['bom dia!', []],
   ['qual a diferença entre debug e release?', []],
