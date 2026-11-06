@@ -28,6 +28,8 @@ const ICONS = {
   stop: '<rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/>',
   chev: '<path d="m9 18 6-6-6-6"/>',
   up: '<path d="m18 15-6-6-6 6"/>',
+  info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
+  cpu: '<rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
   alert: '<circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>',
   search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
@@ -2943,6 +2945,143 @@ function drawModels() {
   }
 }
 
+/* ------------------------------------------------------------ argumentos do llama-server */
+// Opções conhecidas do llama-server, com explicação. O que não estiver aqui vai para "Outros".
+const ARG_GROUPS = [
+  ['gpu', 'Desempenho e memória', 'cpu'],
+  ['think', 'Raciocínio e formato', 'brain'],
+  ['sample', 'Amostragem (criatividade)', 'sparkles'],
+  ['vision', 'Visão', 'eye'],
+];
+const ARG_DEFS = [
+  { k: 'ngl', f: ['-ngl', '--gpu-layers', '--n-gpu-layers'], g: 'gpu', t: 'num', l: 'Camadas na GPU', d: 'Quantas camadas do modelo vão para a placa de vídeo. 99 = todas (mais rápido, se couber na VRAM).' },
+  { k: 'fa', f: ['-fa', '--flash-attn'], g: 'gpu', t: 'sel', o: ['on', 'off', 'auto'], l: 'Flash attention', d: 'Atenção otimizada: menos memória e mais velocidade. Deixe ligada se a placa suportar.' },
+  { k: 'ctk', f: ['-ctk', '--cache-type-k'], g: 'gpu', t: 'sel', o: ['f16', 'q8_0', 'q4_0', 'q5_0', 'q5_1', 'q4_1', 'bf16', 'f32'], l: 'Cache K', d: 'Precisão da memória do contexto (chaves). q8_0 usa metade da memória de f16 quase sem perda.' },
+  { k: 'ctv', f: ['-ctv', '--cache-type-v'], g: 'gpu', t: 'sel', o: ['f16', 'q8_0', 'q4_0', 'q5_0', 'q5_1', 'q4_1', 'bf16', 'f32'], l: 'Cache V', d: 'Precisão da memória do contexto (valores). Com q8_0/q4_0 é preciso flash attention ligada.' },
+  { k: 'b', f: ['-b', '--batch-size'], g: 'gpu', t: 'num', l: 'Lote (batch)', d: 'Tokens processados por vez ao ler o prompt. Maior = leitura mais rápida, mais memória. Padrão 2048.' },
+  { k: 'ub', f: ['-ub', '--ubatch-size'], g: 'gpu', t: 'num', l: 'Microlote (ubatch)', d: 'Pedaço físico do lote. 512 é um bom valor; maior pode acelerar em GPUs grandes.' },
+  { k: 'np', f: ['-np', '--parallel'], g: 'gpu', t: 'num', l: 'Conversas em paralelo', d: 'Quantas respostas o servidor gera ao mesmo tempo (slots). Cada uma divide o contexto, a não ser com contexto unificado.' },
+  { k: 'kvu', f: ['--kv-unified', '-kvu'], g: 'gpu', t: 'bool', l: 'Contexto unificado', d: 'Os slots paralelos compartilham o mesmo contexto em vez de dividi-lo. Recomendado com mais de 1 em paralelo.' },
+  { k: 'ckpt', f: ['--ctx-checkpoints'], g: 'gpu', t: 'num', l: 'Checkpoints de contexto', d: 'Pontos salvos do contexto para reaproveitar o prompt entre mensagens em modelos híbridos/SWA. Mais = menos reprocessamento, mais RAM.' },
+  { k: 'mlock', f: ['--mlock'], g: 'gpu', t: 'bool', l: 'Travar na RAM (mlock)', d: 'Impede o sistema de mandar o modelo para o disco. Use só se sobrar RAM.' },
+  { k: 'nommap', f: ['--no-mmap'], g: 'gpu', t: 'bool', l: 'Não mapear o arquivo (no-mmap)', d: 'Carrega o modelo inteiro na memória em vez de ler do disco sob demanda. Carrega mais devagar, pode rodar mais estável.' },
+  { k: 'jinja', f: ['--jinja'], g: 'think', t: 'bool', l: 'Template Jinja', d: 'Usa o template de chat do próprio modelo. Necessário para ferramentas (tool calling). Deixe ligado.' },
+  { k: 'rbudget', f: ['--reasoning-budget'], g: 'think', t: 'num', l: 'Limite de raciocínio (tokens)', d: 'Quantos tokens o modelo pode pensar antes de responder. -1 = sem limite, 0 = sem raciocínio.' },
+  { k: 'rmsg', f: ['--reasoning-budget-message'], g: 'think', t: 'text', l: 'Mensagem ao estourar o limite', d: 'Texto inserido quando o raciocínio atinge o limite, para o modelo partir para a resposta.' },
+  { k: 'rformat', f: ['--reasoning-format'], g: 'think', t: 'sel', o: ['auto', 'deepseek', 'none'], l: 'Formato do raciocínio', d: 'Como separar o pensamento da resposta. auto funciona para a maioria.' },
+  { k: 'temp', f: ['--temp', '--temperature'], g: 'sample', t: 'num', step: 0.05, l: 'Temperatura', d: 'Criatividade. Baixa (0,2-0,6) = mais preciso e repetível; alta (0,8+) = mais variado.' },
+  { k: 'topk', f: ['--top-k'], g: 'sample', t: 'num', l: 'Top-K', d: 'Considera só os K tokens mais prováveis. 20-40 é comum; 0 desliga.' },
+  { k: 'topp', f: ['--top-p'], g: 'sample', t: 'num', step: 0.05, l: 'Top-P', d: 'Considera os tokens até somar essa probabilidade. 0,9-0,95 é comum; 1 desliga.' },
+  { k: 'minp', f: ['--min-p'], g: 'sample', t: 'num', step: 0.01, l: 'Min-P', d: 'Descarta tokens muito menos prováveis que o melhor. 0,05 é um bom valor; 0 desliga.' },
+  { k: 'rpen', f: ['--repeat-penalty'], g: 'sample', t: 'num', step: 0.05, l: 'Penalidade de repetição', d: 'Evita repetir texto. 1,0 = desligada (recomendado para modelos novos).' },
+  { k: 'ppen', f: ['--presence-penalty'], g: 'sample', t: 'num', step: 0.1, l: 'Penalidade de presença', d: 'Incentiva assuntos novos. 0 = desligada; alguns modelos recomendam 1,5.' },
+  { k: 'mmproj', f: ['--mmproj', '-mm'], g: 'vision', t: 'file', l: 'Projetor de visão (mmproj)', d: 'Arquivo mmproj-*.gguf que permite ao modelo ver imagens. Vem no mesmo repositório do modelo.' },
+];
+
+function splitArgs(str) {
+  const out = []; const re = /"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+)/g; let m;
+  while ((m = re.exec(str || ''))) out.push(m[1] !== undefined ? m[1].replace(/\\"/g, '"') : m[2] !== undefined ? m[2] : m[3]);
+  return out;
+}
+const quoteArg = (v) => (/[\s"]/.test(v) || v === '' ? '"' + v.replace(/"/g, '\\"') + '"' : v);
+
+function parseArgs(str) {
+  const toks = splitArgs(str); const vals = {}; const rest = [];
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i];
+    const eq = t.startsWith('--') && t.includes('=') ? t.indexOf('=') : -1;
+    const flag = eq > 0 ? t.slice(0, eq) : t;
+    const def = ARG_DEFS.find((d) => d.f.includes(flag));
+    if (!def) {
+      rest.push(t);
+      // valor da opção desconhecida vai junto
+      if (t.startsWith('-') && eq < 0 && toks[i + 1] !== undefined && !/^-[a-zA-Z-]/.test(toks[i + 1])) rest.push(toks[++i]);
+      continue;
+    }
+    if (def.t === 'bool') { vals[def.k] = true; continue; }
+    vals[def.k] = eq > 0 ? t.slice(eq + 1) : (toks[++i] ?? '');
+  }
+  return { vals, rest };
+}
+
+function buildArgs(vals, restStr) {
+  const parts = [];
+  for (const d of ARG_DEFS) {
+    const v = vals[d.k];
+    if (d.t === 'bool') { if (v) parts.push(d.f[0]); continue; }
+    if (v === undefined || v === null || String(v).trim() === '') continue;
+    parts.push(d.f[0], quoteArg(String(v).trim()));
+  }
+  const rest = (restStr || '').trim();
+  return [parts.join(' '), rest].filter(Boolean).join(' ');
+}
+
+/** Editor visual dos argumentos extras, com troca para texto. */
+function argsEditor(initial) {
+  let raw = initial || '';
+  let mode = 'form';
+  const box = h('div.args-ed');
+  const seg = h('div.seg.sm', null,
+    h('button', { type: 'button', onclick: () => setMode('form') }, 'Opções'),
+    h('button', { type: 'button', onclick: () => setMode('text') }, 'Texto'));
+  const ta = h('textarea.textarea.mono', { rows: 4 });
+  const form = h('div.args-form');
+  let read = () => raw;
+
+  const drawForm = () => {
+    const { vals, rest } = parseArgs(raw);
+    form.innerHTML = '';
+    const getters = [];
+    for (const [g, title, icon] of ARG_GROUPS) {
+      const defs = ARG_DEFS.filter((d) => d.g === g);
+      const setCount = defs.filter((d) => vals[d.k] !== undefined && vals[d.k] !== false).length;
+      const body = h('div.args-grid');
+      for (const d of defs) {
+        let input; const v = vals[d.k];
+        if (d.t === 'bool') {
+          input = h('input', { type: 'checkbox', checked: !!v });
+          getters.push(() => [d.k, input.checked]);
+          body.append(h('label.arg.arg-bool', { title: d.d }, h('span.switch.sm', null, input, h('span')), h('span.arg-main', null, h('span.arg-l', null, d.l), h('span.arg-d', null, d.d))));
+          continue;
+        }
+        if (d.t === 'sel') {
+          input = h('select.select', null, h('option', { value: '' }, 'padrão'), ...[...new Set([...(v && !d.o.includes(v) ? [v] : []), ...d.o])].map((o) => h('option', { value: o }, o)));
+          input.value = v ?? '';
+        } else if (d.t === 'file') {
+          input = h('input.input.mono', { value: v ?? '', placeholder: 'nenhum' });
+        } else {
+          input = h('input.input' + (d.t === 'num' ? '.mono' : ''), { value: v ?? '', placeholder: 'padrão', inputmode: d.t === 'num' ? 'decimal' : undefined });
+        }
+        getters.push(() => [d.k, input.value.trim().replace(/,/g, d.t === 'num' ? '.' : ',')]);
+        const pick = d.t === 'file' ? h('button.btn.sm', { type: 'button', onclick: async () => {
+          const p = await pickPath({ title: 'Escolher o mmproj (.gguf)', mode: 'file', start: input.value ? input.value.replace(/[\\/][^\\/]*$/, '') : S.info.home });
+          if (p) input.value = p;
+        } }, 'Procurar') : null;
+        body.append(h('div.arg' + (d.t === 'file' || d.t === 'text' ? '.wide' : ''), null,
+          h('label.arg-l', { title: d.d }, d.l, h('span.arg-help', { title: d.d, html: svg('info' in ICONS ? 'info' : 'alert') })),
+          pick ? h('div.inline', null, input, pick) : input,
+          h('span.arg-d', null, d.d)));
+      }
+      const det = h('details.args-sec', { open: setCount > 0 || g === 'gpu' }, h('summary', null, ic('chev'), ic(icon in ICONS ? icon : 'gear'), h('span', null, title), setCount ? h('span.tag', null, `${setCount} definida${setCount > 1 ? 's' : ''}`) : null), body);
+      form.append(det);
+    }
+    const restIn = h('textarea.textarea.mono', { rows: 2, value: rest.map(quoteArg).join(' '), placeholder: 'Outras opções do llama-server, como no terminal' });
+    form.append(h('div.args-sec.rest', null, h('div.arg-l', null, 'Outros argumentos'), restIn, h('span.arg-d', null, 'Opções que não estão acima ficam aqui, sem mudança. Lista completa: llama-server --help.')));
+    read = () => buildArgs(Object.fromEntries(getters.map((g) => g())), restIn.value);
+  };
+  const setMode = (m) => {
+    raw = mode === 'form' ? read() : ta.value;
+    mode = m;
+    seg.children[0].classList.toggle('on', m === 'form');
+    seg.children[1].classList.toggle('on', m === 'text');
+    if (m === 'form') { drawForm(); form.hidden = false; ta.hidden = true; }
+    else { ta.value = raw; form.hidden = true; ta.hidden = false; }
+  };
+  box.append(h('div.args-top', null, h('span.arg-l', null, 'Argumentos do llama-server'), h('span.spacer'), seg), form, ta);
+  setMode('form');
+  return { el: box, get: () => (mode === 'form' ? read() : ta.value).trim() };
+}
+
 /* ------------------------------------------------------------ Hugging Face */
 S.hfJobs = [];
 let hfTimer = 0;
@@ -3064,7 +3203,7 @@ function editModel(m, path) {
   const name = h('input.input', { value: base.name, placeholder: 'ex.: Qwen 35B rápido' });
   const file = inp(base.model, { placeholder: 'C:\\modelos\\modelo.gguf' });
   const ctx = inp(base.context, { inputmode: 'numeric' }); const moe = inp(base.cpuMoe, { inputmode: 'numeric' }); const thr = inp(base.threads, { inputmode: 'numeric' });
-  const extra = h('textarea.textarea.mono', { rows: 4, value: base.extraArgs });
+  const extra = argsEditor(base.extraArgs);
   const pick = h('button.btn', { type: 'button', onclick: async () => {
     const p = await pickPath({ title: 'Escolher o modelo (.gguf)', mode: 'file', start: file.value ? file.value.replace(/[\\/][^\\/]*$/, '') : S.info.home });
     if (p) { file.value = p; if (!name.value.trim()) name.value = p.split(/[\\/]/).pop().replace(/\.gguf$/i, ''); }
@@ -3076,10 +3215,10 @@ function editModel(m, path) {
       field('Nome', name),
       h('div.field', null, h('label', null, 'Arquivo (.gguf)'), h('div.inline', null, file, pick)),
       h('div.row', null, field('Contexto', ctx), field('Camadas MoE na CPU', moe, '0 = nenhuma'), field('Threads', thr, '0 = automático')),
-      field('Argumentos extras', extra, 'Ex.: --mmproj para visão, -ngl, temperatura. Começa com os do modelo carregado.'))],
+      extra.el)],
     foot: [h('button.btn', { onclick: () => md.close() }, 'Cancelar'), h('button.btn.primary', { onclick: async () => {
       const num = (x) => Math.max(0, parseInt(x.value, 10) || 0);
-      const p = { ...base, name: name.value.trim() || 'Modelo', model: file.value.trim().replace(/^"|"$/g, ''), context: num(ctx), cpuMoe: num(moe), threads: num(thr), extraArgs: extra.value.trim() };
+      const p = { ...base, name: name.value.trim() || 'Modelo', model: file.value.trim().replace(/^"|"$/g, ''), context: num(ctx), cpuMoe: num(moe), threads: num(thr), extraArgs: extra.get() };
       if (!p.model) { toast('Escolha o arquivo do modelo.', 'err'); return; }
       const list = S.models.models.filter((x) => x.id !== p.id);
       const at = S.models.models.findIndex((x) => x.id === p.id);
@@ -3117,7 +3256,7 @@ function drawServerForm() {
   const host = inp(c.BindHost); const port = inp(c.Port, true, { inputmode: 'numeric' });
   const ctx = inp(c.Context, true, { inputmode: 'numeric' }); const moe = inp(c.CpuMoe, true, { inputmode: 'numeric' });
   const thr = inp(c.Threads, true, { inputmode: 'numeric' }); const hip = inp(c.HipDevices);
-  const extra = h('textarea.textarea.mono', { rows: 5, value: c.ExtraArgs || '' });
+  const extra = argsEditor(c.ExtraArgs || '');
   const auto = h('input', { type: 'checkbox', checked: !!c.AutoStart });
   const browse = (target, title, mode) => h('button.btn', { type: 'button', onclick: async () => {
     const start = target.value ? target.value.replace(/[\\/][^\\/]*$/, '') : S.info.home;
@@ -3129,7 +3268,7 @@ function drawServerForm() {
     h('div.form-sec', null, act ? `Modelo carregado: ${act.name}` : 'Modelo', h('small', null, 'Arquivo, contexto, MoE, threads e argumentos extras valem só para este modelo.')),
     row('Modelo (.gguf)', model, browse(model, 'Escolher o modelo (.gguf)', 'file')),
     h('div.row', null, row('Contexto', ctx), row('Camadas MoE na CPU', moe, null, '0 = nenhuma'), row('Threads', thr, null, '0 = automático')),
-    row('Argumentos extras', extra),
+    extra.el,
     h('div.form-sec', null, 'Servidor', h('small', null, 'Vale para todos os modelos.')),
     row('llama-server', exe, browse(exe, 'Escolher o llama-server', 'file')),
     h('div.row', null, row('Host', host), row('Porta', port), row('HIP_VISIBLE_DEVICES', hip)),
@@ -3137,7 +3276,7 @@ function drawServerForm() {
     h('div.form-foot', null, h('button.btn.primary', { type: 'button', onclick: async () => {
       const num = (x) => Math.max(0, parseInt(x.value, 10) || 0);
       try {
-        S.llama = await api('/api/llama/config', { config: { ServerExe: exe.value.trim().replace(/^"|"$/g, ''), Model: model.value.trim().replace(/^"|"$/g, ''), BindHost: host.value.trim() || '127.0.0.1', Port: num(port) || 1235, Context: num(ctx), CpuMoe: num(moe), Threads: num(thr), HipDevices: hip.value.trim(), ExtraArgs: extra.value.trim(), AutoStart: auto.checked } });
+        S.llama = await api('/api/llama/config', { config: { ServerExe: exe.value.trim().replace(/^"|"$/g, ''), Model: model.value.trim().replace(/^"|"$/g, ''), BindHost: host.value.trim() || '127.0.0.1', Port: num(port) || 1235, Context: num(ctx), CpuMoe: num(moe), Threads: num(thr), HipDevices: hip.value.trim(), ExtraArgs: extra.get(), AutoStart: auto.checked } });
         S.info.llamaUrl = S.llama.url; lastHealth = '';
         toast(S.llama.running ? 'Salvo. Reinicie o servidor para aplicar.' : 'Configuração salva');
         drawServerStatus(); checkHealth(); loadModels();
