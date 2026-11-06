@@ -851,6 +851,11 @@ function blocksOf(conv) {
 // Qualquer gesto dela (roda, toque, teclas, arrastar a barra) decide se continua seguindo.
 let followBottom = true;
 let userScrollAt = 0;
+// ponteiro sobre algo clicável (ou botão pressionado): a rolagem automática espera,
+// senão o bloco foge do mouse enquanto o modelo escreve e o clique cai em outro lugar
+let pressing = false; let overClickable = false;
+const holdScroll = () => pressing || overClickable;
+const CLICKABLE = '.tool-head, summary, button, a, .chip, input, select, textarea';
 function nearBottom() { const el = $('#messages'); return el.scrollHeight - el.scrollTop - el.clientHeight < 60; }
 function toBottom() { const el = $('#messages'); el.scrollTop = el.scrollHeight; followBottom = true; }
 function initScrollFollow() {
@@ -858,7 +863,12 @@ function initScrollFollow() {
   const mark = () => { userScrollAt = Date.now(); };
   el.addEventListener('wheel', (e) => { mark(); if (e.deltaY < 0) followBottom = false; }, { passive: true });
   el.addEventListener('touchmove', mark, { passive: true });
-  el.addEventListener('pointerdown', mark);
+  el.addEventListener('pointerdown', () => { mark(); pressing = true; });
+  // solta um pouco depois: o clique termina e o bloco abre antes de a rolagem voltar
+  const release = () => { if (pressing) setTimeout(() => { pressing = false; }, 250); };
+  window.addEventListener('pointerup', release); window.addEventListener('pointercancel', release);
+  el.addEventListener('pointerover', (e) => { overClickable = e.pointerType !== 'touch' && !!e.target.closest?.(CLICKABLE); });
+  el.addEventListener('pointerleave', () => { overClickable = false; });
   el.addEventListener('keydown', mark);
   el.addEventListener('scroll', () => {
     // só gestos da pessoa mudam o modo; as rolagens do próprio app não contam
@@ -886,11 +896,12 @@ function renderChat() {
 function renderMessages(onlyLast) {
   const box = $('#messages');
   const conv = cur();
-  const stick = onlyLast ? followBottom : true;
+  const stick = onlyLast ? followBottom && !holdScroll() : true;
   const top = box.scrollTop;
   if (!conv || !conv.messages.length) { box.innerHTML = ''; box.append(renderEmpty()); drawActivitySoon(); return; }
   const blocks = blocksOf(conv);
-  if (onlyLast && box.lastElementChild?.dataset.start == blocks[blocks.length - 1].start && box.children.length === blocks.length) {
+  // o marcador de compactação não é bloco: conta só os blocos, senão tudo seria recriado a cada quadro
+  if (onlyLast && box.lastElementChild?.dataset.start == blocks[blocks.length - 1].start && box.querySelectorAll(':scope > [data-start]').length === blocks.length) {
     // rolagem interna (raciocínio, código) sobrevive à troca do bloco; no fim, segue o texto
     const inner = new Map($$('.think-body', box.lastElementChild).map((e) => [e.dataset.key, e.scrollHeight - e.scrollTop - e.clientHeight < 24]));
     // atualiza no lugar (sem trocar os elementos): cliques, seleção e rolagem continuam funcionando
@@ -1038,7 +1049,7 @@ function renderAI(b, conv, isLast) {
         // o estado é gravado no clique (antes do navegador abrir/fechar), para a próxima atualização já respeitar
         h('summary', { onclick: (e) => {
           const willOpen = !e.currentTarget.parentElement.open;
-          if (willOpen) { S.openTools.add(key); S.closedThink.delete(key); } else { S.openTools.delete(key); S.closedThink.add(key); }
+          if (willOpen) { S.openTools.add(key); S.closedThink.delete(key); if (!e.currentTarget.parentElement.classList.contains('live')) followBottom = false; } else { S.openTools.delete(key); S.closedThink.add(key); }
         } }, h('span', { html: svg('chev', 'chev'), style: { display: 'contents' } }), h('span.lbl', null, thinkingNow ? 'Pensando...' : `Raciocínio`), thinkingNow ? null : h('span.think-n', null, `${think.trim().split(/\s+/).length} palavras`)),
         h('div.think-body', { dataset: { key } }, think.trim()));
       steps.push(tlItem('think' + (thinkingNow ? '.now' : ''), ic('brain'), d));
@@ -1143,7 +1154,7 @@ function renderTool(tc, res, live) {
     denied: [h('span', { html: svg('ban') }), 'negada'],
   }[status];
 
-  const head = h('button.tool-head', { onclick: (e) => { const t = e.currentTarget.closest('.tool'); t.classList.toggle('open'); if (t.classList.contains('open')) S.openTools.add(key); else S.openTools.delete(key); } },
+  const head = h('button.tool-head', { onclick: (e) => { const t = e.currentTarget.closest('.tool'); t.classList.toggle('open'); if (t.classList.contains('open')) { S.openTools.add(key); followBottom = false; } else S.openTools.delete(key); } },
     h('span.tool-ico', { html: svg(toolIcon(name, source)) }),
     h('span.tool-name', null, displayName),
     server ? h('span.tool-server', null, server) : null,
