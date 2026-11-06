@@ -89,8 +89,8 @@ const DEFS: &[Def] = &[
       r#"{"type":"object","properties":{"task":{"type":"string","description":"O que investigar e o que deve constar no relatório"},"where":{"type":"string","description":"Pasta, arquivos ou site para começar (opcional)"}},"required":["task"]}"#),
 ];
 
-const SKILL_TOOL: Def = d("read_skill_file", "", false, false, "Lê um arquivo auxiliar de uma skill ativa (scripts, modelos, referências citadas no SKILL.md).",
-    r#"{"type":"object","properties":{"skill":{"type":"string","description":"id da skill"},"path":{"type":"string"}},"required":["skill","path"]}"#);
+const SKILL_TOOL: Def = d("read_skill_file", "", false, false, "Lê um arquivo auxiliar de uma skill ativa (scripts, modelos, referências citadas no SKILL.md). Arquivo grande vem como sumário; leia trechos com offset/limit.",
+    r#"{"type":"object","properties":{"skill":{"type":"string","description":"id da skill"},"path":{"type":"string"},"offset":{"type":"integer"},"limit":{"type":"integer"}},"required":["skill","path"]}"#);
 
 
 fn def(name: &str) -> Option<&'static Def> {
@@ -494,7 +494,7 @@ pub async fn call(app: &Arc<App>, ws: PathBuf, name: &str, args: Value, allow: &
     }
     match app.mcp.call_by_tool(name, args).await {
         Ok((text, is_err, images)) => {
-            let content = if compact_on { crate::compact::compact(&text, &crate::compact::saidas_dir(app), name, 20000).text } else { app::truncate(text, 40000) };
+            let content = if compact_on { crate::compact::compact(&text, &crate::compact::saidas_dir(app), name, 12000).text } else { app::truncate(text, 24000) };
             ToolOut { content, is_error: is_err, images }
         }
         Err(e) => ToolOut { content: format!("Erro: {e}"), is_error: true, images: vec![] },
@@ -593,8 +593,55 @@ fn fit_args(schema: &Value, args: &mut Value) -> Result<(), String> {
 }
 
 /// Busca por conteúdo com o ripgrep (respeita .gitignore e é bem mais rápida). None = usar a busca própria.
+
+/// Lê um arquivo de texto do jeito econômico: sumário se for grande e sem trecho; trechos com limite de linhas e bytes.
+fn read_text(file: &Path, size: u64, a: &Value) -> Result<String, String> {
+    let buf = std::fs::read(file).map_err(|x| x.to_string())?;
+    if looks_binary(&buf) {
+        return Ok(format!("Arquivo binário ({}): {}. Não dá para ler como texto.", fmt_size(size), file.display()));
+    }
+    let text = String::from_utf8_lossy(&buf);
+    let text = text.trim_start_matches('\u{feff}');
+    let lines: Vec<&str> = text.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l)).collect();
+    let total = lines.len();
+    let ranged = a.get("offset").and_then(Value::as_u64).is_some() || a.get("limit").and_then(Value::as_u64).is_some();
+    // arquivo grande lido inteiro gasta muito contexto: devolve o sumário e o modelo lê só o que precisar
+    if !ranged && (total > BIG_LINES || text.len() > BIG_BYTES) {
+        let ext = file.extension().map(|x| x.to_string_lossy().to_lowercase()).unwrap_or_default();
+        let marks = outline(&ext, &lines);
+        if marks.len() >= 3 {
+            let body: Vec<String> = marks.iter().map(|(n, l)| format!("{n}: {l}")).collect();
+            return Ok(format!("[{} linhas, {}. Sumário com o número da linha; leia os trechos com offset/limit ou procure com search_files (path = este arquivo)]\n{}", total, fmt_size(size), body.join("\n")));
+        }
+        let a2 = json!({"offset": 1, "limit": BIG_LINES});
+        return read_text(file, size, &a2);
+    }
+    let off = a.get("offset").and_then(Value::as_u64).unwrap_or(1).max(1) as usize;
+    // trecho enorme é o mesmo que ler tudo: corta e diz como continuar
+    let lim = (a.get("limit").and_then(Value::as_u64).unwrap_or(2000).max(1) as usize).min(if total > BIG_LINES { MAX_SLICE } else { usize::MAX });
+    // também por bytes: poucas linhas enormes (minificado, CSV largo) enchem o contexto do mesmo jeito
+    let mut bytes = 0;
+    let mut slice: Vec<&str> = vec![];
+    for l in lines.iter().skip(off - 1).take(lim) {
+        bytes += l.len() + 1;
+        if bytes > MAX_SLICE_BYTES && !slice.is_empty() {
+            break;
+        }
+        slice.push(if l.len() > MAX_SLICE_BYTES { &l[..l.floor_char_boundary(MAX_SLICE_BYTES)] } else { l });
+    }
+    let mut out = slice.join("\n");
+    let end = off - 1 + slice.len();
+    if off > 1 || end < total {
+        let more = if end < total { format!("; continue com offset={}", end + 1) } else { String::new() };
+        out = format!("[linhas {off}-{end} de {total}{more}]\n{out}");
+    }
+    Ok(out)
+}
+
 const BIG_LINES: usize = 400;
+const SEARCH_MAX: usize = 120;
 const MAX_SLICE: usize = 600;
+const MAX_SLICE_BYTES: usize = 24 * 1024;
 
 /// Reescreveu um arquivo grande para mudar pouco: diz quanto mudou e como gastar menos.
 fn rewrite_hint(before: &str, after: &str) -> String {
@@ -697,7 +744,7 @@ fn outline(ext: &str, lines: &[&str]) -> Vec<(usize, String)> {
 fn search_rg(ws: &Path, start: &Path, name: &str, pattern: &str) -> Option<String> {
     let rg = crate::bins::which("rg")?;
     let mut c = std::process::Command::new(rg);
-    c.args(["-n", "-i", "--no-heading", "--color", "never", "--max-count", "30", "--max-columns", "220", "--max-columns-preview", "--max-filesize", "2M"]);
+    c.args(["-n", "-i", "--no-heading", "--color", "never", "--max-count", "20", "--max-columns", "180", "--max-columns-preview", "--max-filesize", "2M"]);
     if !name.is_empty() {
         c.args(["--iglob", name]);
     }
@@ -717,13 +764,13 @@ fn search_rg(ws: &Path, start: &Path, name: &str, pattern: &str) -> Option<Strin
     }
     let text = String::from_utf8_lossy(&o.stdout);
     let mut lines: Vec<String> = vec![];
-    for l in text.lines().take(200) {
+    for l in text.lines().take(SEARCH_MAX) {
         let l = l.strip_prefix("./").or_else(|| l.strip_prefix(".\\")).unwrap_or(l);
         let (file, rest) = l.split_once(':').unwrap_or((l, ""));
         lines.push(format!("{}:{}", rel_to(ws, &start.join(file)), rest));
     }
-    let full = text.lines().count() > 200;
-    Some(lines.join("\n") + if full { "\n[limite de 200 resultados]" } else { "" })
+    let n = text.lines().count();
+    Some(lines.join("\n") + &if n > SEARCH_MAX { format!("\n[mostrando {SEARCH_MAX} de {n}; refine a busca (name, path ou regex mais específica)]") } else { String::new() })
 }
 
 fn s<'a>(a: &'a Value, k: &str) -> &'a str {
@@ -861,7 +908,8 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
             let mut items: Vec<_> = std::fs::read_dir(&dir).map_err(e)?.flatten().collect();
             items.sort_by_key(|x| (!x.path().is_dir(), x.file_name().to_string_lossy().to_lowercase()));
             let mut lines = vec![];
-            for it in items.iter().take(1000) {
+            const SHOW: usize = 300;
+            for it in items.iter().take(SHOW) {
                 let n = it.file_name().to_string_lossy().into_owned();
                 if it.path().is_dir() {
                     lines.push(format!("[pasta] {n}/"));
@@ -870,8 +918,17 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
                     lines.push(format!("{n}  ({size})"));
                 }
             }
-            if items.len() > 1000 {
-                lines.push(format!("... e mais {} itens", items.len() - 1000));
+            if items.len() > SHOW {
+                // o resto vira contagem por tipo; para achar algo, search_files
+                let mut by: std::collections::BTreeMap<String, usize> = Default::default();
+                for it in &items[SHOW..] {
+                    let k = if it.path().is_dir() { "pastas".to_string() } else { it.path().extension().map(|x| format!(".{}", x.to_string_lossy().to_lowercase())).unwrap_or_else(|| "sem extensão".into()) };
+                    *by.entry(k).or_default() += 1;
+                }
+                let mut v: Vec<_> = by.into_iter().collect();
+                v.sort_by(|a, b| b.1.cmp(&a.1));
+                let parts: Vec<String> = v.iter().take(8).map(|(k, n)| format!("{n} {k}")).collect();
+                lines.push(format!("... e mais {} itens ({}). Para achar algo aqui, use search_files com name.", items.len() - SHOW, parts.join(", ")));
             }
             Ok(format!("{}\n{}", dir.display(), if lines.is_empty() { "(vazia)".into() } else { lines.join("\n") }))
         }
@@ -886,35 +943,7 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
             if md.len() > 20 * 1024 * 1024 {
                 return Err(format!("Arquivo grande demais ({}).", fmt_size(md.len())));
             }
-            let buf = std::fs::read(&file).map_err(e)?;
-            if looks_binary(&buf) {
-                return Ok(format!("Arquivo binário ({}): {}. Não dá para ler como texto.", fmt_size(md.len()), file.display()));
-            }
-            let text = String::from_utf8_lossy(&buf);
-            let text = text.trim_start_matches('\u{feff}');
-            let lines: Vec<&str> = text.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l)).collect();
-            let total = lines.len();
-            let ranged = a.get("offset").and_then(Value::as_u64).is_some() || a.get("limit").and_then(Value::as_u64).is_some();
-            // arquivo grande lido inteiro gasta muito contexto: devolve o sumário e o modelo lê só o que precisar
-            if !ranged && (total > BIG_LINES || text.len() > BIG_BYTES) {
-                let ext = file.extension().map(|x| x.to_string_lossy().to_lowercase()).unwrap_or_default();
-                let marks = outline(&ext, &lines);
-                if marks.len() >= 3 {
-                    let body: Vec<String> = marks.iter().map(|(n, l)| format!("{n}: {l}")).collect();
-                    return Ok(format!("[{} linhas, {}. Sumário com o número da linha; leia os trechos com offset/limit ou procure com search_files (path = este arquivo)]\n{}", total, fmt_size(md.len()), body.join("\n")));
-                }
-                let head: Vec<&str> = lines.iter().take(BIG_LINES).copied().collect();
-                return Ok(format!("[linhas 1-{} de {total}; continue com offset/limit]\n{}", head.len(), head.join("\n")));
-            }
-            let off = a.get("offset").and_then(Value::as_u64).unwrap_or(1).max(1) as usize;
-            // trecho enorme é o mesmo que ler tudo: corta e diz como continuar
-            let lim = (a.get("limit").and_then(Value::as_u64).unwrap_or(2000).max(1) as usize).min(if total > BIG_LINES { MAX_SLICE } else { usize::MAX });
-            let slice: Vec<&str> = lines.iter().skip(off - 1).take(lim).copied().collect();
-            let mut out = slice.join("\n");
-            if off > 1 || off - 1 + lim < total {
-                out = format!("[linhas {}-{} de {total}]\n{out}", off, off - 1 + slice.len());
-            }
-            Ok(out)
+            read_text(&file, md.len(), a)
         }
         "write_file" => {
             let file = resolve_write(ws, s(a, "path"))?;
@@ -1004,8 +1033,10 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
             if let (Some(re), true) = (&content_re, start.is_file()) {
                 let text = std::fs::read(&start).map_err(e)?;
                 let text = String::from_utf8_lossy(&text);
-                let hits: Vec<String> = text.split('\n').enumerate().filter(|(_, l)| re.is_match(l)).take(200).map(|(i, l)| format!("{}: {}", i + 1, cut(l.trim_end_matches('\r'), 220))).collect();
-                return Ok(if hits.is_empty() { "Nada encontrado.".into() } else { format!("{}\n{}", rel_to(ws, &start), hits.join("\n")) });
+                let all: Vec<(usize, &str)> = text.split('\n').enumerate().filter(|(_, l)| re.is_match(l)).collect();
+                let hits: Vec<String> = all.iter().take(SEARCH_MAX).map(|(i, l)| format!("{}: {}", i + 1, cut(l.trim_end_matches('\r'), 180))).collect();
+                let more = if all.len() > SEARCH_MAX { format!("\n[mostrando {SEARCH_MAX} de {}; refine a regex]", all.len()) } else { String::new() };
+                return Ok(if hits.is_empty() { "Nada encontrado.".into() } else { format!("{}\n{}{more}", rel_to(ws, &start), hits.join("\n")) });
             }
             if content_re.is_some() {
                 if let Some(r) = search_rg(ws, &start, s(a, "name"), s(a, "content")) {
@@ -1018,7 +1049,7 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
                 !(en.file_type().is_dir() && SKIP_DIRS.contains(&en.file_name().to_string_lossy().as_ref()))
             });
             for (i, en) in walker.flatten().enumerate() {
-                if results.len() >= 200 || i > 50000 || Instant::now() > deadline {
+                if results.len() >= SEARCH_MAX || i > 50000 || Instant::now() > deadline {
                     break;
                 }
                 let fname = en.file_name().to_string_lossy();
@@ -1045,11 +1076,11 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
                     continue;
                 }
                 for (ln, line) in String::from_utf8_lossy(&buf).lines().enumerate() {
-                    if results.len() >= 200 {
+                    if results.len() >= SEARCH_MAX {
                         break;
                     }
                     if cre.is_match(line) {
-                        let t: String = line.trim().chars().take(200).collect();
+                        let t: String = line.trim().chars().take(180).collect();
                         results.push(format!("{shown}:{}: {t}", ln + 1));
                     }
                 }
@@ -1057,8 +1088,8 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
             if results.is_empty() {
                 Ok("Nada encontrado.".into())
             } else {
-                let full = results.len() >= 200;
-                Ok(results.join("\n") + if full { "\n[limite de 200 resultados]" } else { "" })
+                let full = results.len() >= SEARCH_MAX;
+                Ok(results.join("\n") + &if full { format!("\n[limite de {SEARCH_MAX} resultados; refine a busca]") } else { String::new() })
             }
         }
         "read_skill_file" => {
@@ -1075,8 +1106,8 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
                 let names: Vec<String> = std::fs::read_dir(&file).map_err(e)?.flatten().map(|x| file_name(&x.path())).collect();
                 return Ok(names.join("\n"));
             }
-            let buf = std::fs::read(&file).map_err(e)?;
-            Ok(if looks_binary(&buf) { format!("Arquivo binário: {}", file.display()) } else { String::from_utf8_lossy(&buf).into_owned() })
+            let size = std::fs::metadata(&file).map_err(e)?.len();
+            read_text(&file, size, a)
         }
         _ => Err(format!("Ferramenta desconhecida: {name}")),
     }
