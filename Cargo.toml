@@ -1,6 +1,6 @@
 [package]
 name = "llama-studio"
-version = "2.9.2"
+version = "2.10.0"
 edition = "2021"
 description = "Interface local para o llama-server com pasta de trabalho, habilidades e conectores MCP"
 
@@ -39,3 +39,6 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = true
+
+[build-dependencies]
+winresource = "0.1"

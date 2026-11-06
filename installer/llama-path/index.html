@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><title>Llama Studio</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{font:15px system-ui,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#f6f6f9;color:#333}a{color:#5b5bd6}</style>
+<script>
+// O llama-server serve esta página; a interface de verdade é a do Llama Studio.
+function go(){ fetch('http://127.0.0.1:1240/', {mode:'no-cors'}).then(function(){ location.replace('http://127.0.0.1:1240/'); }).catch(function(){ setTimeout(go, 1500); }); }
+go();
+</script></head>
+<body><p>Abrindo o <a href="http://127.0.0.1:1240/">Llama Studio</a>...</p></body></html>

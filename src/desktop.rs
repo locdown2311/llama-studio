@@ -12,30 +12,10 @@ use wry::{DragDropEvent, NewWindowResponse, WebContext, WebView, WebViewBuilder}
 
 use crate::app::{open_url, App, UiMsg};
 
-/// Desenha o ícone: quadrado índigo com "L" e um ponto de status.
+/// Ícone do programa (assets/icon.svg em 32x32) com um ponto de status no canto.
 fn icon_rgba(status: Option<[u8; 3]>) -> Vec<u8> {
     const N: i32 = 32;
-    let mut px = vec![0u8; (N * N * 4) as usize];
-    let bg = [0x5b, 0x5b, 0xd6];
-    for y in 0..N {
-        for x in 0..N {
-            let i = ((y * N + x) * 4) as usize;
-            // cantos arredondados (raio 7)
-            let r = 7;
-            let cx = if x < r { r - x } else if x >= N - r { x - (N - r - 1) } else { 0 };
-            let cy = if y < r { r - y } else if y >= N - r { y - (N - r - 1) } else { 0 };
-            let inside = cx == 0 || cy == 0 || cx * cx + cy * cy <= r * r;
-            if !inside {
-                continue;
-            }
-            let mut c = bg;
-            // letra L
-            if (x >= 10 && x <= 13 && y >= 7 && y <= 24) || (x >= 10 && x <= 22 && y >= 21 && y <= 24) {
-                c = [255, 255, 255];
-            }
-            px[i..i + 4].copy_from_slice(&[c[0], c[1], c[2], 255]);
-        }
-    }
+    let mut px = include_bytes!("../assets/icon-32.rgba").to_vec();
     if let Some(col) = status {
         let (ox, oy) = (25, 25);
         for y in 0..N {
@@ -123,7 +103,7 @@ pub fn run(app: Arc<App>, url: String, start_hidden: bool) {
             u.window.set_focus();
             return;
         }
-        let icon = tao::window::Icon::from_rgba(icon_rgba(None), 32, 32).ok();
+        let icon = tao::window::Icon::from_rgba(include_bytes!("../assets/icon-64.rgba").to_vec(), 64, 64).ok();
         let window = match WindowBuilder::new()
             .with_title("llama studio")
             .with_inner_size(LogicalSize::new(1400.0, 900.0))

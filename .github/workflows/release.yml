@@ -56,6 +56,44 @@ jobs:
           Pop-Location
           Get-FileHash dist/llama-studio.exe, dist/ui.zip | ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } | Out-File dist/SHA256SUMS.txt -Encoding ascii
 
+      - name: Links do llama.cpp (última versão oficial)
+        id: llama
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $rel = gh api repos/ggml-org/llama.cpp/releases/latest | ConvertFrom-Json
+          $names = $rel.assets | ForEach-Object { $_.name }
+          function Url($pat) { ($rel.assets | Where-Object { $_.name -match $pat } | Select-Object -First 1).browser_download_url }
+          $cuda = $rel.assets | Where-Object { $_.name -match '^llama-.*-bin-win-cuda-([\d.]+)-x64\.zip$' } | Sort-Object { [version]($_.name -replace '^.*-cuda-([\d.]+)-x64\.zip$', '$1') } -Descending | Select-Object -First 1
+          $cv = if ($cuda) { $cuda.name -replace '^.*-cuda-([\d.]+)-x64\.zip$', '$1' } else { '' }
+          $o = @{
+            LlamaTag  = $rel.tag_name
+            UrlVulkan = Url '^llama-.*-bin-win-vulkan-x64\.zip$'
+            UrlCpu    = Url '^llama-.*-bin-win-cpu-x64\.zip$'
+            UrlHip    = Url '^llama-.*-bin-win-hip.*-x64\.zip$'
+            UrlCuda   = if ($cuda) { $cuda.browser_download_url } else { '' }
+            UrlCudart = if ($cv) { Url "^cudart-llama-bin-win-cuda-$([regex]::Escape($cv))-x64\.zip$" } else { '' }
+          }
+          $o.GetEnumerator() | ForEach-Object { Write-Host "$($_.Key) = $($_.Value)"; "$($_.Key)=$($_.Value)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append }
+          if (-not $o.UrlVulkan -or -not $o.UrlCpu) { Write-Host "Assets disponíveis:"; $names; Write-Warning "Não achei os pacotes Vulkan/CPU do llama.cpp; a release sai sem instalador" }
+
+      - name: Instalador (Inno Setup)
+        id: setup
+        if: steps.llama.outputs.UrlVulkan != ''
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress | Out-Null }
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & $iscc /Qp "/DAppVersion=$env:STUDIO_VERSION" "/DLlamaTag=${{ steps.llama.outputs.LlamaTag }}" `
+            "/DUrlVulkan=${{ steps.llama.outputs.UrlVulkan }}" "/DUrlCpu=${{ steps.llama.outputs.UrlCpu }}" `
+            "/DUrlHip=${{ steps.llama.outputs.UrlHip }}" "/DUrlCuda=${{ steps.llama.outputs.UrlCuda }}" `
+            "/DUrlCudart=${{ steps.llama.outputs.UrlCudart }}" installer/llama-studio.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC falhou ($LASTEXITCODE)" }
+          Get-FileHash dist/llama-studio-setup-*.exe | ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } | Out-File dist/SHA256SUMS.txt -Encoding ascii -Append
+
       - name: Publicar release
         if: steps.ver.outputs.publicar == 'true'
         uses: softprops/action-gh-release@v2
@@ -64,10 +102,14 @@ jobs:
           name: llama studio ${{ env.STUDIO_VERSION }}
           target_commitish: ${{ github.sha }}
           files: |
+            dist/llama-studio-setup-*.exe
             dist/llama-studio.exe
             dist/ui.zip
             dist/SHA256SUMS.txt
           generate_release_notes: true
+          body: |
+            **Instalar pela primeira vez:** baixe `llama-studio-setup-${{ env.STUDIO_VERSION }}.exe`. Ele instala o Llama Studio e o llama.cpp ${{ steps.llama.outputs.LlamaTag }} (Vulkan, CUDA, HIP ou CPU, à escolha), sem pedir administrador.
+            **Já tem instalado:** o programa avisa e se atualiza sozinho (Procurar atualizações).
 
       - name: Guardar artefatos (sem versão nova)
         if: steps.ver.outputs.publicar != 'true'
