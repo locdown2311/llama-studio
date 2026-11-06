@@ -48,6 +48,7 @@ const ICONS = {
   home: '<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   ban: '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
   calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  wand: '<path d="m15 4 5 5L9 20H4v-5z"/><path d="M13 6l5 5"/><path d="M5 3v4M3 5h4M19 15v4M17 17h4"/>',
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   tag: '<path d="M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
   shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>',
@@ -305,7 +306,7 @@ document.addEventListener('click', (e) => {
 
 /* ============================================================ estado */
 const TOOL_GROUPS = ['read', 'write', 'edit', 'shell', 'code', 'browser', 'computer', 'history', 'toolsearch', 'explore', 'todo', 'notebook'];
-const DEFAULT_SETTINGS = { systemPrompt: '', temperature: '', topP: '', maxTokens: '', maxSteps: 30, approval: 'writes', auditor: false, auditMax: 'baixo', auditMcp: false, auditPolicy: '', theme: 'light', showThinking: true, vision: 'auto', explorerSteps: 20, autoCompact: true, compactAt: 75, compactMode: 'meio', lazyLoad: true, autoRoute: true, projMap: false, projSummary: false, tools: Object.fromEntries(TOOL_GROUPS.map((g) => [g, true])) };
+const DEFAULT_SETTINGS = { systemPrompt: '', temperature: '', topP: '', maxTokens: '', maxSteps: 30, approval: 'writes', auditor: false, auditMax: 'baixo', auditMcp: false, auditPolicy: '', theme: 'light', showThinking: true, vision: 'auto', explorerSteps: 20, autoCompact: true, compactAt: 75, compactMode: 'meio', lazyLoad: true, autoRoute: true, autoLevel: 'equilibrado', projMap: false, projSummary: false, tools: Object.fromEntries(TOOL_GROUPS.map((g) => [g, true])) };
 const S = {
   view: 'chat',
   convs: store.get('convs', []),
@@ -429,7 +430,7 @@ function newConv(projectId) {
   const personaId = S.draftPersona !== undefined ? S.draftPersona : (proj?.personaId || S.settings.defaultPersona || null);
   S.draftPersona = undefined;
   const modelId = S.draftModel; S.draftModel = undefined;
-  const c = { id: uid(), title: 'Nova conversa', messages: [], createdAt: Date.now(), updatedAt: Date.now(), autoApprove: false, projectId: proj ? proj.id : null, personaId, modelId: modelId || null, think: S.draftThink || undefined, plan: S.draftPlan || undefined };
+  const c = { id: uid(), title: 'Nova conversa', messages: [], createdAt: Date.now(), updatedAt: Date.now(), autoApprove: false, projectId: proj ? proj.id : null, personaId, modelId: modelId || null, think: S.draftThink || undefined, plan: S.draftPlan || undefined, autoLevel: S.draftAuto || undefined };
   if (proj) { proj.open = true; saveProjects(); }
   S.convs.unshift(c);
   S.curId = c.id;
@@ -1488,6 +1489,8 @@ function updatePickers() {
     pers ? `Personalidade: ${pers.name}` : 'Personalidade: nenhuma', !!pers, 0, pers?.color);
   const tk = thinkOf(c);
   iconBtn($('#pick-think'), ic(tk === 'off' ? ('zap' in ICONS ? 'zap' : 'send') : 'brain'), `Raciocínio: ${THINK_OPTS.find((o) => o[0] === tk)[1]}`, tk !== 'auto', 0, tk === 'off' ? '#d99a1e' : 'var(--accent)');
+  const al = autoLevelOf(c);
+  iconBtn($('#pick-auto'), ic(al === 'desligado' ? 'ban' : 'wand'), `Recursos automáticos: ${AUTO_LEVELS.find((o) => o[0] === al)[1]}`, al !== 'equilibrado', 0, al === 'desligado' ? 'var(--muted)' : al === 'liberal' ? '#d99a1e' : 'var(--accent)');
   const pl = planOf(c);
   iconBtn($('#pick-plan'), ic('list'), pl ? 'Modo plano: ligado (o modelo só investiga e propõe)' : 'Modo plano: desligado', pl, 0, '#0e9f8a');
   const skNames = act.skills.map((id) => S.skills.find((k) => k.id === id)?.name || id);
@@ -1861,7 +1864,7 @@ async function submit(conv, item) {
     conv.title = (plain || parts.map((p) => p.name).filter(Boolean).join(', ')).slice(0, 60);
   }
   conv.updatedAt = Date.now();
-  if (S.settings.autoRoute !== false) await autoRoute(conv, conv.messages[conv.messages.length - 1]);
+  if (autoLevelOf(conv) !== 'desligado') await autoRoute(conv, conv.messages[conv.messages.length - 1]);
   saveConvs(); renderConvList();
   if (conv.id === S.curId) { renderChatTitle(); renderMessages(false); updatePickers(); }
   await runAgent(conv);
@@ -1897,11 +1900,21 @@ const ROUTES = [
 // a não ser que fale de algo concreto: "esse", "meu", "quando abro", um arquivo, um link, um endereço
 const ASK_RE = /^\s*(me\s+)?(o que (é|e|são|significa)|explica|explique|como funciona|qual (a|é a|e a) diferen[cç]a|qual o significado|por ?que|quem (foi|é))/i;
 const CONCRETE_RE = /\b(esse|essa|este|esta|isso|isto|aqui|nesse|nessa|neste|nesta|meu|minha|meus|minhas|abro|uso|rodo|tento|estou|t[oô])\b|https?:\/\/|\b0x[0-9a-f]{4,}\b|\b\w+\.(exe|dll|sys|rs|js|ts|py|cs|cpp|go|java|pdf|zip|docx?|xlsx?|csv|txt|png|jpe?g|json|md)\b/i;
-function routeProfiles(text) {
+// níveis: cauteloso (só sinais fortes), equilibrado (fortes ou dois fracos) e liberal (um fraco basta,
+// e perguntas de conceito também ligam)
+const AUTO_LEVELS = [
+  ['desligado', 'Desligado', 'Só o que você ligar na barra do chat.'],
+  ['cauteloso', 'Cauteloso', 'Só com sinais claros: x64dbg, 0x401000, .dll, cargo, um link, instagram.'],
+  ['equilibrado', 'Equilibrado', 'Sinais claros ou dois indícios juntos. Erra pouco para os dois lados.'],
+  ['liberal', 'Liberal', 'Um indício basta, inclusive em perguntas. Liga mais coisas e gasta mais contexto.'],
+];
+function routeProfiles(text, level = 'equilibrado') {
+  if (level === 'desligado') return [];
   const t = String(text).replace(/(ik_)?llama\.cpp/gi, 'llama');
-  if (ASK_RE.test(t) && !CONCRETE_RE.test(t)) return [];
+  if (level !== 'liberal' && ASK_RE.test(t) && !CONCRETE_RE.test(t)) return [];
   const strongHit = ROUTES.filter((r) => r.strong.test(t));
-  const weakHit = (r) => (!r.need || r.need.test(t)) && new Set((t.match(r.weak) || []).map((x) => x.toLowerCase().slice(0, 5))).size >= 2;
+  const need = level === 'cauteloso' ? Infinity : level === 'liberal' ? 1 : 2;
+  const weakHit = (r) => (level === 'liberal' || !r.need || r.need.test(t)) && new Set((t.match(r.weak) || []).map((x) => x.toLowerCase().slice(0, 5))).size >= need;
   const out = ROUTES.filter((r) => strongHit.includes(r) || weakHit(r));
   // engenharia reversa explícita: "função", "compila" e "erro" ali não são pedido de programação
   return strongHit.some((r) => r.id === 're') && !strongHit.some((r) => r.id === 'code') ? out.filter((r) => r.id !== 'code') : out;
@@ -1911,8 +1924,8 @@ const norm = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g,
 const words = (t) => new Set(norm(t).split(/[^a-z0-9]+/).filter((w) => w.length >= 5 && !STOP.has(w)));
 
 /** Conectores citados pelo nome e habilidades cujo nome ou descrição batem com o pedido. */
-function routeExtras(text, skills, mcps) {
-  if (ASK_RE.test(text) && !CONCRETE_RE.test(text)) return { mcp: [], skills: [] };
+function routeExtras(text, skills, mcps, level = 'equilibrado') {
+  if (level === 'desligado' || (level !== 'liberal' && ASK_RE.test(text) && !CONCRETE_RE.test(text))) return { mcp: [], skills: [] };
   const low = ' ' + norm(text).replace(/[^a-z0-9]+/g, ' ') + ' ';
   const mcp = mcps.filter((s) => {
     const key = norm(s.name).replace(/mcp|server|servidor/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
@@ -1926,10 +1939,28 @@ function routeExtras(text, skills, mcps) {
     const nameHit = [...nameWs].filter((w) => ws.has(w)).length;
     const descHit = [...words(sk.description)].filter((w) => !nameWs.has(w) && ws.has(w)).length;
     // nome completo citado; ou parte do nome + assunto da descrição; ou três palavras do assunto
-    const sc = low.includes(' ' + nameKey + ' ') || low.includes(' ' + nameKey + 's ') ? 10 : nameHit && descHit ? 5 + descHit : descHit >= 3 ? descHit : 0;
+    const min = level === 'cauteloso' ? Infinity : level === 'liberal' ? 2 : 3;
+    const sc = low.includes(' ' + nameKey + ' ') || low.includes(' ' + nameKey + 's ') ? 10 : level !== 'cauteloso' && nameHit && descHit ? 5 + descHit : descHit >= min ? descHit : 0;
     if (sc) out.push([sk.id, sc]);
   }
   return { mcp, skills: out.sort((a, b) => b[1] - a[1]).slice(0, 2).map((x) => x[0]) };
+}
+
+function autoLevelOf(c) {
+  const v = (c ? c.autoLevel : S.draftAuto) || S.settings.autoLevel || 'equilibrado';
+  return S.settings.autoRoute === false && !(c?.autoLevel || S.draftAuto) ? 'desligado' : v;
+}
+function fillAutoPop() {
+  const pop = $('#pop-auto'); pop.innerHTML = '';
+  const cur0 = autoLevelOf(cur());
+  pop.append(h('div.pop-head', null, h('span', null, 'Recursos automáticos nesta conversa')));
+  for (const [v, l, d] of AUTO_LEVELS) {
+    pop.append(h('button.menu-item' + (v === cur0 ? '.sel' : ''), { onclick: () => {
+      const c = cur(); if (c) { c.autoLevel = v; saveConvs(); } else S.draftAuto = v;
+      closePops(); updatePickers();
+    } }, ic(v === 'desligado' ? 'ban' : 'wand'), h('span.mi-main', null, l, h('span.mi-sub', null, d)), v === cur0 ? ic('check') : null));
+  }
+  pop.append(h('div.pop-foot', null, h('button.link', { onclick: () => { closePops(); setView('settings'); setTimeout(() => $('#set-tools')?.scrollIntoView({ block: 'start' }), 60); } }, 'Padrão para novas conversas')));
 }
 
 async function autoRoute(conv, msg) {
@@ -1939,7 +1970,8 @@ async function autoRoute(conv, msg) {
   const have = { groups: new Set([...enabledGroups(), ...auto.groups]), mcp: new Set([...activeSel(conv).mcp, ...auto.mcp]), skills: new Set([...activeSel(conv).skills, ...auto.skills]) };
   const added = { groups: [], mcp: [], skills: [], profiles: [] };
   const add = (k, v) => { if (!have[k].has(v)) { have[k].add(v); added[k].push(v); } };
-  for (const r of routeProfiles(text)) {
+  const level = autoLevelOf(conv);
+  for (const r of routeProfiles(text, level)) {
     added.profiles.push(r.label);
     for (const g of r.groups || []) add('groups', g);
     if (r.mcp) for (const s of S.mcp) if (r.mcp.test(s.name)) add('mcp', s.name);
@@ -1947,7 +1979,7 @@ async function autoRoute(conv, msg) {
     if (r.think && !conv.think && !conv.autoThink) conv.autoThink = r.think;
   }
   // conectores e habilidades citados pelo nome ou pelo assunto
-  const ex = routeExtras(text, S.skills, S.mcp);
+  const ex = routeExtras(text, S.skills, S.mcp, level);
   for (const n of ex.mcp) add('mcp', n);
   for (const id of ex.skills) add('skills', id);
   // conector desligado que o pedido precisa: liga e espera conectar (até 8 s)
@@ -3936,7 +3968,8 @@ function renderSettings() {
         field('Máximo de tokens', input('input.input', { value: st.maxTokens, placeholder: 'sem limite', inputmode: 'numeric' }, (x) => put({ maxTokens: x.value.trim() })))),
       field('Enviar imagens ao modelo', seg([['auto', `Automático (${S.vision ? 'tem visão' : 'sem visão'})`], ['on', 'Sempre'], ['off', 'Nunca']], st.vision, (v) => put({ vision: v })), 'Capturas de tela e imagens coladas na mensagem.')),
     section('tools', 'Ferramentas', 'O que o modelo pode usar. Também dá para ligar e desligar pela barra do chat.',
-      sw('Ativar recursos automaticamente', 'Pelo pedido, liga sozinho o que ele precisa nesta conversa: ferramentas, conectores (ex.: x64dbg ao falar de depuração), habilidades e o raciocínio. Sem gastar tokens; dá para desfazer na mensagem.', st.autoRoute !== false, (v) => put({ autoRoute: v })),
+      field('Recursos automáticos (padrão das conversas novas)', (() => { const x = h('select.select', null, AUTO_LEVELS.map(([v, l, d]) => h('option', { value: v }, `${l}: ${d}`))); x.value = st.autoRoute === false ? 'desligado' : (st.autoLevel || 'equilibrado'); x.addEventListener('change', () => put({ autoLevel: x.value, autoRoute: x.value !== 'desligado' })); return x; })(),
+        'Pelo pedido, o studio liga sozinho ferramentas, conectores, habilidades e o raciocínio da conversa, sem gastar tokens. Cada conversa pode mudar pelo botão de varinha na barra do chat.'),
       toolGrid,
       h('div.row', null,
         field('Passos com ferramentas por resposta', input('input.input', { value: st.maxSteps, inputmode: 'numeric' }, (x) => put({ maxSteps: Number(x.value) || 30 })), 'O modelo para depois disso e pede para continuar.'),
@@ -5515,6 +5548,7 @@ async function init() {
   $('#pick-ws').addEventListener('click', () => togglePop('#pop-ws', fillWsPop));
   $('#ctx-meter').addEventListener('click', () => togglePop('#pop-ctx', fillCtxPop));
   $('#pick-think').addEventListener('click', () => togglePop('#pop-think', fillThinkPop));
+  $('#pick-auto').addEventListener('click', () => togglePop('#pop-auto', fillAutoPop));
   $('#pick-plan').addEventListener('click', togglePlan);
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && running(cur()) && S.view === 'chat' && !$('#modal-root').childElementCount && !mention) stop();

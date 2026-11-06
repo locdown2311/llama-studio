@@ -1363,3 +1363,7 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .auto-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .auto-chip button { border: 0; background: transparent; color: inherit; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; cursor: pointer; opacity: .7; }
 .auto-chip button:hover { opacity: 1; background: color-mix(in srgb, var(--accent) 15%, transparent); }
+.pop-foot .link { border: 0; background: none; color: var(--accent); font: inherit; font-size: 12.5px; cursor: pointer; padding: 4px 8px; }
+.pop-foot .link:hover { text-decoration: underline; }
+#pop-auto { width: 340px; }
+#pop-auto .mi-sub { white-space: normal; }

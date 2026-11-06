@@ -26,5 +26,19 @@ for (const f of ['treino', 'validacao1', 'validacao2', 'validacao4', 'extras']) 
     if (!e.length && !m.length) ok++; else console.log(`${f}: ${e.length ? '+' + e : ''} ${m.length ? '-' + m : ''} | ${t}`);
   }
 }
-console.log(`${ok}/${total} frases certas · ligou a mais: ${extra} · faltou: ${miss}`);
-process.exit(ok === total ? 0 : 1);
+console.log(`equilibrado: ${ok}/${total} frases certas · ligou a mais: ${extra} · faltou: ${miss}`);
+
+// os outros níveis: cauteloso nunca pode ligar algo que o equilibrado não ligaria; liberal só mede
+let cautExtra = 0, cautMiss = 0, libExtra = 0, libMiss = 0, n = 0;
+for (const f of ['treino', 'validacao1', 'validacao2', 'validacao4', 'extras']) {
+  const mod = await import('./' + f + '.mjs');
+  for (const [t, ep] of mod.default) {
+    n++;
+    const c = routeProfiles(t, 'cauteloso').map((r) => r.id); const l = routeProfiles(t, 'liberal').map((r) => r.id);
+    cautExtra += c.filter((x) => !ep.includes(x)).length; cautMiss += ep.filter((x) => !c.includes(x)).length;
+    libExtra += l.filter((x) => !ep.includes(x)).length; libMiss += ep.filter((x) => !l.includes(x)).length;
+  }
+}
+console.log(`cauteloso: ligou a mais ${cautExtra}, faltou ${cautMiss} · liberal: ligou a mais ${libExtra}, faltou ${libMiss} (em ${n} frases)`);
+if (routeProfiles('investigue a função em 0x401000 no x64dbg', 'desligado').length) { console.log('desligado ligou algo'); process.exit(1); }
+process.exit(ok === total && cautExtra === 0 ? 0 : 1);
