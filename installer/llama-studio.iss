@@ -166,6 +166,23 @@ begin
   Result := FileExists(ExpandConstant('{app}\llama-cpp\llama-server.exe'));
 end;
 
+// procura na hora o pacote HIP/ROCm mais novo das releases do llama.cpp (quando o CI não achou um)
+function FindHipUrl: String;
+var
+  Code: Integer;
+  Out, Ps1: String;
+  Lines: TArrayOfString;
+begin
+  Result := '';
+  Out := ExpandConstant('{tmp}\hip-url.txt');
+  Ps1 := '$r = Invoke-RestMethod -UseBasicParsing -Headers @{''User-Agent''=''llama-studio-setup''} ''https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=40''; ' +
+         '$a = $r | ForEach-Object { $_.assets } | Where-Object { $_.name -match ''-bin-win-(hip|rocm).*x64\.zip$'' } | Select-Object -First 1; ' +
+         'if ($a) { [IO.File]::WriteAllText(''' + Out + ''', $a.browser_download_url) }';
+  if Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' + Ps1 + '"', '', SW_HIDE, ewWaitUntilTerminated, Code)
+     and LoadStringsFromFile(Out, Lines) and (GetArrayLength(Lines) > 0) then
+    Result := Trim(Lines[0]);
+end;
+
 function OnDownloadProgress(const Url, FileName: String; const Progress, ProgressMax: Int64): Boolean;
 begin
   Result := True;
@@ -196,7 +213,6 @@ begin
   EnginePage.Add('Só CPU: sem usar a placa de vídeo');
   EnginePage.Add('Não baixar agora (manter o que já está instalado ou configurar depois)');
   if '{#UrlCuda}' = '' then EnginePage.CheckListBox.ItemEnabled[E_CUDA] := False;
-  if '{#UrlHip}' = '' then EnginePage.CheckListBox.ItemEnabled[E_HIP] := False;
   EnginePage.SelectedValueIndex := Def;
 
   DownloadPage := CreateDownloadPage(SetupMessage(msgWizardPreparing), 'Baixando o llama.cpp e o que mais for preciso...', @OnDownloadProgress);
@@ -216,6 +232,7 @@ end;
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
   E, N: Integer;
+  Url: String;
 begin
   Result := True;
   if CurPageID <> wpReady then Exit;
@@ -223,9 +240,21 @@ begin
   NeedWebView2 := not HasWebView2;
   DownloadPage.Clear;
   N := 0;
-  if (E <> E_KEEP) and (EngineUrl(E) <> '') then
+  Url := EngineUrl(E);
+  if (E = E_HIP) and (Url = '') then
   begin
-    DownloadPage.Add(EngineUrl(E), 'llama-engine.zip', ''); N := N + 1;
+    Url := FindHipUrl;
+    if Url = '' then
+    begin
+      SuppressibleMsgBox('O llama.cpp não tem um pacote HIP/ROCm para Windows nas versões recentes.' + #13#10 +
+        'Escolha Vulkan (funciona nas placas AMD) ou volte depois.', mbInformation, MB_OK, IDOK);
+      Result := False;
+      Exit;
+    end;
+  end;
+  if (E <> E_KEEP) and (Url <> '') then
+  begin
+    DownloadPage.Add(Url, 'llama-engine.zip', ''); N := N + 1;
     if (E = E_CUDA) and ('{#UrlCudart}' <> '') then
     begin
       DownloadPage.Add('{#UrlCudart}', 'llama-cudart.zip', ''); N := N + 1;

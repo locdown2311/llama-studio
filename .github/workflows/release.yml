@@ -69,6 +69,10 @@ jobs:
           $rel = $all | Where-Object { $_.assets | Where-Object { $_.name -match '-bin-win-.*vulkan.*x64\.zip$' } } | Select-Object -First 1
           if (-not $rel) { $rel = $all[0]; Write-Host "Releases vistas:"; $all | Select-Object -First 5 | ForEach-Object { "$($_.tag_name): $(($_.assets | ForEach-Object { $_.name }) -join ', ')" } }
           $names = $rel.assets | ForEach-Object { $_.name }
+          Write-Host "Pacotes Windows:"; $names | Where-Object { $_ -match 'win' } | ForEach-Object { "  $_" }
+          # HIP/ROCm nem sempre sai em toda build: usa o mais novo entre as releases recentes
+          $hipAsset = $all | ForEach-Object { $_.assets } | Where-Object { $_.name -match '-bin-win-(hip|rocm).*x64\.zip$' } | Select-Object -First 1
+          $hip = if ($hipAsset) { $hipAsset.browser_download_url } else { '' }
           Write-Host "llama.cpp: $($rel.tag_name)"
           function Url($pat) { ($rel.assets | Where-Object { $_.name -match $pat } | Select-Object -First 1).browser_download_url }
           $cuda = $rel.assets | Where-Object { $_.name -match '^llama-.*-bin-win-cuda-([\d.]+)-x64\.zip$' } | Sort-Object { [version]($_.name -replace '^.*-cuda-([\d.]+)-x64\.zip$', '$1') } -Descending | Select-Object -First 1
@@ -77,7 +81,7 @@ jobs:
             LlamaTag  = $rel.tag_name
             UrlVulkan = Url '-bin-win-vulkan-x64\.zip$'
             UrlCpu    = Url '-bin-win-cpu-x64\.zip$'
-            UrlHip    = Url '^llama-.*-bin-win-hip.*-x64\.zip$'
+            UrlHip    = $hip
             UrlCuda   = if ($cuda) { $cuda.browser_download_url } else { '' }
             UrlCudart = if ($cv) { Url "^cudart-llama-bin-win-cuda-$([regex]::Escape($cv))-x64\.zip$" } else { '' }
           }
