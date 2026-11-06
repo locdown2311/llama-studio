@@ -55,6 +55,7 @@ O instalador não pede administrador: instala em `%LOCALAPPDATA%\Programs\Llama 
 - Exportar a conversa em Markdown, histórico pesquisável e medidor de contexto.
 
 ### Modelos
+- **Motores do llama.cpp** direto do programa: Vulkan, CUDA, ROCm, SYCL ou CPU, baixados da release oficial. Dá para ter vários instalados e trocar com um clique. Na primeira abertura, um guia sugere o motor pela placa detectada e ajuda a baixar o primeiro modelo.
 - **Vários modelos cadastrados, um carregado por vez.** Cada conversa escolhe o seu, e o studio troca quando precisa, esperando as respostas em andamento.
 - **Busca e download do Hugging Face**: lista as quantizações com o tamanho, inclui o projetor de visão, retoma downloads interrompidos e cria o modelo pronto para usar.
 - **Editor visual dos argumentos** do llama-server, com explicação de cada opção e sliders com limites.

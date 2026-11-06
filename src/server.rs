@@ -112,6 +112,11 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/llama/log", get(llama_log))
         .route("/api/models", get(models_list).post(models_save))
         .route("/api/models/activate", post(models_activate))
+        .route("/api/engines", get(engines_list))
+        .route("/api/engines/install", post(engines_install))
+        .route("/api/engines/use", post(engines_use))
+        .route("/api/engines/remove", post(engines_remove))
+        .route("/api/engines/cancel", post(engines_cancel))
         .route("/api/hf", get(hf_info).post(hf_token))
         .route("/api/hf/search", get(hf_search))
         .route("/api/hf/files", get(hf_files))
@@ -892,4 +897,32 @@ async fn hf_cancel(b: Bytes) -> Res {
     let v = body(&b);
     crate::hf::cancel(st(&v, "id"));
     ok(crate::hf::list())
+}
+
+// ---------------------------------------------------------------- motores do llama.cpp
+
+async fn engines_list(State(app): S, Query(qs): Q) -> Res {
+    ok(crate::engines::list(&app, q(&qs, "check") == "1").await)
+}
+
+async fn engines_install(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    crate::engines::install(&app, st(&v, "variant"), v["activate"].as_bool().unwrap_or(true)).await.map(ok).map_err(bad)?
+}
+
+async fn engines_use(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    crate::engines::use_engine(&app, std::path::Path::new(st(&v, "path"))).await.map(ok).map_err(bad)?
+}
+
+async fn engines_remove(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    crate::engines::remove(&app, st(&v, "id")).map_err(bad)?;
+    ok(crate::engines::list(&app, false).await)
+}
+
+async fn engines_cancel(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    crate::engines::cancel(st(&v, "id"));
+    ok(crate::engines::list(&app, false).await)
 }

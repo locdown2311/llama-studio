@@ -3056,7 +3056,7 @@ let srvTimer = null; let logNext = 0;
 async function renderServerPage() {
   try { S.llama = await api('/api/llama'); } catch (e) { toast(e.message, 'err'); return; }
   await loadModels();
-  drawServerStatus(); drawServerForm(); drawModels(); pollHf();
+  drawServerStatus(); drawServerForm(); drawModels(); pollHf(); loadEngines(true);
   $('#srv-log').textContent = ''; logNext = 0;
   await pollLog();
   clearInterval(srvTimer);
@@ -3280,6 +3280,128 @@ function argsEditor(initial) {
   return { el: box, get: () => (mode === 'form' ? read() : ta.value).trim() };
 }
 
+/* ------------------------------------------------------------ motores do llama.cpp */
+S.engines = null;
+let engTimer = 0;
+const ENGINE_ICON = { vulkan: 'cpu', cuda: 'cpu', rocm: 'cpu', sycl: 'cpu', cpu: 'cpu' };
+
+async function loadEngines(check = true) {
+  try { S.engines = await api('/api/engines' + (check ? '?check=1' : '')); } catch (e) { if (check) toast(e.message, 'err'); return null; }
+  drawEngines();
+  clearTimeout(engTimer);
+  if (S.engines.jobs?.some((j) => j.status === 'downloading')) engTimer = setTimeout(() => pollEngines(), 1000);
+  return S.engines;
+}
+
+async function pollEngines() {
+  const before = new Map((S.engines?.jobs || []).map((j) => [j.id, j.status]));
+  let r; try { r = await api('/api/engines'); } catch { return; }
+  S.engines = { ...S.engines, ...r, available: S.engines?.available, suggest: r.suggest };
+  for (const j of r.jobs) if (before.get(j.id) === 'downloading' && j.status !== 'downloading') {
+    if (j.status === 'done') { toast(`Motor ${j.variant} ${j.tag} instalado e em uso`); try { S.llama = await api('/api/llama'); } catch { /* ok */ } if (S.view === 'server') { drawServerStatus(); drawServerForm(); } }
+    else if (j.status === 'error') toast(`Motor ${j.variant}: ${j.error}`, 'err');
+  }
+  drawEngines(); $('#onb')?.dispatchEvent(new Event('refresh'));
+  if (r.jobs.some((j) => j.status === 'downloading')) engTimer = setTimeout(pollEngines, 1000);
+}
+
+async function installEngine(variant) {
+  try { await api('/api/engines/install', { variant, activate: true }); toast('Baixando o motor...'); pollEngines(); }
+  catch (e) { toast(e.message, 'err'); }
+}
+
+function engineCards(box, { compact = false } = {}) {
+  const E = S.engines; if (!E) { box.append(h('div.empty-card', null, 'Carregando...')); return; }
+  const job = (v) => E.jobs?.find((j) => j.variant === v && j.status === 'downloading');
+  const inst = (v) => (E.installed || []).filter((x) => x.id.startsWith(v + '-'));
+  if (E.error) box.append(h('div.eng-err', null, ic('alert'), E.error));
+  const grid = h('div.eng-grid');
+  for (const a of E.available || []) {
+    const mine = inst(a.id); const act = mine.find((x) => x.active); const jb = job(a.id);
+    const newer = mine.length && a.tag && !mine.some((x) => x.id === `${a.id}-${a.tag}`);
+    const rec = E.suggest === a.id;
+    let action;
+    if (jb) {
+      const pct = jb.total ? Math.min(100, jb.done / jb.total * 100) : 0;
+      action = h('div.eng-prog', null, h('div.dl-bar', null, h('i', { style: { width: pct.toFixed(1) + '%' } })), h('span', null, `${fmtBytes(jb.done)} de ${fmtBytes(jb.total)}`),
+        h('button.icon-btn.sm', { title: 'Cancelar', 'aria-label': 'Cancelar', html: svg('x'), onclick: async () => { await api('/api/engines/cancel', { id: jb.id }); loadEngines(false); } }));
+    } else if (a.missing) action = h('span.muted', null, 'Sem pacote para Windows agora');
+    else if (act && !newer) action = h('span.tag.ok', null, 'em uso');
+    else if (mine.length && !newer) action = h('button.btn.sm', { onclick: async () => { try { S.llama = await api('/api/engines/use', { path: mine[0].path }); toast('Motor trocado'); loadEngines(false); drawServerStatus?.(); } catch (e) { toast(e.message, 'err'); } } }, ic('play'), 'Usar');
+    else action = h('button.btn.sm' + (rec || newer ? '.primary' : ''), { onclick: () => installEngine(a.id) }, ic('download'), newer ? `Atualizar para ${a.tag}` : `Instalar · ${fmtBytes(a.size)}`);
+    grid.append(h('div.eng' + (act ? '.on' : '') + (rec ? '.rec' : ''), null,
+      h('div.eng-top', null, h('b', null, a.name), a.label ? h('span.tag', null, a.label) : null, rec ? h('span.tag.ctx', null, 'recomendado') : null),
+      compact ? null : h('div.eng-desc', null, a.desc),
+      h('div.eng-foot', null, action)));
+  }
+  box.append(grid);
+  if (!compact) {
+    const cur = E.current;
+    box.append(h('div.eng-cur', null, ic(E.currentExists ? 'check' : 'alert'),
+      h('span', null, E.currentExists ? (E.managed ? 'Em uso: ' : 'Em uso (fora do studio): ') : 'O llama-server configurado não existe: '), h('code', { title: cur }, cur || 'nenhum'),
+      (E.gpus || []).length ? h('span.muted', null, ' · placa: ' + E.gpus.join(', ')) : null));
+    const others = (E.installed || []).filter((x) => !x.active);
+    if (others.length) {
+      box.append(h('div.eng-inst', null, h('span.muted', null, 'Também instalados:'),
+        ...others.map((x) => h('span.chip', null, x.id, h('button.linkish', { onclick: async () => { try { S.llama = await api('/api/engines/use', { path: x.path }); loadEngines(false); } catch (e) { toast(e.message, 'err'); } } }, 'usar'),
+          h('button.linkish', { onclick: async () => { if (!(await confirmBox(`Remover o motor ${x.id}?`, 'Remover', true))) return; try { S.engines = { ...S.engines, ...(await api('/api/engines/remove', { id: x.id })) }; drawEngines(); } catch (e) { toast(e.message, 'err'); } } }, 'remover')))));
+    }
+  }
+}
+
+function drawEngines() {
+  const box = $('#engines'); if (!box) return;
+  box.innerHTML = '';
+  engineCards(box);
+}
+
+/* ------------------------------------------------------------ primeira abertura: guia */
+async function maybeOnboard(force = false) {
+  if (!force && store.get('onboarded', false)) return;
+  const E = await loadEngines(true);
+  await loadModels();
+  const needEngine = !E?.currentExists;
+  const needModel = !S.models.models.length;
+  if (!force && !needEngine && !needModel) { store.set('onboarded', true); return; }
+  openOnboarding();
+}
+
+function openOnboarding() {
+  if ($('#onb')) return;
+  const body = h('div.onb#onb');
+  const draw = () => {
+    body.innerHTML = '';
+    const E = S.engines || {};
+    const engOk = !!E.currentExists && !E.jobs?.some((j) => j.status === 'downloading');
+    const modelOk = S.models.models.length > 0;
+    const step = (n, done, title, sub, content) => h('div.onb-step' + (done ? '.done' : ''), null,
+      h('div.onb-n', null, done ? h('span', { html: svg('check') }) : String(n)),
+      h('div.onb-main', null, h('div.onb-title', null, title), h('div.onb-sub', null, sub), content));
+    const engBox = h('div'); engineCards(engBox, { compact: true });
+    body.append(
+      h('p.onb-lead', null, 'Dois passos e você já pode conversar com um modelo rodando no seu computador.'),
+      step(1, engOk, 'Instale o motor', E.gpus?.length ? `Encontrei: ${E.gpus.join(', ')}. Já marquei o recomendado.` : 'Escolha conforme a sua placa de vídeo. Em dúvida, Vulkan.', engOk && !E.jobs?.some((j) => j.status === 'downloading') ? null : engBox),
+      step(2, modelOk, 'Baixe um modelo', modelOk ? `${S.models.models.length} modelo(s) na lista.` : 'Modelos GGUF do Hugging Face. Para começar, algo entre 4B e 9B em Q4_K_M roda bem na maioria das placas.',
+        modelOk ? null : h('div.onb-models', null,
+          ...[['Qwen3.5 9B', 'unsloth/Qwen3.5-9B-GGUF'], ['Qwen3.5 4B (leve)', 'unsloth/Qwen3.5-4B-GGUF'], ['Gemma 4', 'gemma 4 gguf']].map(([l, q]) => h('button.chip', { onclick: () => openHf(q) }, ic('download'), l)),
+          h('button.btn.sm', { onclick: () => openHf() }, ic('search'), 'Procurar outro'))));
+  };
+  body.addEventListener('refresh', draw);
+  draw();
+  const timer = setInterval(async () => { if (!document.body.contains(body)) { clearInterval(timer); return; } await loadModels(); draw(); }, 2500);
+  const m = modal({
+    title: 'Boas-vindas ao Llama Studio', wide: true, body: [body],
+    foot: [h('button.btn', { onclick: () => { store.set('onboarded', true); m.close(); } }, 'Configurar depois'),
+      h('button.btn.primary', { onclick: async () => {
+        store.set('onboarded', true); m.close();
+        if (S.engines?.currentExists && S.models.models.length) {
+          if (!S.models.active) { try { await activateModel(S.models.models[0].id); } catch (e) { toast(e.message, 'err'); } }
+          else if (S.llama?.state === 'stopped') startLlama();
+        }
+      } }, 'Começar')],
+  });
+}
+
 /* ------------------------------------------------------------ Hugging Face */
 S.hfJobs = [];
 let hfTimer = 0;
@@ -3329,9 +3451,9 @@ async function hfDownload(repo, f, mmproj) {
   } catch (e) { toast(e.message, 'err'); }
 }
 
-function openHf() {
+function openHf(initial = '') {
   let timer = 0; let seq = 0;
-  const q = h('input.input', { placeholder: 'Buscar modelos GGUF (ex.: qwen3 coder, gemma 3, llama 3.1 8b)', autofocus: true });
+  const q = h('input.input', { placeholder: 'Buscar modelos GGUF (ex.: qwen3 coder, gemma 3, llama 3.1 8b)', autofocus: true, value: initial });
   const list = h('div.hf-list');
   const back = h('button.btn.ghost.sm', { hidden: true, onclick: () => { back.hidden = true; q.parentElement.hidden = false; run(); } }, ic('chev'), 'Voltar à busca');
   back.querySelector('svg').style.transform = 'rotate(180deg)';
@@ -3384,7 +3506,7 @@ function openHf() {
   q.addEventListener('keydown', (e) => { if (e.key === 'Enter') { clearTimeout(timer); run(); } });
   const md = modal({ title: 'Modelos do Hugging Face', wide: true, body: [h('div.hf-search', null, h('span', { html: svg('search'), style: { display: 'grid' } }), q), back, list, tokenBox], foot: [h('button.btn', { onclick: () => md.close() }, 'Fechar')] });
   setTimeout(() => q.focus(), 50);
-  run();
+  if (/^[\w.-]+\/[\w.-]+$/.test(initial)) openRepo(initial); else run();
 }
 
 function fmtNum(n) { return n >= 1e6 ? (n / 1e6).toFixed(1).replace('.', ',') + ' mi' : n >= 1000 ? Math.round(n / 1000) + ' mil' : String(n); }
@@ -3880,6 +4002,7 @@ async function init() {
   renderChat();
   renderTree();
   await Promise.all([loadSkills(), loadMcp(), checkHealth(), loadModels()]);
+  setTimeout(() => maybeOnboard(), 600);
   // tela de abertura enquanto o modelo carrega (o servidor pode estar subindo agora)
   for (let i = 0; i < 4 && S.llama && S.llama.state === 'stopped' && S.llama.config?.AutoStart; i++) { await new Promise((r) => setTimeout(r, 400)); await checkHealth(); }
   if (S.llama && ['loading', 'external-loading'].includes(S.llama.state)) showSplash();

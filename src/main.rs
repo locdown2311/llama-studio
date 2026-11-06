@@ -14,6 +14,7 @@ mod shell;
 mod desktop;
 mod llama;
 mod locate;
+mod engines;
 mod hf;
 mod mcp;
 mod models;
