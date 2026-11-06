@@ -443,7 +443,7 @@ function newConv(projectId) {
 
 function selectConv(id) {
   if (S.sideDrawer) toggleSide(false);
-  setTimeout(() => { const c = cur(); if (c && S.settings.projMap === true) ensureMap(c).then(() => maybeSummarizeMap(c)); if (S.wsTab === 'notebook') drawNotebook(); }, 50);
+  setTimeout(() => { const c = cur(); if (c && S.settings.projMap === true) ensureMap(c).then(() => maybeSummarizeMap(c)); }, 50);
   const prev = kitModelId();
   S.curId = id; saveConvs(); closeMention?.();
   const next = kitModelId();
@@ -460,6 +460,7 @@ async function deleteConv(c) {
   saveConvs(); renderConvList(); renderChat();
   api('/api/kvcache/prune', { keep: 6, drop: [c.id] }).catch(() => {});
   api('/api/checkpoints/prune', { forget: [c.id] }).catch(() => {});
+  if (!c.projectId) { NB.delete('conv-' + c.id); api('/api/notebook/save', { key: 'conv-' + c.id, cards: [], next: 1 }).catch(() => {}); }
 }
 
 function convRow(c, nested) {
@@ -874,14 +875,19 @@ function scheduleRender() {
 
 const renderConvListSoon = debounce(() => renderConvList(), 300);
 
-function renderChat() { syncWsRoot(); renderChatTitle(); renderMessages(false); renderComposer(); }
+function renderChat() {
+  syncWsRoot(); renderChatTitle(); renderMessages(false); renderComposer();
+  // painel da direita acompanha a conversa e o projeto atuais
+  if (S.wsTab === 'notebook' && S.nbShown !== (cur() ? nbKey(cur()) : null)) drawNotebook();
+  if (S.wsTab === 'activity') drawActivity();
+}
 
 function renderMessages(onlyLast) {
   const box = $('#messages');
   const conv = cur();
   const stick = onlyLast ? followBottom : true;
   const top = box.scrollTop;
-  if (!conv || !conv.messages.length) { box.innerHTML = ''; box.append(renderEmpty()); return; }
+  if (!conv || !conv.messages.length) { box.innerHTML = ''; box.append(renderEmpty()); drawActivitySoon(); return; }
   const blocks = blocksOf(conv);
   if (onlyLast && box.lastElementChild?.dataset.start == blocks[blocks.length - 1].start && box.children.length === blocks.length) {
     // rolagem interna (raciocínio, código) sobrevive à troca do bloco; no fim, segue o texto
@@ -5169,17 +5175,38 @@ async function showMap(conv) {
 // Cartões por pasta de trabalho (todas as conversas da mesma pasta dividem o caderno).
 const NB = new Map();
 const NB_STATUS = ['hipótese', 'confirmado', 'descartado'];
-function nbKey(conv) { const ws = (wsOf(conv) || 'geral').toLowerCase(); let x = 5381; for (let i = 0; i < ws.length; i++) x = ((x * 33) ^ ws.charCodeAt(i)) >>> 0; return 'ws-' + x.toString(36); }
-async function nbLoad(key) {
+// O caderno é do projeto (todas as conversas dele) ou, fora de projeto, só da conversa.
+// Conversas abertas a partir de um cartão (Testar) usam o caderno de onde vieram.
+function nbOwner(conv) { return (conv?.nbOf && S.convs.find((x) => x.id === conv.nbOf)) || conv; }
+function nbKey(conv) {
+  const o = nbOwner(conv); const proj = projectOf(o);
+  return proj ? 'proj-' + proj.id : 'conv-' + (o?.id || 'nenhuma');
+}
+function nbScope(conv) { const proj = projectOf(nbOwner(conv)); return proj ? `do projeto ${proj.name}` : 'desta conversa'; }
+// versões antigas guardavam um caderno por pasta de trabalho
+function nbLegacyKey(conv) { const ws = (wsOf(conv) || 'geral').toLowerCase(); let x = 5381; for (let i = 0; i < ws.length; i++) x = ((x * 33) ^ ws.charCodeAt(i)) >>> 0; return 'ws-' + x.toString(36); }
+async function nbLoad(key, conv) {
   if (!NB.has(key)) {
     const r = await api('/api/notebook', { key });
-    const cards = Array.isArray(r.cards) ? r.cards : [];
-    NB.set(key, { cards, next: r.next || cards.reduce((a, c) => Math.max(a, c.id), 0) + 1 });
+    let cards = Array.isArray(r.cards) ? r.cards : [];
+    const nb = { cards, next: r.next || cards.reduce((a, c) => Math.max(a, c.id), 0) + 1 };
+    NB.set(key, nb);
+    if (!cards.length && !r.migrated && conv && key !== CAL_KEY) {
+      // traz do caderno antigo da pasta só os cartões criados nesta conversa (ou nas do projeto)
+      try {
+        const old = await api('/api/notebook', { key: nbLegacyKey(nbOwner(conv)) });
+        const o = nbOwner(conv); const proj = projectOf(o);
+        const mine = new Set(proj ? S.convs.filter((x) => x.projectId === proj.id).map((x) => x.id) : [o.id]);
+        cards = (old.cards || []).filter((c) => (c.conv ? mine.has(c.conv) : !!proj));
+        if (cards.length) { nb.cards = cards; nb.next = cards.reduce((a, c) => Math.max(a, c.id), 0) + 1; await api('/api/notebook/save', { key, cards: nb.cards, next: nb.next }); }
+      } catch { /* sem caderno antigo */ }
+    }
+    return nb;
   }
   return NB.get(key);
 }
 async function nbSave(key) {
-  const nb = NB.get(key);
+  const nb = NB.get(key); if (!nb) return;
   await api('/api/notebook/save', { key, cards: nb.cards, next: nb.next });
   if (S.wsTab === 'notebook') drawNotebook();
 }
@@ -5187,7 +5214,7 @@ const nbLine = (c) => `#${c.id} [${c.status || 'hipótese'}]${c.kind ? ' ' + c.k
 async function notebookTool(conv, a) {
   if (typeof a === 'string') a = parseArgs(a) || {};
   a = a || {};
-  const key = nbKey(conv); const nb = await nbLoad(key);
+  const key = nbKey(conv); const nb = await nbLoad(key, conv);
   const id = a.id != null ? Number(String(a.id).replace(/^#/, '')) : null;
   const card = id != null ? nb.cards.find((c) => c.id === id) : null;
   const fields = ['title', 'kind', 'addr', 'status', 'text'];
@@ -5228,7 +5255,7 @@ async function notebookTool(conv, a) {
   }
 }
 async function editCard(conv, card) {
-  const key = nbKey(conv); const nb = await nbLoad(key);
+  const key = nbKey(conv); const nb = await nbLoad(key, conv);
   const title = h('input.input', { value: card?.title || '', placeholder: 'Ex.: verifica a licença' });
   const kind = h('input.input', { value: card?.kind || '', placeholder: 'função, endereço, string...', list: 'nb-kinds' });
   const addr = h('input.input.mono', { value: card?.addr || '', placeholder: '0x401000' });
@@ -5282,7 +5309,7 @@ async function testCard(conv, card) {
   const proj = projectOf(conv);
   const c = newConv(proj?.id || null);
   c.title = `Testar #${card.id}: ${card.title}`.slice(0, 60);
-  c.testCard = card.id;
+  c.testCard = card.id; c.nbOf = nbOwner(conv).id;
   if (dbg.length) { const sel = activeSel(c); for (const n of dbg) if (!sel.mcp.includes(n)) sel.mcp.push(n); S.sel.mcp = [...new Set([...S.sel.mcp, ...dbg])]; saveSel(); }
   if (!S.settings.tools.notebook) { S.settings.tools.notebook = true; store.set('settings', S.settings); }
   setView('chat'); updatePickers();
@@ -5339,7 +5366,7 @@ async function sigScan(conv) {
   let r;
   try { r = await api('/api/sig/scan', { file: p, ws: wsOf(conv) }); } catch (e) { toast(e.message, 'err'); return; }
   if (!r.total) { toast('Nenhuma assinatura salva ainda. Crie pelo cartão de uma função (botão Criar assinatura).'); return; }
-  const key = nbKey(conv); const nb = await nbLoad(key);
+  const key = nbKey(conv); const nb = await nbLoad(key, conv);
   const addCard = (x) => {
     if (x.hits.length !== 1) return false;
     const va = x.hits[0].va;
@@ -5373,15 +5400,17 @@ async function sigManage() {
 S.nbQuery = '';
 async function drawNotebook() {
   const box = $('#ws-notebook'); if (!box || box.hidden) return;
-  const c = cur() || { id: 'none', messages: [] };
+  const c = cur();
+  if (!c) { S.nbShown = null; box.innerHTML = ''; box.append(h('div.act-empty', null, ic('book'), 'Abra uma conversa ou um projeto para ver o caderno dele.')); return; }
   const key = nbKey(c);
+  S.nbShown = key;
   let nb;
-  try { nb = await nbLoad(key); } catch (e) { box.innerHTML = ''; box.append(h('div.act-empty', null, 'Erro: ' + e.message)); return; }
+  try { nb = await nbLoad(key, c); } catch (e) { box.innerHTML = ''; box.append(h('div.act-empty', null, 'Erro: ' + e.message)); return; }
   const keep = box.scrollTop;
   box.innerHTML = '';
   const q = S.nbQuery.toLowerCase();
   const search = h('input.input.nb-search', { value: S.nbQuery, placeholder: 'Filtrar cartões', oninput: (e) => { S.nbQuery = e.target.value; clearTimeout(drawNotebook._t); drawNotebook._t = setTimeout(() => { drawNotebook().then(() => { const i = $('.nb-search'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }); }, 150); } });
-  box.append(h('div.nb-top', null, search,
+  box.append(h('div.ws-scope', null, ic('book'), `Caderno ${nbScope(c)}`), h('div.nb-top', null, search,
     h('button.icon-btn.sm', { title: 'Novo cartão', 'aria-label': 'Novo cartão', html: svg('plus'), onclick: () => editCard(c) }),
     h('button.icon-btn.sm', { title: 'Mais', 'aria-label': 'Mais opções do caderno', html: svg('more'), onclick: (e) => { const r = e.currentTarget.getBoundingClientRect(); floatMenu(r.left - 200, r.bottom + 4, [
       { label: 'Procurar assinaturas num binário', icon: 'search', onclick: () => sigScan(c) },
@@ -5564,7 +5593,8 @@ function drawActivity() {
   const c = cur();
   const keep = box.scrollTop; const atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
   box.innerHTML = '';
-  if (!c || !c.messages.length) { box.append(h('div.act-empty', null, ic('list'), 'Os passos do modelo (raciocínio, ferramentas, respostas) aparecem aqui conforme ele trabalha.')); return; }
+  if (!c || !c.messages.length) { box.append(h('div.act-empty', null, ic('list'), 'Os passos do modelo (raciocínio, ferramentas, respostas) desta conversa aparecem aqui conforme ele trabalha.')); return; }
+  box.append(h('div.ws-scope', null, ic('list'), `Atividade de "${clipText(c.title, 40)}"`));
   const blocks = blocksOf(c);
   let nTools = 0; let nErr = 0; let ms = 0;
   const list = h('div.act');

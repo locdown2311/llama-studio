@@ -60,7 +60,7 @@ O instalador não pede administrador: instala em `%LOCALAPPDATA%\Programs\Llama 
 - **Modo plano**: o modelo só investiga e propõe um plano, sem alterar nada. Um botão executa o plano quando você aprovar.
 - **Leituras em paralelo**: leituras pedidas no mesmo passo rodam juntas, no agente e nos subagentes.
 - **Correções viram regras**: ao negar uma ação ou desfazer uma alteração, o botão "Virar regra" propõe uma regra curta, que você guarda no prompt, no projeto ou na política do auditor.
-- **Caderno de investigação**: o modelo registra achados (funções, endereços, strings, hipóteses) em cartões por pasta de trabalho e consulta antes de repetir trabalho. Exporta em Markdown ou como script de rótulos do x64dbg.
+- **Caderno de investigação**: o modelo registra achados (funções, endereços, strings, hipóteses) em cartões do projeto (ou da conversa, fora de projeto) e consulta antes de repetir trabalho. Exporta em Markdown ou como script de rótulos do x64dbg.
 - **Hipótese testada**: o botão Testar de um cartão abre uma conversa que testa a hipótese no debugger e grava no cartão se foi confirmada ou descartada, com a evidência.
 - **Assinaturas de funções**: os bytes de uma função identificada (com curingas em chamadas, saltos e endereços) viram uma assinatura; num binário novo, o studio acha as funções conhecidas e cria os cartões. Sem o modelo.
 - **Habilidade a partir da conversa**: transforma uma conversa que deu certo num `SKILL.md` para revisar e salvar.
