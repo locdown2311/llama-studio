@@ -261,7 +261,7 @@ document.addEventListener('click', (e) => {
 
 /* ============================================================ estado */
 const TOOL_GROUPS = ['read', 'write', 'edit', 'shell', 'code', 'browser', 'computer', 'history', 'toolsearch', 'explore', 'todo'];
-const DEFAULT_SETTINGS = { systemPrompt: '', temperature: '', topP: '', maxTokens: '', maxSteps: 30, approval: 'writes', theme: 'light', showThinking: true, vision: 'auto', explorerSteps: 20, autoCompact: true, compactAt: 75, lazyLoad: true, tools: Object.fromEntries(TOOL_GROUPS.map((g) => [g, true])) };
+const DEFAULT_SETTINGS = { systemPrompt: '', temperature: '', topP: '', maxTokens: '', maxSteps: 30, approval: 'writes', theme: 'light', showThinking: true, vision: 'auto', explorerSteps: 20, autoCompact: true, compactAt: 75, compactMode: 'meio', lazyLoad: true, tools: Object.fromEntries(TOOL_GROUPS.map((g) => [g, true])) };
 const S = {
   view: 'chat',
   convs: store.get('convs', []),
@@ -710,7 +710,7 @@ function renderEmpty() {
 
 function compactMark(conv) {
   const d = h('details.compact-mark', null,
-    h('summary', null, ic('archive'), h('span', null, `Conversa compactada${conv.compactions > 1 ? ` ${conv.compactions} vezes` : ''}: o que vem antes daqui foi resumido para o modelo`), h('span.cm-see', null, 'ver resumo')),
+    h('summary', null, ic('archive'), h('span', null, `Conversa compactada${conv.compactions > 1 ? ` ${conv.compactions} vezes` : ''}: ${conv.compactHead ? 'o trecho entre o primeiro pedido e aqui' : 'o que vem antes daqui'} foi resumido para o modelo`), h('span.cm-see', null, 'ver resumo')),
     h('div.md', { html: md(conv.summary || '') }));
   return d;
 }
@@ -1680,9 +1680,19 @@ function apiMessages(conv, system) {
   msgs.forEach((m, i) => { if (m.role === 'assistant') lastAssistant = i; });
   msgs.forEach((m, i) => { m.__i = i; });
   const cut = conv.compactCut || 0;
-  if (cut && conv.summary) out.push({ role: 'user', content: '[Resumo automático da conversa anterior, gerado para caber no contexto]\n\n' + conv.summary });
+  const head = cut ? Math.min(conv.compactHead || 0, cut) : 0;
+  let summaryDone = !(cut && conv.summary);
+  const pushSummary = () => {
+    if (summaryDone) return; summaryDone = true;
+    if (out[out.length - 1]?.role === 'user') out.push({ role: 'assistant', content: 'Certo, vou trabalhar nisso.' });
+    out.push({ role: 'user', content: (head ? '[Resumo automático do meio da conversa, gerado para caber no contexto]\n\n' : '[Resumo automático da conversa anterior, gerado para caber no contexto]\n\n') + conv.summary });
+    // mantém a alternância usuário/assistente que alguns templates exigem
+    out.push({ role: 'assistant', content: 'Entendido. Vou continuar a partir desse resumo.' });
+  };
+  if (!head) pushSummary();
   for (const m of msgs) {
-    if (m.__i < cut) continue;
+    if (m.__i >= head && m.__i < cut) continue;
+    if (m.__i >= cut) pushSummary();
     if (m.role === 'user' && m.hidden) {
       if (m._images?.length && m.__i > lastAssistant) out.push({ role: 'user', content: [{ type: 'text', text: m.content }, ...m._images.map((url) => ({ type: 'image_url', image_url: { url } }))] });
       else out.push({ role: 'user', content: m.content + ' [imagem omitida do histórico]' });
@@ -1873,7 +1883,7 @@ function fillCtxPop() {
 
 
 async function streamRaw(messages, tools, msg, signal, onDelta) {
-  const body = { messages, stream: true };
+  const body = { messages, stream: true, cache_prompt: true };
   if (tools.length) body.tools = tools;
   const st = S.settings;
   if (st.temperature !== '' && st.temperature != null) body.temperature = Number(st.temperature);
@@ -1951,7 +1961,9 @@ async function runAgent(conv) {
     const fetchTools = () => api('/api/tools', { ...sel, extra: conv.extraTools || [], lazy });
     let [{ tools, meta, catalog }, ctx] = await Promise.all([
       fetchTools(),
-      api('/api/context', { ws: wsOf(conv), skills: sel.skills, groups, refs, lazy, now: new Date().toLocaleString('pt-BR', { dateStyle: 'full', timeStyle: 'short' }) }),
+      // o prompt de sistema precisa ficar idêntico entre mensagens para o llama-server reaproveitar o cache:
+      // só a data (sem hora) e sem a lista de arquivos referenciados (eles já vão na própria mensagem)
+      api('/api/context', { ws: wsOf(conv), skills: sel.skills, groups, refs: [], lazy, now: new Date().toLocaleDateString('pt-BR', { dateStyle: 'full' }) }),
     ]);
     const tctx = { signal: ac.signal, conv, refs, groups, ctxText: ctx.text, ws: wsOf(conv) };
     const persona = personaOf(conv); const proj = projectOf(conv);
@@ -2068,8 +2080,14 @@ async function maybeCompact(conv, system, tools, signal, force = false) {
   msgs.forEach((m, i) => { if (m.role === 'tool' && i < lastUser && !m.short && (m.content || '').length > 1500) { m.short = true; shortened++; } });
   if (!force && estimateTokens(conv, system, tools) < limit) { if (shortened) saveConvs(); return true; }
 
-  // etapa 2: resume o começo e guarda só o final (cerca de 35% do limite)
-  const from = conv.compactCut || 0;
+  // etapa 2: resume e guarda só o final (cerca de 35% do limite).
+  // Modo "meio": o primeiro pedido do usuário fica intacto no topo (é ele que define a tarefa).
+  let head = conv.compactHead || 0;
+  if (!conv.compactCut && S.settings.compactMode !== 'inicio') {
+    const fu = msgs.findIndex((m) => m.role === 'user' && !m.hidden);
+    if (fu >= 0 && userContent(msgs[fu]).length < limit * 0.25 * 3.2) head = fu + 1;
+  }
+  const from = Math.max(conv.compactCut || 0, head);
   const budget = limit * 0.35 * 3.2;
   let acc = 0; let cut = msgs.length;
   for (let i = msgs.length - 1; i > from; i--) {
@@ -2108,6 +2126,7 @@ async function maybeCompact(conv, system, tools, signal, force = false) {
     if (!summary) return false;
     conv.summary = summary;
     conv.compactCut = cut;
+    conv.compactHead = head;
     conv.compactions = (conv.compactions || 0) + 1;
     saveConvs();
     return true;
@@ -2960,9 +2979,20 @@ function renderSettings() {
     (() => {
       const i = h('input', { type: 'checkbox', checked: !!st.autoCompact });
       i.addEventListener('change', () => { S.settings.autoCompact = i.checked; store.set('settings', S.settings); });
-      return h('label.tcard', null, h('span.tc-main', null, h('span.tc-title', null, 'Compactar automaticamente'), h('span.tc-desc', null, `Resume o começo da conversa quando passar de ${st.compactAt}% do contexto${S.nCtx ? ` (${S.nCtx.toLocaleString('pt-BR')} tokens)` : ''}.`)), h('span.switch', null, i, h('span')));
+      return h('label.tcard', null, h('span.tc-main', null, h('span.tc-title', null, 'Compactar automaticamente'), h('span.tc-desc', null, `Resume a conversa quando passar de ${st.compactAt}% do contexto${S.nCtx ? ` (${S.nCtx.toLocaleString('pt-BR')} tokens)` : ''}.`)), h('span.switch', null, i, h('span')));
     })(),
-    h('div.field', null, h('label', null, 'Compactar ao chegar em (% do contexto)'), (() => { const x = h('input.input', { value: st.compactAt, inputmode: 'numeric', style: { maxWidth: '120px' } }); x.addEventListener('change', () => { S.settings.compactAt = Math.min(95, Math.max(30, Number(x.value) || 75)); x.value = S.settings.compactAt; store.set('settings', S.settings); }); return x; })()),
+    h('div.row', null,
+      h('div.field', null, h('label', null, 'Compactar ao chegar em'), (() => {
+        const sl = slider({ min: 30, max: 95, step: 5, fmt: (v) => v + '% do contexto' }, st.compactAt, { optional: false });
+        sl.el.addEventListener('change', () => { S.settings.compactAt = Number(sl.get()); store.set('settings', S.settings); });
+        return sl.el;
+      })()),
+      h('div.field', null, h('label', null, 'O que resumir'), (() => {
+        const x = h('select.select', null, h('option', { value: 'meio' }, 'O meio: mantém o primeiro pedido e o final'), h('option', { value: 'inicio' }, 'O começo: mantém só o final'));
+        x.value = st.compactMode || 'meio';
+        x.addEventListener('change', () => { S.settings.compactMode = x.value; store.set('settings', S.settings); });
+        return x;
+      })(), h('small', null, 'No modo "meio" o pedido que abriu a conversa nunca é resumido, então o modelo não perde o objetivo.'))),
     h('div.section-title', null, 'Servidor'),
     h('div.field', null, h('label', null, 'Endereço do llama-server'), llama, h('small', null, 'Muda sozinho quando você salva a página Servidor. Ajuste aqui só se o llama-server roda em outro lugar.')),
     h('div.section-title', null, 'Modelo'),
@@ -3070,6 +3100,7 @@ const ARG_DEFS = [
   { k: 'np', f: ['-np', '--parallel'], g: 'gpu', t: 'num', min: 1, max: 8, def: 1, l: 'Conversas em paralelo', d: 'Quantas respostas o servidor gera ao mesmo tempo (slots). Cada uma divide o contexto, a não ser com contexto unificado.' },
   { k: 'kvu', f: ['--kv-unified', '-kvu'], g: 'gpu', t: 'bool', l: 'Contexto unificado', d: 'Os slots paralelos compartilham o mesmo contexto em vez de dividi-lo. Recomendado com mais de 1 em paralelo.' },
   { k: 'ckpt', f: ['--ctx-checkpoints'], g: 'gpu', t: 'num', min: 0, max: 64, def: 8, l: 'Checkpoints de contexto', d: 'Pontos salvos do contexto para reaproveitar o prompt entre mensagens em modelos híbridos/SWA. Mais = menos reprocessamento, mais RAM.' },
+  { k: 'creuse', f: ['--cache-reuse'], g: 'gpu', t: 'num', opts: [0, 64, 128, 256, 512, 1024], def: 0, l: 'Reaproveitar cache (cache-reuse)', d: 'Reaproveita pedaços do cache quando o começo do prompt muda (compactação, ferramenta carregada). 256 acelera bastante conversas longas; 0 desliga.' },
   { k: 'mlock', f: ['--mlock'], g: 'gpu', t: 'bool', l: 'Travar na RAM (mlock)', d: 'Impede o sistema de mandar o modelo para o disco. Use só se sobrar RAM.' },
   { k: 'nommap', f: ['--no-mmap'], g: 'gpu', t: 'bool', l: 'Não mapear o arquivo (no-mmap)', d: 'Carrega o modelo inteiro na memória em vez de ler do disco sob demanda. Carrega mais devagar, pode rodar mais estável.' },
   { k: 'jinja', f: ['--jinja'], g: 'think', t: 'bool', l: 'Template Jinja', d: 'Usa o template de chat do próprio modelo. Necessário para ferramentas (tool calling). Deixe ligado.' },

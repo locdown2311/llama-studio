@@ -306,7 +306,7 @@ begin
 
   // configuração do llama-server (llama-gui.json): cria se não existir; se existir, só aponta para o motor novo
   Cfg := ExpandConstant('{app}\llama-gui.json');
-  if E = E_CPU then Extra := '--jinja -fa auto' else Extra := '-ngl 99 -fa on --jinja';
+  if E = E_CPU then Extra := '--jinja -fa auto --cache-reuse 256' else Extra := '-ngl 99 -fa on --jinja --cache-reuse 256';
   if not FileExists(Cfg) then
     Ps('@{ ServerExe = ' + Q(Dir + '\llama-server.exe') + '; Model = ''''; BindHost = ''127.0.0.1''; Port = 1235; Context = 32768; ' +
        'CpuMoe = 0; Threads = 0; HipDevices = ''''; ExtraArgs = ' + Q(Extra) + '; AutoStart = $false } | ConvertTo-Json | ForEach-Object { [IO.File]::WriteAllText(' + Q(Cfg) + ', $_) }')

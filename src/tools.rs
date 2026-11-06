@@ -264,7 +264,7 @@ pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[Strin
     let has = |g: &str| groups.iter().any(|x| x == g);
     let mut parts = vec![];
     if !now.is_empty() {
-        parts.push(format!("Data e hora atuais: {now}."));
+        parts.push(format!("Data de hoje: {now}."));
     }
     parts.push(format!("Sistema do usuário: {}.", if app::IS_WIN { "Windows" } else { std::env::consts::OS }));
     if has("read") || has("write") || has("edit") || has("shell") {
