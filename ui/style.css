@@ -1159,3 +1159,25 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .onb-models .chip { display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); font: inherit; font-size: 12.5px; cursor: pointer; color: var(--text); }
 .onb-models .chip:hover { border-color: var(--accent-line); color: var(--accent); }
 .onb-models .chip svg { width: 13px; height: 13px; }
+.menu-item.sel { background: var(--accent-soft); }
+.menu-item.sel > svg:last-child { margin-left: auto; color: var(--accent); }
+.code.live pre { white-space: pre-wrap; }
+
+/* otimizar */
+.bench { display: flex; flex-direction: column; gap: 12px; font-size: 14px; }
+.bench p { margin: 0; }
+.bench-notes { margin: 0; padding-left: 18px; color: var(--text-2); font-size: 13px; line-height: 1.6; }
+.bench-prog { display: flex; align-items: center; gap: 8px; color: var(--text-2); }
+.bench-prog svg { width: 15px; height: 15px; }
+.bench-win { display: flex; gap: 10px; align-items: flex-start; padding: 12px; border-radius: 10px; background: var(--ok-soft); }
+.bench-win > svg { width: 18px; height: 18px; color: var(--ok); flex: none; margin-top: 2px; }
+.bench-win div div { font-size: 13px; color: var(--text-2); margin-top: 2px; }
+.bench-t { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.bench-t th { text-align: left; font-weight: 500; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.bench-t td { padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.bench-t tr.best td { background: var(--accent-soft); font-weight: 600; }
+.bench-log { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--code-bg); font-size: 11.5px; max-height: 120px; overflow: auto; white-space: pre-wrap; }
+
+.td-ask { display: flex; align-items: center; gap: 8px; padding: 8px 12px 10px; border-top: 1px solid var(--line); background: var(--accent-soft); font-size: 13px; font-weight: 500; }
+.td-ask > span { flex: 1; }
+.td-head.ask .td-title::after { content: ' · aguardando você'; font-weight: 400; color: var(--accent); }

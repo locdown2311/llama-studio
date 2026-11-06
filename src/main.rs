@@ -5,6 +5,7 @@
 #![cfg_attr(all(windows, feature = "desktop", not(debug_assertions)), windows_subsystem = "windows")]
 
 mod app;
+mod bench;
 mod bins;
 mod compact;
 mod browser;

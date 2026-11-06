@@ -123,7 +123,7 @@ impl App {
             .expect("cliente http");
 
         let app = Arc::new(App {
-            llama: Llama::new(&llama_dir, &app_dir),
+            llama: Llama::new(&llama_dir, &app_dir, &root),
             app_dir,
             llama_dir,
             browser: Browser::new(&root),

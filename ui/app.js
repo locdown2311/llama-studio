@@ -28,6 +28,7 @@ const ICONS = {
   stop: '<rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/>',
   chev: '<path d="m9 18 6-6-6-6"/>',
   up: '<path d="m18 15-6-6-6 6"/>',
+  zap: '<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>',
   info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
   cpu: '<rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
@@ -245,6 +246,34 @@ function md(text) {
   return html;
 }
 
+/**
+ * Markdown de um texto que ainda está chegando: os parágrafos já completos são
+ * convertidos uma vez só (cache); a cada atualização só o trecho final é refeito.
+ * Bloco de código ainda aberto vai como texto simples (sem colorir) até fechar.
+ */
+function mdLive(text) {
+  if (!text) return '';
+  let inFence = false; let cut = 0; let i = 0;
+  const re = /^(```|~~~)|\n\n/gm;
+  let m;
+  while ((m = re.exec(text))) {
+    if (m[1]) inFence = !inFence;
+    else if (!inFence) cut = m.index + 2;
+    i = re.lastIndex;
+  }
+  const head = cut > 0 ? md(text.slice(0, cut)) : '';
+  const tail = text.slice(cut);
+  if (!tail) return head;
+  const fenceOpen = /^(```|~~~)/m.test(tail) && (tail.match(/^(```|~~~)/gm) || []).length % 2 === 1;
+  if (fenceOpen) {
+    const at = tail.search(/^(```|~~~)/m);
+    const before = tail.slice(0, at);
+    const code = tail.slice(at).replace(/^(```|~~~)[^\n]*\n?/, '');
+    return head + (before.trim() ? md(before) : '') + `<div class="code live"><pre><code>${esc(code)}</code></pre></div>`;
+  }
+  return head + md(tail);
+}
+
 document.addEventListener('click', (e) => {
   const cb = e.target.closest('.copy-btn');
   if (cb) {
@@ -381,7 +410,7 @@ function newConv(projectId) {
   const personaId = S.draftPersona !== undefined ? S.draftPersona : (proj?.personaId || S.settings.defaultPersona || null);
   S.draftPersona = undefined;
   const modelId = S.draftModel; S.draftModel = undefined;
-  const c = { id: uid(), title: 'Nova conversa', messages: [], createdAt: Date.now(), updatedAt: Date.now(), autoApprove: false, projectId: proj ? proj.id : null, personaId, modelId: modelId || null };
+  const c = { id: uid(), title: 'Nova conversa', messages: [], createdAt: Date.now(), updatedAt: Date.now(), autoApprove: false, projectId: proj ? proj.id : null, personaId, modelId: modelId || null, think: S.draftThink || undefined };
   if (proj) { proj.open = true; saveProjects(); }
   S.convs.unshift(c);
   S.curId = c.id;
@@ -407,6 +436,7 @@ async function deleteConv(c) {
   S.convs = S.convs.filter((x) => x.id !== c.id);
   if (S.curId === c.id) S.curId = S.convs[0]?.id || null;
   saveConvs(); renderConvList(); renderChat();
+  api('/api/kvcache/prune', { keep: 6, drop: [c.id] }).catch(() => {});
 }
 
 function convRow(c, nested) {
@@ -818,7 +848,7 @@ function renderAI(b, conv, isLast) {
     }
     const isFinal = m === last && !m.tool_calls?.length;
     if (sp.text.trim()) {
-      const mdEl = h('div.md', { html: md(sp.text) });
+      const mdEl = h('div.md', { html: live && m === last ? mdLive(sp.text) : md(sp.text) });
       if (isFinal) finalMd = mdEl; else steps.push(tlItem('say', ic('message' in ICONS ? 'message' : 'chat'), mdEl));
     }
     for (const tc of m.tool_calls || []) {
@@ -1236,6 +1266,8 @@ function updatePickers() {
   const pers = personaOf(c);
   iconBtn($('#pick-persona'), pers ? h('span.p-ava', { style: { background: pers.color } }, (pers.name[0] || '?').toUpperCase()) : ic('user'),
     pers ? `Personalidade: ${pers.name}` : 'Personalidade: nenhuma', !!pers, 0, pers?.color);
+  const tk = thinkOf(c);
+  iconBtn($('#pick-think'), ic(tk === 'off' ? ('zap' in ICONS ? 'zap' : 'send') : 'brain'), `Raciocínio: ${THINK_OPTS.find((o) => o[0] === tk)[1]}`, tk !== 'auto', 0, tk === 'off' ? '#d99a1e' : 'var(--accent)');
   const skNames = act.skills.map((id) => S.skills.find((k) => k.id === id)?.name || id);
   iconBtn($('#pick-skills'), ic('sparkles'), nSk ? `Habilidades: ${skNames.join(', ') || nSk}` : 'Habilidades: nenhuma', nSk > 0, nSk, 'var(--skill)');
   iconBtn($('#pick-mcp'), ic('plug'), nMcp ? `Conectores: ${act.mcp.join(', ') || nMcp}` : 'Conectores: nenhum', nMcp > 0, nMcp, 'var(--mcp)');
@@ -1577,8 +1609,9 @@ async function submit(conv, item) {
 }
 
 /* ============================================================ lista de tarefas do modelo */
-function updateTodos(conv, args) {
+async function updateTodos(conv, args, signal) {
   if (typeof args === 'string') { try { args = JSON.parse(args); } catch { args = {}; } }
+  const isNew = !conv.todos?.length || conv.todos.every((t) => t.status === 'done');
   let list = args?.todos;
   if (typeof list === 'string') { try { list = JSON.parse(list); } catch { list = null; } }
   if (!Array.isArray(list)) return { content: 'Erro: envie todos como uma lista de {text, status}.', isError: true };
@@ -1589,8 +1622,23 @@ function updateTodos(conv, args) {
   if (conv.id === S.curId) drawTodos();
   const done = conv.todos.filter((t) => t.status === 'done').length;
   const now = conv.todos.find((t) => t.status === 'in_progress');
+  // plano novo: pergunta se pode seguir antes de começar a executar
+  if (isNew && conv.todos.length > 1 && S.settings.confirmPlan !== false) {
+    conv._planWait = true; conv.todosOpen = true;
+    if (conv.id === S.curId) drawTodos();
+    if (conv.id !== S.curId) toast(`"${conv.title}" montou um plano e espera você aprovar`);
+    const ans = await new Promise((resolve) => {
+      S.planWaits.set(conv.id, resolve);
+      signal?.addEventListener('abort', () => resolve('stop'), { once: true });
+    });
+    S.planWaits.delete(conv.id); conv._planWait = false;
+    if (conv.id === S.curId) drawTodos();
+    if (ans === 'stop') return { content: 'O usuário não aprovou o plano e interrompeu. Não execute nada; espere a próxima mensagem dele.', isError: false };
+    return { content: `O usuário aprovou o plano (${conv.todos.length} passos). Pode executar, atualizando a lista a cada passo.`, isError: false };
+  }
   return { content: `Lista atualizada: ${done} de ${conv.todos.length} feitas.${now ? ' Em andamento: ' + now.text : ''}`, isError: false };
 }
+S.planWaits = new Map();
 
 function drawTodos() {
   const box = $('#todos'); if (!box) return;
@@ -1602,7 +1650,7 @@ function drawTodos() {
   const all = done === list.length;
   const open = c.todosOpen ?? !all;
   const nowItem = list.find((t) => t.status === 'in_progress');
-  const head = h('button.td-head', { onclick: () => { c.todosOpen = !open; saveConvs(); drawTodos(); }, 'aria-expanded': String(open) },
+  const head = h('button.td-head' + (c._planWait ? '.ask' : ''), { onclick: () => { c.todosOpen = !open; saveConvs(); drawTodos(); }, 'aria-expanded': String(open) },
     h('span.td-ring', { html: (() => { const C = 2 * Math.PI * 6; return `<svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="6" fill="none" stroke="var(--line-2)" stroke-width="2.2"/><circle cx="8" cy="8" r="6" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round" stroke-dasharray="${(done / list.length * C).toFixed(2)} ${C.toFixed(2)}" transform="rotate(-90 8 8)"/></svg>`; })() }),
     h('span.td-title', null, all ? 'Tarefas concluídas' : nowItem ? nowItem.text : 'Tarefas'),
     h('span.td-count', null, `${done}/${list.length}`),
@@ -1612,7 +1660,11 @@ function drawTodos() {
     const ul = h('ol.td-list');
     for (const t of list) ul.append(h('li.td.' + t.status, null, h('span.td-box', { html: t.status === 'done' ? svg('check') : '' }), h('span.td-text', null, t.text)));
     box.append(ul);
-    if (all || !running(c)) box.append(h('div.td-foot', null, h('button.btn.ghost.sm', { onclick: () => { c.todos = []; saveConvs(); drawTodos(); } }, 'Limpar lista')));
+    if (c._planWait) {
+      box.append(h('div.td-ask', null, h('span', null, 'Seguir com este plano?'),
+        h('button.btn.ghost.sm', { onclick: () => { S.planWaits.get(c.id)?.('stop'); S.runs.get(c.id)?.abort(); setEditorText('Ajuste o plano: '); focusEditor(); } }, 'Ajustar'),
+        h('button.btn.primary.sm', { onclick: () => S.planWaits.get(c.id)?.('go') }, ic('check'), 'Continuar')));
+    } else if (all || !running(c)) box.append(h('div.td-foot', null, h('button.btn.ghost.sm', { onclick: () => { c.todos = []; saveConvs(); drawTodos(); } }, 'Limpar lista')));
   }
 }
 
@@ -1743,7 +1795,7 @@ function apiMessages(conv, system) {
 async function streamCompletion(conv, system, tools, msg, signal) {
   const msgs = apiMessages(conv, system);
   conv.ctxSys = Math.ceil(((system || '').length + JSON.stringify(tools || []).length) / 3.2);
-  const r = await streamRaw(msgs, tools, msg, signal, scheduleRender);
+  const r = await streamRaw(msgs, tools, msg, signal, scheduleRender, requestExtras(conv));
   // medida real do servidor: prompt (com o que veio do cache) + resposta
   if (msg.ctxTokens) { conv.ctx = { tokens: msg.ctxTokens, n: conv.messages.length, cut: conv.compactCut || 0 }; drawCtxMeter(); }
   return r;
@@ -1775,6 +1827,16 @@ function renderToolsPage() {
   };
   box.append(
     opt('compactOutput', 'Enxugar saídas de ferramentas', 'Antes de ir para o modelo, tira cores e barras de progresso, junta linhas repetidas e, se passar de ~12 mil caracteres, mantém começo e fim. A saída inteira fica salva para o modelo consultar se precisar.'),
+    (() => {
+      const i = h('input', { type: 'checkbox', checked: S.settings.confirmPlan !== false, onchange: () => { S.settings.confirmPlan = i.checked; store.set('settings', S.settings); } });
+      return h('label.tcard.wrap', null, h('span.tc-main', null, h('span.tc-title', null, 'Aprovar o plano antes de executar'),
+        h('span.tc-desc', null, 'Quando o modelo monta uma lista de tarefas nova, ele espera você clicar em Continuar (ou Ajustar) antes de começar.')), h('span.switch', null, i, h('span')));
+    })(),
+    (() => {
+      const i = h('input', { type: 'checkbox', checked: S.settings.kvSave !== false, onchange: () => { S.settings.kvSave = i.checked; store.set('settings', S.settings); } });
+      return h('label.tcard.wrap', null, h('span.tc-main', null, h('span.tc-title', null, 'Guardar o cache de cada conversa'),
+        h('span.tc-desc', null, 'Ao trocar de conversa, o que o llama-server já processou da anterior vai para o disco e volta quando ela for retomada, em vez de reprocessar o histórico inteiro. Usa alguns GB em disco (guarda as 6 mais recentes).')), h('span.switch', null, i, h('span')));
+    })(),
     opt('useRtk', 'Passar comandos pelo RTK', 'Quando o RTK está instalado, git, cargo, pytest, docker, gh e outros rodam por ele, que devolve só o essencial (falhas, arquivos alterados).'),
     (() => {
       const i = h('input', { type: 'checkbox', checked: S.settings.lazyLoad !== false, onchange: () => { S.settings.lazyLoad = i.checked; store.set('settings', S.settings); } });
@@ -1827,6 +1889,82 @@ async function binRemove(b) {
   if (!(await confirmBox(`Remover ${b.name} da pasta do studio?`, 'Remover', true))) return;
   try { await api('/api/bins/remove', { id: b.id }); toast(`${b.name} removido`); } catch (e) { toast(e.message, 'err'); }
   await loadBins(true);
+}
+
+/* ============================================================ raciocínio por conversa e slot */
+const THINK_OPTS = [
+  ['auto', 'Padrão do modelo', 'O modelo decide (como vem no template dele).'],
+  ['on', 'Pensar', 'Raciocina antes de responder. Melhor para tarefas difíceis.'],
+  ['off', 'Responder direto', 'Sem raciocínio: bem mais rápido para pedidos simples.'],
+];
+function thinkOf(c) { return (c ? c.think : S.draftThink) || 'auto'; }
+function requestExtras(conv) {
+  const x = {};
+  const t = thinkOf(conv);
+  if (t !== 'auto') x.chat_template_kwargs = { enable_thinking: t === 'on' };
+  if (t === 'off') x.reasoning_budget = 0;
+  if (conv._slot != null) x.id_slot = conv._slot;
+  return x;
+}
+function fillThinkPop() {
+  const pop = $('#pop-think'); pop.innerHTML = '';
+  const cur0 = thinkOf(cur());
+  pop.append(h('div.pop-head', null, h('span', null, 'Raciocínio nesta conversa')));
+  for (const [v, l, d] of THINK_OPTS) {
+    pop.append(h('button.menu-item' + (v === cur0 ? '.sel' : ''), { onclick: () => {
+      const c = cur(); if (c) { c.think = v; saveConvs(); } else S.draftThink = v;
+      closePops(); updatePickers();
+    } }, ic(v === 'off' ? 'zap' in ICONS ? 'zap' : 'send' : 'brain'), h('span.mi-main', null, l, h('span.mi-sub', null, d)), v === cur0 ? ic('check') : null));
+  }
+}
+
+/* ============================================================ cache de cada conversa (slots do llama-server) */
+// Cada conversa ganha um slot do servidor. Quando outra conversa precisa do slot, o cache da
+// anterior vai para o disco (--slot-save-path) e volta quando ela for usada de novo:
+// conversas longas retomam sem reprocessar o histórico inteiro.
+S.slots = { ok: true, owner: [], used: [], key: '', started: 0 };
+function kvKey() {
+  let h = 5381; const str = `${S.model}|${S.nCtx}`;
+  for (let i = 0; i < str.length; i++) h = ((h * 33) ^ str.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
+function kvFile(c) { return `${c.id}-${kvKey()}.bin`; }
+
+async function assignSlot(conv) {
+  conv._slot = null;
+  const sl = S.slots;
+  if (S.settings.kvSave === false || !sl.ok || !S.nSlots || !S.model) return;
+  const key = kvKey();
+  const started = S.llama?.startedAt || 0;
+  if (sl.key !== key || sl.started !== started) { sl.key = key; sl.started = started; sl.owner = []; sl.used = []; }
+  const busy = new Set([...S.runs.keys()].filter((id) => id !== conv.id).map((id) => S.convs.find((c) => c.id === id)?._slot).filter((x) => x != null));
+  const mine = sl.owner.indexOf(conv.id);
+  if (mine >= 0 && !busy.has(mine)) { conv._slot = mine; sl.used[mine] = Date.now(); return; }
+  let best = -1;
+  for (let k = 0; k < S.nSlots; k++) {
+    if (busy.has(k)) continue;
+    if (!sl.owner[k]) { best = k; break; }
+    if (best < 0 || (sl.used[k] || 0) < (sl.used[best] || 0)) best = k;
+  }
+  if (best < 0) return;
+  const prev = sl.owner[best] && sl.owner[best] !== conv.id ? S.convs.find((c) => c.id === sl.owner[best]) : null;
+  try {
+    if (prev && (prev.ctx?.tokens || 0) >= 3000) {
+      conv._waitingModel = true; conv._waitText = 'Guardando o cache da outra conversa...'; scheduleRender();
+      await api(`/slots/${best}?action=save`, { filename: kvFile(prev) });
+      (prev.kv ||= {})[key] = Date.now();
+      api('/api/kvcache/prune', { keep: 6 }).catch(() => {});
+    }
+    if (conv.kv?.[key]) {
+      conv._waitingModel = true; conv._waitText = 'Recuperando o cache desta conversa...'; scheduleRender();
+      try { await api(`/slots/${best}?action=restore`, { filename: kvFile(conv) }); }
+      catch { delete conv.kv[key]; }
+    }
+  } catch (e) {
+    if (/save.?path|not supported|501|404/i.test(e.message)) sl.ok = false;
+  } finally { conv._waitingModel = false; conv._waitText = ''; }
+  sl.owner[best] = conv.id; sl.used[best] = Date.now(); conv._slot = best;
+  saveConvs();
 }
 
 /* ============================================================ medidor de contexto */
@@ -1901,8 +2039,8 @@ function fillCtxPop() {
 }
 
 
-async function streamRaw(messages, tools, msg, signal, onDelta) {
-  const body = { messages, stream: true, cache_prompt: true };
+async function streamRaw(messages, tools, msg, signal, onDelta, extra = {}) {
+  const body = { messages, stream: true, cache_prompt: true, ...extra };
   if (tools.length) body.tools = tools;
   const st = S.settings;
   if (st.temperature !== '' && st.temperature != null) body.temperature = Number(st.temperature);
@@ -2000,7 +2138,7 @@ async function runAgent(conv) {
       const msg = { role: 'assistant', content: '', reasoning: '', tool_calls: [], t0: step === 0 ? t0 : Date.now() };
       conv.messages.push(msg);
       scheduleRender();
-      if (step === 0) { await ensureModel(conv, ac.signal); await waitModel(conv, ac.signal); }
+      if (step === 0) { await ensureModel(conv, ac.signal); await waitModel(conv, ac.signal); await assignSlot(conv); }
       if (ac.signal.aborted) throw new DOMException('abort', 'AbortError');
       await maybeCompact(conv, system, tools, ac.signal);
       try {
@@ -2187,7 +2325,7 @@ async function execTool(name, args, info, tctx, tmsg) {
   try {
     if (name === 'execute_code') return await runCode(args?.code ?? '', tctx, tmsg);
     if (name === 'recall_history') return recallHistory(args || {}, tctx.conv);
-    if (name === 'update_todos') return updateTodos(tctx.conv, args);
+    if (name === 'update_todos') return await updateTodos(tctx.conv, args, tctx.signal);
     if (name === 'search_tools') {
       const names = Array.isArray(args?.names) ? args.names : typeof args?.names === 'string' ? args.names.split(/[\s,]+/).filter(Boolean) : [];
       const r = await api('/api/tools/search', { query: args?.query || '', names });
@@ -3083,6 +3221,7 @@ function drawModels() {
         h('div.mdl-meta', null, `contexto ${fmtK(m.context)}`, m.cpuMoe ? ` · ${m.cpuMoe} camadas MoE na CPU` : '', m.threads ? ` · ${m.threads} threads` : '', used ? ` · ${used} conversa${used > 1 ? 's' : ''}` : '')),
       h('div.mdl-acts', null,
         on ? null : h('button.btn.sm', { onclick: async () => { try { await activateModel(m.id); } catch (e) { toast(e.message, 'err'); } } }, ic('play'), 'Carregar'),
+        h('button.btn.sm.ghost', { title: 'Mede algumas configurações no seu PC e grava a mais rápida neste modelo', onclick: () => openBench(m) }, ic('zap'), 'Otimizar'),
         h('button.icon-btn.sm', { title: 'Editar', 'aria-label': 'Editar', html: svg('edit'), onclick: () => editModel(m) }),
         on ? null : h('button.icon-btn.sm', { title: 'Remover da lista', 'aria-label': 'Remover', html: svg('trash'), onclick: async () => {
           if (!(await confirmBox(`Tirar "${m.name}" da lista? O arquivo não é apagado.`, 'Remover', true))) return;
@@ -3511,6 +3650,60 @@ function openHf(initial = '') {
 
 function fmtNum(n) { return n >= 1e6 ? (n / 1e6).toFixed(1).replace('.', ',') + ' mi' : n >= 1000 ? Math.round(n / 1000) + ' mil' : String(n); }
 
+/* ------------------------------------------------------------ otimizar para o PC (llama-bench) */
+function openBench(m) {
+  const body = h('div.bench');
+  let timer = 0; let started = false;
+  const fmt = (x) => (x ? x.toFixed(1).replace('.', ',') : '–');
+  const draw = (st) => {
+    body.innerHTML = '';
+    if (!started && !st?.running) {
+      body.append(h('p', null, `Mede a velocidade de ${m.name} no seu computador com algumas combinações de microlote (ubatch) e threads, e grava a mais rápida neste modelo.`),
+        h('ul.bench-notes', null, h('li', null, 'O llama-server fica parado durante o teste (alguns minutos) e volta sozinho no fim.'),
+          h('li', null, 'Conta metade a velocidade de leitura do prompt e metade a de geração, que é o que mais pesa num agente.')));
+      return;
+    }
+    if (st.error) body.append(h('div.eng-err', null, ic('alert'), st.error));
+    if (st.running) {
+      const pct = st.total ? st.done / st.total * 100 : 0;
+      body.append(h('div.bench-prog', null, h('span', { html: svg('loader', 'spin') }), h('span', null, `Medindo... ${st.done} de ${st.total}`)), h('div.dl-bar', null, h('i', { style: { width: pct + '%' } })));
+    }
+    const r = st.result;
+    if (r) {
+      const gain = (a, b) => (a && b ? ` (${a >= b ? '+' : ''}${Math.round((a / b - 1) * 100)}%)` : '');
+      body.append(h('div.bench-win', null, ic('check'), h('div', null, h('b', null, `Gravado: ubatch ${r.ub}, ${r.threads} threads`),
+        h('div', null, `Leitura do prompt ${fmt(r.pp)} tok/s${gain(r.pp, r.beforePp)} · geração ${fmt(r.tg)} tok/s${gain(r.tg, r.beforeTg)}`))));
+    }
+    const combos = r?.combos || [];
+    const rows = combos.length ? combos : [];
+    if (!rows.length && st.rows?.length) {
+      const map = new Map();
+      for (const x of st.rows) { const k = x.ub + '|' + x.t; const o = map.get(k) || { ub: x.ub, t: x.t }; if (x.pp) o.pp = x.ts; else o.tg = x.ts; map.set(k, o); }
+      rows.push(...map.values());
+    }
+    if (rows.length) {
+      const best = r ? rows.find((x) => x.ub === r.ub && x.t === r.threads) : null;
+      body.append(h('table.bench-t', null, h('thead', null, h('tr', null, h('th', null, 'ubatch'), h('th', null, 'threads'), h('th', null, 'leitura (tok/s)'), h('th', null, 'geração (tok/s)'))),
+        h('tbody', null, rows.map((x) => h('tr' + (x === best ? '.best' : ''), null, h('td', null, String(x.ub)), h('td', null, String(x.t)), h('td', null, fmt(x.pp)), h('td', null, fmt(x.tg)))))));
+    }
+    if (st.log?.length && (st.running || st.error)) body.append(h('pre.bench-log', null, st.log.slice(-6).join('\n')));
+  };
+  const poll = async () => {
+    let st; try { st = await api('/api/bench'); } catch { return; }
+    draw(st);
+    if (st.running) timer = setTimeout(poll, 1000);
+    else { goBtn.disabled = false; goBtn.textContent = 'Medir de novo'; if (st.result) { loadModels(); try { S.llama = await api('/api/llama'); } catch { /* ok */ } } }
+  };
+  const goBtn = h('button.btn.primary', { onclick: async () => {
+    try { started = true; goBtn.disabled = true; draw(await api('/api/bench/start', { id: m.id })); poll(); } catch (e) { toast(e.message, 'err'); goBtn.disabled = false; }
+  } }, 'Começar');
+  draw(null);
+  api('/api/bench').then((st) => { if (st.running) { started = true; goBtn.disabled = true; poll(); } }).catch(() => {});
+  const md = modal({ title: `Otimizar ${m.name} para o seu PC`, wide: true, body: [body],
+    onClose: () => clearTimeout(timer),
+    foot: [h('button.btn', { onclick: async () => { const st = await api('/api/bench').catch(() => ({})); if (st.running && await confirmBox('Parar a medição?', 'Parar', true)) await api('/api/bench/cancel', {}); md.close(); } }, 'Fechar'), goBtn] });
+}
+
 async function saveModels(list) {
   try { S.models = await api('/api/models', { models: list }); } catch (e) { toast(e.message, 'err'); return; }
   drawModels(); updatePickers();
@@ -3807,7 +4000,7 @@ async function checkHealth() {
     try { const r = await fetch('/health'); status = r.ok ? 'ok' : r.status === 503 ? 'loading' : 'offline'; } catch { status = 'offline'; }
   }
   if (status === 'ok' && !S.model) {
-    try { const p = await (await fetch('/props')).json(); S.model = p.model_path || p.model_alias || ''; S.vision = !!(p.modalities?.vision); S.nCtx = p.default_generation_settings?.n_ctx || p.n_ctx || 0; drawCtxMeter(); } catch { /* ok */ }
+    try { const p = await (await fetch('/props')).json(); S.model = p.model_path || p.model_alias || ''; S.vision = !!(p.modalities?.vision); S.nCtx = p.default_generation_settings?.n_ctx || p.n_ctx || 0; S.nSlots = p.total_slots || 1; drawCtxMeter(); } catch { /* ok */ }
     if (!S.model) { try { const m = await (await fetch('/v1/models')).json(); S.model = m.data?.[0]?.id || ''; } catch { /* ok */ } }
   }
   if (status !== 'ok') S.model = '';
@@ -3979,6 +4172,7 @@ async function init() {
   $('#pick-mcp').addEventListener('click', () => togglePop('#pop-mcp', fillMcpPop));
   $('#pick-ws').addEventListener('click', () => togglePop('#pop-ws', fillWsPop));
   $('#ctx-meter').addEventListener('click', () => togglePop('#pop-ctx', fillCtxPop));
+  $('#pick-think').addEventListener('click', () => togglePop('#pop-think', fillThinkPop));
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && running(cur()) && S.view === 'chat' && !$('#modal-root').childElementCount && !mention) stop();
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); $('#search').focus(); $('#search').select(); }

@@ -127,6 +127,11 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/props", any(proxy))
         .route("/health", any(proxy))
         .route("/slots", any(proxy))
+        .route("/slots/{*rest}", any(proxy))
+        .route("/api/kvcache/prune", post(kv_prune))
+        .route("/api/bench", get(bench_status))
+        .route("/api/bench/start", post(bench_start))
+        .route("/api/bench/cancel", post(bench_cancel))
         .route("/tokenize", any(proxy))
         .route("/detokenize", any(proxy))
         .route("/apply-template", any(proxy))
@@ -925,4 +930,45 @@ async fn engines_cancel(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     crate::engines::cancel(st(&v, "id"));
     ok(crate::engines::list(&app, false).await)
+}
+
+// ---------------------------------------------------------------- cache das conversas em disco
+
+/// Apaga os caches de conversa mais antigos (mantém `keep`) e os de `drop` (conversas apagadas).
+async fn kv_prune(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let keep = v["keep"].as_u64().unwrap_or(6) as usize;
+    let drop_ids = strs(&v, "drop");
+    let dir = app.llama.kv_dir.clone();
+    let mut files: Vec<(std::time::SystemTime, std::path::PathBuf, u64)> = std::fs::read_dir(&dir)
+        .map(|rd| rd.flatten().filter_map(|e| { let m = e.metadata().ok()?; Some((m.modified().ok()?, e.path(), m.len())) }).collect())
+        .unwrap_or_default();
+    files.sort_by(|a, b| b.0.cmp(&a.0));
+    let mut removed = 0;
+    for (i, (_, p, _)) in files.iter().enumerate() {
+        let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        if i >= keep || drop_ids.iter().any(|d| !d.is_empty() && name.starts_with(d.as_str())) {
+            if std::fs::remove_file(p).is_ok() {
+                removed += 1;
+            }
+        }
+    }
+    let total: u64 = files.iter().map(|f| f.2).sum();
+    ok(json!({"removed": removed, "files": files.len(), "bytes": total}))
+}
+
+// ---------------------------------------------------------------- otimizar para o PC
+
+async fn bench_status() -> Res {
+    ok(crate::bench::status())
+}
+
+async fn bench_start(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    crate::bench::start(&app, st(&v, "id")).map(ok).map_err(bad)?
+}
+
+async fn bench_cancel() -> Res {
+    crate::bench::cancel();
+    ok(crate::bench::status())
 }

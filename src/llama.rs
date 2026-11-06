@@ -71,6 +71,8 @@ struct LogBuf {
 pub struct Llama {
     file: PathBuf,
     studio_page: PathBuf,
+    /// onde o llama-server guarda o cache de cada conversa (--slot-save-path)
+    pub kv_dir: PathBuf,
     pub cfg: RwLock<LlamaCfg>,
     kill: Mutex<Option<oneshot::Sender<()>>>,
     running: std::sync::atomic::AtomicBool,
@@ -82,7 +84,7 @@ pub struct Llama {
 }
 
 impl Llama {
-    pub fn new(llama_dir: &Path, app_dir: &Path) -> Self {
+    pub fn new(llama_dir: &Path, app_dir: &Path, root: &Path) -> Self {
         let file = llama_dir.join("llama-gui.json");
         let mut cfg = LlamaCfg::defaults(llama_dir);
         if let Some(v) = crate::app::read_json::<Value>(&file) {
@@ -102,6 +104,7 @@ impl Llama {
         Llama {
             file,
             studio_page: app_dir.join("llama-path"),
+            kv_dir: root.join("kvcache"),
             cfg: RwLock::new(cfg),
             kill: Mutex::new(None),
             running: false.into(),
@@ -149,21 +152,50 @@ impl Llama {
     }
 
     pub fn args_string(&self) -> String {
+        self.args_for(None).0
+    }
+
+    /// Monta os argumentos. Com `help` (saída do --help do motor), tira o que o motor não aceita
+    /// (ex.: opções novas do llama.cpp no ik_llama.cpp) e devolve o que foi ignorado.
+    fn args_for(&self, help: Option<&Help>) -> (String, Vec<String>) {
         let c = self.cfg();
+        let has = |f: &str| help.map(|h| h.flags.contains(f)).unwrap_or(true);
         let mut a = vec![format!("-m \"{}\"", c.model), format!("--host {} --port {}", c.bind_host, c.port), format!("-c {}", c.context)];
         if c.cpu_moe > 0 {
-            a.push(format!("--n-cpu-moe {}", c.cpu_moe));
+            if has("--n-cpu-moe") {
+                a.push(format!("--n-cpu-moe {}", c.cpu_moe));
+            } else if has("-ncmoe") {
+                a.push(format!("-ncmoe {}", c.cpu_moe));
+            } else {
+                // equivalente com -ot: especialistas das N primeiras camadas na CPU
+                let layers: Vec<String> = (0..c.cpu_moe).map(|i| i.to_string()).collect();
+                a.push(format!("-ot \"blk\\.({})\\.ffn_(up|down|gate)_exps.*=CPU\"", layers.join("|")));
+            }
         }
         if c.threads > 0 {
             a.push(format!("-t {}", c.threads));
         }
+        let mut dropped = vec![];
         if !c.extra_args.trim().is_empty() {
-            a.push(c.extra_args.trim().to_string());
+            match help {
+                Some(h) => {
+                    let (kept, d) = filter_args(&c.extra_args, h);
+                    dropped = d;
+                    if !kept.is_empty() {
+                        a.push(kept);
+                    }
+                }
+                None => a.push(c.extra_args.trim().to_string()),
+            }
         }
-        if self.studio_page.is_dir() && !c.extra_args.contains("--path") {
+        if self.studio_page.is_dir() && !c.extra_args.contains("--path") && has("--path") {
             a.push(format!("--path \"{}\"", self.studio_page.display()));
         }
-        a.join(" ")
+        if !c.extra_args.contains("--slot-save-path") && help.is_some_and(|h| h.flags.contains("--slot-save-path")) {
+            let _ = std::fs::create_dir_all(&self.kv_dir);
+            a.push(format!("--slot-save-path \"{}\"", self.kv_dir.display()));
+        }
+        (a.join(" "), dropped)
     }
 
     pub fn command_line(&self) -> String {
@@ -210,7 +242,11 @@ impl Llama {
                 return Err(format!("Já existe um llama-server (ou outro programa) usando a porta {}. O studio usa esse; para iniciar pelo studio, feche o outro antes.", c.port));
             }
         }
-        let args = self.args_string();
+        let help = engine_help(&c.server_exe);
+        let (args, dropped) = self.args_for(help.as_ref());
+        if !dropped.is_empty() {
+            self.push_log(format!("Ignorado (este motor não aceita): {}", dropped.join(" ")));
+        }
         self.push_log(format!("Iniciando: \"{}\" {}", c.server_exe, args));
         let mut cmd = tokio::process::Command::new(&c.server_exe);
         #[cfg(windows)]
@@ -321,30 +357,150 @@ fn sticky(s: String) -> &'static str {
     }
 }
 
-/// Divide uma linha de comando respeitando aspas (só fora do Windows).
-#[cfg(not(windows))]
-fn split_args(s: &str) -> Vec<String> {
-    let mut out = vec![];
-    let mut cur = String::new();
-    let mut quote = false;
-    let mut has = false;
-    for ch in s.chars() {
-        match ch {
-            '"' => {
-                quote = !quote;
-                has = true;
-            }
-            c if c.is_whitespace() && !quote => {
-                if has || !cur.is_empty() {
-                    out.push(std::mem::take(&mut cur));
-                    has = false;
-                }
-            }
-            c => cur.push(c),
+
+// ---------------------------------------------------------------- compatibilidade de argumentos entre motores
+
+pub struct Help {
+    pub flags: std::collections::HashSet<String>,
+    /// opções que aceitam valor on|off|auto (o -fa no llama.cpp novo; no ik_llama é só -fa)
+    fa_takes_value: bool,
+}
+
+static HELP: Mutex<Option<std::collections::HashMap<String, (u64, Option<std::sync::Arc<Help>>)>>> = Mutex::new(None);
+
+/// Lê (e guarda) as opções que o llama-server aceita, pelo --help.
+pub fn engine_help(exe: &str) -> Option<Help> {
+    let mtime = std::fs::metadata(exe).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
+    if let Some((t, h)) = HELP.lock().unwrap().as_ref().and_then(|m| m.get(exe)) {
+        if *t == mtime {
+            return h.as_ref().map(|h| Help { flags: h.flags.clone(), fa_takes_value: h.fa_takes_value });
         }
     }
-    if has || !cur.is_empty() {
+    let mut c = std::process::Command::new(exe);
+    c.arg("--help").stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        c.creation_flags(crate::CREATE_NO_WINDOW);
+    }
+    let parsed = (|| {
+        let mut child = c.spawn().ok()?;
+        let t0 = std::time::Instant::now();
+        loop {
+            if child.try_wait().ok()?.is_some() {
+                break;
+            }
+            if t0.elapsed() > Duration::from_secs(15) {
+                let _ = child.kill();
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let o = child.wait_with_output().ok()?;
+        let text = format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+        let re = regex_lite::Regex::new(r"(?m)(?:^|[\s,])(--?[a-zA-Z][a-zA-Z0-9-]*)").unwrap();
+        let flags: std::collections::HashSet<String> = re.captures_iter(&text).map(|m| m[1].to_string()).collect();
+        if flags.len() < 30 {
+            return None; // não parece um --help de verdade: não filtra nada
+        }
+        let fa_line = text.lines().find(|l| l.contains("-fa,") || l.contains("--flash-attn")).unwrap_or("");
+        let fa_takes_value = fa_line.contains("on") && (fa_line.contains("off") || fa_line.contains("auto"));
+        Some(Help { flags, fa_takes_value })
+    })();
+    let stored = parsed.as_ref().map(|h| std::sync::Arc::new(Help { flags: h.flags.clone(), fa_takes_value: h.fa_takes_value }));
+    HELP.lock().unwrap().get_or_insert_with(Default::default).insert(exe.to_string(), (mtime, stored));
+    parsed
+}
+
+/// Divide uma linha de comando respeitando aspas (e \" dentro delas).
+pub fn split_args(s: &str) -> Vec<String> {
+    let mut out = vec![];
+    let mut cur = String::new();
+    let mut quote: Option<char> = None;
+    let mut started = false;
+    let mut it = s.chars().peekable();
+    while let Some(ch) = it.next() {
+        match quote {
+            Some('"') if ch == '\\' && it.peek() == Some(&'"') => {
+                it.next();
+                cur.push('"');
+            }
+            Some(q) if ch == q => quote = None,
+            Some(_) => cur.push(ch),
+            None if ch == '"' || ch == '\'' => {
+                quote = Some(ch);
+                started = true;
+            }
+            None if ch.is_whitespace() => {
+                if started || !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                    started = false;
+                }
+            }
+            None => cur.push(ch),
+        }
+    }
+    if started || !cur.is_empty() {
         out.push(cur);
     }
     out
+}
+
+pub fn quote_arg(a: &str) -> String {
+    if a.is_empty() || a.contains(char::is_whitespace) || a.contains('"') {
+        format!("\"{}\"", a.replace('"', "\\\""))
+    } else {
+        a.to_string()
+    }
+}
+
+fn is_flag(t: &str) -> bool {
+    t.starts_with('-') && t.len() > 1 && !t[1..].starts_with(|c: char| c.is_ascii_digit() || c == '.')
+}
+
+/// Tira as opções que o motor não conhece (com o valor delas).
+fn filter_args(extra: &str, h: &Help) -> (String, Vec<String>) {
+    let toks = split_args(extra);
+    let mut kept = vec![];
+    let mut dropped = vec![];
+    let mut i = 0;
+    while i < toks.len() {
+        let t = &toks[i];
+        let flag = t.split('=').next().unwrap_or(t);
+        let has_value = i + 1 < toks.len() && !is_flag(&toks[i + 1]) && !t.contains('=');
+        if is_flag(t) && !h.flags.contains(flag) {
+            dropped.push(t.clone());
+            if has_value {
+                dropped.push(toks[i + 1].clone());
+                i += 1;
+            }
+        } else if (flag == "-fa" || flag == "--flash-attn") && !h.fa_takes_value {
+            // ik_llama.cpp: -fa sem valor
+            let v = if has_value { toks[i + 1].to_lowercase() } else { String::new() };
+            if matches!(v.as_str(), "on" | "off" | "auto" | "1" | "0" | "true" | "false") {
+                i += 1;
+            }
+            if v != "off" && v != "0" && v != "false" {
+                kept.push(flag.to_string());
+            }
+        } else {
+            kept.push(quote_arg(t));
+        }
+        i += 1;
+    }
+    (kept.join(" "), dropped)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filtra_para_motor_antigo() {
+        let flags: std::collections::HashSet<String> = ["-ngl", "-fa", "-b", "-ub", "--jinja", "--temp", "-ctk", "-ctv"].iter().map(|s| s.to_string()).collect();
+        let h = Help { flags, fa_takes_value: false };
+        let (k, d) = filter_args("-ngl 99 -fa on -ctk q8_0 --kv-unified --ctx-checkpoints 32 --jinja --reasoning-budget-message \"I have to answer now.\" --temp 0.6", &h);
+        assert_eq!(k, "-ngl 99 -fa -ctk q8_0 --jinja --temp 0.6");
+        assert_eq!(d, vec!["--kv-unified", "--ctx-checkpoints", "32", "--reasoning-budget-message", "I have to answer now."]);
+    }
 }
