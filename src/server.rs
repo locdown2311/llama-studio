@@ -129,6 +129,9 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/slots", any(proxy))
         .route("/slots/{*rest}", any(proxy))
         .route("/api/kvcache/prune", post(kv_prune))
+        .route("/api/checkpoints", post(cp_list))
+        .route("/api/checkpoints/undo", post(cp_undo))
+        .route("/api/checkpoints/prune", post(cp_prune))
         .route("/api/bench", get(bench_status))
         .route("/api/bench/start", post(bench_start))
         .route("/api/bench/cancel", post(bench_cancel))
@@ -762,7 +765,17 @@ async fn tools_call(State(app): S, b: Bytes) -> Res {
         Some(a) => a.clone(),
         None => json!({}),
     };
-    let r = tools::call(&app, ws_of(&app, st(&v, "ws")), st(&v, "name"), args, &strs(&v, "allow")).await;
+    let ws = ws_of(&app, st(&v, "ws"));
+    let name = st(&v, "name");
+    // ponto de restauração antes de mexer em arquivo
+    if matches!(name, "write_file" | "edit_file" | "create_directory") && !st(&v, "cp").is_empty() {
+        if let Ok(file) = tools::resolve_write(&ws, args.get("path").and_then(Value::as_str).unwrap_or("")) {
+            if let Err(e) = crate::checkpoint::snapshot(&app, st(&v, "conv"), st(&v, "cp"), &file) {
+                eprintln!("ponto de restauração: {e}");
+            }
+        }
+    }
+    let r = tools::call(&app, ws, name, args, &strs(&v, "allow")).await;
     ok(json!({"content": r.content, "isError": r.is_error, "images": r.images}))
 }
 
@@ -935,6 +948,28 @@ async fn engines_cancel(State(app): S, b: Bytes) -> Res {
 // ---------------------------------------------------------------- cache das conversas em disco
 
 /// Apaga os caches de conversa mais antigos (mantém `keep`) e os de `drop` (conversas apagadas).
+async fn cp_list(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    ok(crate::checkpoint::list(&app, st(&v, "conv")))
+}
+
+async fn cp_undo(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    ok(crate::checkpoint::undo(&app, st(&v, "conv"), &strs(&v, "ids")))
+}
+
+/// {forget: [conversas]} apaga os pontos delas; {keep: [conversas]} apaga os das outras.
+async fn cp_prune(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    for c in strs(&v, "forget") {
+        crate::checkpoint::forget(&app, &c);
+    }
+    if v.get("keep").is_some() {
+        crate::checkpoint::prune(&app, &strs(&v, "keep"));
+    }
+    ok(json!({"ok": true}))
+}
+
 async fn kv_prune(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     let keep = v["keep"].as_u64().unwrap_or(6) as usize;

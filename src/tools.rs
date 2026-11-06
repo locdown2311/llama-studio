@@ -546,7 +546,7 @@ fn resolve_read(app: &App, ws: &Path, p: &str, allow: &[PathBuf]) -> Result<Path
     Err(format!("Acesso negado: \"{p}\" está fora da pasta de trabalho ({}).", ws.display()))
 }
 
-fn resolve_write(ws: &Path, p: &str) -> Result<PathBuf, String> {
+pub(crate) fn resolve_write(ws: &Path, p: &str) -> Result<PathBuf, String> {
     let full = resolve(ws, p);
     if !is_inside(ws, &full) || app::normalize(&full) == app::normalize(ws) {
         return Err(format!("Só posso escrever dentro da pasta de trabalho ({}).", ws.display()));

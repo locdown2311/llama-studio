@@ -422,7 +422,7 @@ function newConv(projectId) {
   const personaId = S.draftPersona !== undefined ? S.draftPersona : (proj?.personaId || S.settings.defaultPersona || null);
   S.draftPersona = undefined;
   const modelId = S.draftModel; S.draftModel = undefined;
-  const c = { id: uid(), title: 'Nova conversa', messages: [], createdAt: Date.now(), updatedAt: Date.now(), autoApprove: false, projectId: proj ? proj.id : null, personaId, modelId: modelId || null, think: S.draftThink || undefined };
+  const c = { id: uid(), title: 'Nova conversa', messages: [], createdAt: Date.now(), updatedAt: Date.now(), autoApprove: false, projectId: proj ? proj.id : null, personaId, modelId: modelId || null, think: S.draftThink || undefined, plan: S.draftPlan || undefined };
   if (proj) { proj.open = true; saveProjects(); }
   S.convs.unshift(c);
   S.curId = c.id;
@@ -449,6 +449,7 @@ async function deleteConv(c) {
   if (S.curId === c.id) S.curId = S.convs[0]?.id || null;
   saveConvs(); renderConvList(); renderChat();
   api('/api/kvcache/prune', { keep: 6, drop: [c.id] }).catch(() => {});
+  api('/api/checkpoints/prune', { forget: [c.id] }).catch(() => {});
 }
 
 function convRow(c, nested) {
@@ -839,7 +840,25 @@ function renderUser(m, idx, conv) {
     bubble,
     h('div.chips', null,
       h('button.chip', { onclick: () => navigator.clipboard.writeText(m.content || '').then(() => toast('Copiado')) }, ic('copy'), 'Copiar'),
-      h('button.chip', { onclick: () => editFrom(conv, idx) }, ic('edit'), 'Editar')));
+      h('button.chip', { onclick: () => editFrom(conv, idx) }, ic('edit'), 'Editar'),
+      conv.messages.slice(idx + 1).some((x) => x.role === 'tool' && x.cps?.length && !x.undone)
+        ? h('button.chip', { title: 'Desfaz as alterações de arquivo feitas depois desta mensagem e volta a conversa até aqui', onclick: () => rewindTo(conv, idx) }, ic('history'), 'Voltar até aqui') : null));
+}
+
+async function rewindTo(conv, idx) {
+  if (running(conv)) return;
+  const later = conv.messages.slice(idx + 1).filter((x) => x.role === 'tool' && x.cps?.length && !x.undone);
+  const files = new Set(later.flatMap((m) => { const a = parseArgs(conv.messages.find((x) => x.tool_calls?.some((t) => t.id === m.tool_call_id))?.tool_calls.find((t) => t.id === m.tool_call_id)?.function.arguments); return a?.path ? [a.path] : []; }));
+  const cmds = conv.messages.slice(idx + 1).some((x) => x.role === 'tool' && ['run_command', 'execute_code'].includes(x.name) && x.status === 'ok');
+  const ok = await confirmBox(`Desfazer ${later.length === 1 ? 'a alteração' : `as ${later.length} alterações`} em ${files.size === 1 ? 'arquivo' : `${files.size || ''} arquivos`} feitas depois desta mensagem e voltar a conversa até aqui? A mensagem volta para a caixa de texto.`
+    + (cmds ? ' Comandos e códigos executados não são desfeitos.' : ''), 'Voltar até aqui', true);
+  if (!ok) return;
+  try {
+    const r = await undoTools(conv, later);
+    if (r.errors.length) { toast('Alguns arquivos não voltaram: ' + r.errors.map((x) => `${basename(String(x.path))} (${x.error})`).join('; ')); renderMessages(); return; }
+    toast(`${r.done.length} ${r.done.length === 1 ? 'alteração desfeita' : 'alterações desfeitas'}`);
+  } catch (e) { toast('Erro: ' + e.message); return; }
+  editFrom(conv, idx);
 }
 
 function editFrom(conv, idx) {
@@ -927,6 +946,7 @@ function renderAI(b, conv, isLast) {
     card,
     !live ? h('div.chips', null,
       h('button.chip', { onclick: () => navigator.clipboard.writeText(finalText).then(() => toast('Resposta copiada')) }, ic('copy'), 'Copiar'),
+      isLast && planPending(conv, b) ? h('button.chip.primary', { onclick: () => runPlan(conv) }, ic('play'), 'Executar o plano') : null,
       isLast ? h('button.chip', { onclick: () => { conv.messages.splice(b.start); runAgent(conv); } }, ic('refresh'), 'Tentar novamente') : null,
       isLast && toolCount ? h('button.chip', { onclick: (e) => { $$('.tool', e.currentTarget.closest('.msg-ai')).forEach((t) => { t.classList.add('open'); S.openTools.add(t.dataset.id); }); } }, ic('list'), 'Expandir ferramentas') : null) : null);
 }
@@ -1047,6 +1067,20 @@ function renderTool(tc, res, live) {
     bodyEl.append(h('div.tool-sec', null, h('div.tool-sec-label', null, res.isError ? 'Erro' : 'Resultado', h('span', { style: { marginLeft: 'auto', fontWeight: 400 } }, content.length > 1000 ? fmtSize(content.length) : '')), inner));
   }
 
+  if (res?.cps?.length && (status === 'ok' || status === 'error')) {
+    const conv = S.convs.find((c) => c.messages.includes(res));
+    bodyEl.append(h('div.cp-row', null, ic('history'),
+      h('span', null, res.undone ? 'Alteração desfeita: o arquivo voltou ao estado de antes.' : 'Ponto de restauração guardado antes desta alteração.'),
+      res.undone || !conv ? null : h('button.btn.sm', { onclick: async (e) => {
+        e.currentTarget.disabled = true;
+        try {
+          const r = await undoTools(conv, [res]);
+          if (r.errors.length) toast('Não consegui desfazer: ' + r.errors.map((x) => x.error).join('; '));
+          else toast(r.done.length === 1 ? `Desfeito: ${basename(String(r.done[0].path))}` : `${r.done.length} alterações desfeitas`);
+        } catch (err) { toast('Erro: ' + err.message); }
+        renderMessages();
+      } }, 'Desfazer')));
+  }
   if (res?.audit && status !== 'audit') {
     const a = res.audit;
     bodyEl.append(h('div.audit.r-' + a.risk + (a.approve ? '.ok' : ''), null,
@@ -1318,6 +1352,8 @@ function updatePickers() {
     pers ? `Personalidade: ${pers.name}` : 'Personalidade: nenhuma', !!pers, 0, pers?.color);
   const tk = thinkOf(c);
   iconBtn($('#pick-think'), ic(tk === 'off' ? ('zap' in ICONS ? 'zap' : 'send') : 'brain'), `Raciocínio: ${THINK_OPTS.find((o) => o[0] === tk)[1]}`, tk !== 'auto', 0, tk === 'off' ? '#d99a1e' : 'var(--accent)');
+  const pl = planOf(c);
+  iconBtn($('#pick-plan'), ic('list'), pl ? 'Modo plano: ligado (o modelo só investiga e propõe)' : 'Modo plano: desligado', pl, 0, '#0e9f8a');
   const skNames = act.skills.map((id) => S.skills.find((k) => k.id === id)?.name || id);
   iconBtn($('#pick-skills'), ic('sparkles'), nSk ? `Habilidades: ${skNames.join(', ') || nSk}` : 'Habilidades: nenhuma', nSk > 0, nSk, 'var(--skill)');
   iconBtn($('#pick-mcp'), ic('plug'), nMcp ? `Conectores: ${act.mcp.join(', ') || nMcp}` : 'Conectores: nenhum', nMcp > 0, nMcp, 'var(--mcp)');
@@ -1647,7 +1683,7 @@ function editorEmpty() { return !readEditor().length; }
 
 async function submit(conv, item) {
   const { content, parts, refs } = item;
-  conv.messages.push({ role: 'user', content, parts, refs, ts: Date.now() });
+  conv.messages.push({ role: 'user', content, parts, refs, ts: Date.now(), ...(conv.plan ? { plan: true } : {}) });
   if (conv.title === 'Nova conversa') {
     const plain = parts.filter((p) => p.t === 'text').map((p) => p.v).join(' ').replace(/\s+/g, ' ').trim();
     conv.title = (plain || parts.map((p) => p.name).filter(Boolean).join(', ')).slice(0, 60);
@@ -1820,7 +1856,7 @@ function apiMessages(conv, system) {
       else out.push({ role: 'user', content: m.content + ' [imagem omitida do histórico]' });
       continue;
     }
-    if (m.role === 'user') out.push({ role: 'user', content: userContent(m) });
+    if (m.role === 'user') out.push({ role: 'user', content: userContent(m) + (m.plan ? PLAN_NOTE : '') });
     else if (m.role === 'assistant') {
       const text = splitThink(m.content).text;
       const calls = (m.tool_calls || []).filter((t) => t.function?.name);
@@ -1948,6 +1984,31 @@ const THINK_OPTS = [
   ['on', 'Pensar', 'Raciocina antes de responder. Melhor para tarefas difíceis.'],
   ['off', 'Responder direto', 'Sem raciocínio: bem mais rápido para pedidos simples.'],
 ];
+/* ------------------------------------------------------------ modo plano */
+// O modelo só investiga e escreve um plano; nada é alterado até o usuário aprovar.
+// O aviso vai na mensagem do usuário (e não no prompt de sistema) para não invalidar o cache.
+const PLAN_NOTE = '\n\n[Modo plano] Não altere nada ainda: não escreva nem edite arquivos, não rode comandos e não use ferramentas que mudem algo. '
+  + 'Investigue só com leitura (e subagentes exploradores, se ajudar) e responda com um plano numerado: o que vai mudar, em quais arquivos, em que ordem, os riscos e como verificar. '
+  + 'Termine perguntando se pode executar.';
+function planOf(c) { return c ? !!c.plan : !!S.draftPlan; }
+function togglePlan() {
+  const c = cur();
+  if (c) { c.plan = !c.plan; saveConvs(); } else S.draftPlan = !S.draftPlan;
+  updatePickers();
+  toast(planOf(c) ? 'Modo plano: o modelo investiga e propõe um plano, sem alterar nada' : 'Modo plano desligado');
+}
+/** A resposta em `b` veio de um pedido em modo plano e o plano ainda não foi executado. */
+function planPending(conv, b) {
+  if (!conv.plan) return false;
+  for (let i = b.start - 1; i >= 0; i--) { const m = conv.messages[i]; if (m.role === 'user' && !m.hidden) return !!m.plan; }
+  return false;
+}
+async function runPlan(conv) {
+  conv.plan = false; saveConvs(); updatePickers();
+  const text = 'Plano aprovado. Pode executar.';
+  await submit(conv, { content: text, parts: [{ t: 'text', v: text }], refs: [] });
+}
+
 function thinkOf(c) { return (c ? c.think : S.draftThink) || 'auto'; }
 function requestExtras(conv) {
   const x = {};
@@ -2260,6 +2321,7 @@ async function auditCall(tc, info, conv, signal) {
     `Pasta de trabalho: ${ws || '(nenhuma)'}`,
     `Pedido mais recente do usuário:\n${clip(lastUser ? userContent(lastUser) : '(nenhum)', 2000)}`,
     said ? `O que o agente disse antes da ação:\n${clip(said, 800)}` : '',
+    lastUser?.plan ? 'Atenção: o usuário pediu só um plano (modo plano). Aprove apenas ações que não alteram nada.' : '',
     `Ação proposta: ${name} (ferramenta ${where}${info.mutating ? ', altera algo' : ''})`,
     'Argumentos:\n```json\n' + clip(argText, 6000) + '\n```',
   ].filter(Boolean).join('\n\n');
@@ -2321,6 +2383,8 @@ async function runAgent(conv) {
     ].filter(Boolean).join('\n\n');
     conv.ctxParts = ctxBreakdown(system, ctx.text, catalog, tools, meta);
     const maxSteps = Math.max(1, Number(S.settings.maxSteps) || 30);
+    const lastAsk = [...conv.messages].reverse().find((m) => m.role === 'user' && !m.hidden);
+    const planTurn = !!lastAsk?.plan;
 
     for (let step = 0; step < maxSteps; step++) {
       const msg = { role: 'assistant', content: '', reasoning: '', tool_calls: [], t0: step === 0 ? t0 : Date.now() };
@@ -2341,6 +2405,7 @@ async function runAgent(conv) {
       if (!msg.tool_calls?.length) break;
 
       const parallel = [];
+      const reads = [];
       const images = [];
       let refetch = false;
       for (const tc of msg.tool_calls) {
@@ -2348,6 +2413,15 @@ async function runAgent(conv) {
         const info = meta[tc.function.name] || { source: tc.function.name.includes('__') ? 'mcp' : 'builtin', mutating: true };
         const tmsg = { role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: '', status: 'pending', source: info.source, server: info.server };
         conv.messages.push(tmsg);
+        // leituras vão para a mesma fila paralela dos exploradores; o que altera algo espera elas terminarem
+        if (PARALLEL_READS.has(tc.function.name) && !needsApproval(info, conv) && !shouldAudit(info, conv)) {
+          tmsg.status = 'running'; scheduleRender();
+          const ts = performance.now();
+          reads.push(execTool(tc.function.name, parseArgs(tc.function.arguments) ?? tc.function.arguments, info, tctx, tmsg).then((r) => {
+            tmsg.ms = performance.now() - ts; tmsg.content = r.content; tmsg.isError = r.isError; tmsg.status = r.isError ? 'error' : 'ok'; saveConvs(); scheduleRender();
+          }));
+          continue;
+        }
         if (tc.function.name === 'explore') {
           // subagentes rodam em paralelo (o llama-server atende vários slots)
           tmsg.status = 'running'; scheduleRender();
@@ -2357,14 +2431,24 @@ async function runAgent(conv) {
           }));
           continue;
         }
+        if (reads.length) { await Promise.all(reads); reads.length = 0; }
+        let forceAsk = false;
+        if (planTurn && info.mutating) {
+          if (info.source !== 'mcp') {
+            tmsg.status = 'denied'; tmsg.isError = true;
+            tmsg.content = 'Modo plano: nenhuma alteração é permitida agora. Use só ferramentas de leitura e termine com o plano; o usuário aprova antes de executar.';
+            saveConvs(); scheduleRender(); continue;
+          }
+          forceAsk = true; // conector sem marca de "só leitura": o auditor ou o usuário decide
+        }
         let audited = false;
-        if (shouldAudit(info, conv)) {
+        if (shouldAudit(info, conv) || (forceAsk && S.settings.auditor)) {
           tmsg.status = 'audit'; scheduleRender();
           tmsg.audit = await auditCall(tc, info, conv, ac.signal);
           if (ac.signal.aborted) { tmsg.status = 'denied'; tmsg.content = 'Cancelado pelo usuário.'; throw new DOMException('abort', 'AbortError'); }
           audited = tmsg.audit.approve;
         }
-        if (!audited && (needsApproval(info, conv) || tmsg.audit)) {
+        if (!audited && (needsApproval(info, conv) || tmsg.audit || forceAsk)) {
           tmsg.status = 'approval'; scheduleRender();
           S.waiting.add(conv.id); renderConvList();
           if (conv.id !== S.curId || S.view !== 'chat') toast(`"${conv.title}" está esperando sua permissão`);
@@ -2391,7 +2475,7 @@ async function runAgent(conv) {
         }
         saveConvs(); scheduleRender();
       }
-      if (parallel.length) await Promise.all(parallel);
+      if (parallel.length || reads.length) await Promise.all([...parallel, ...reads]);
       if (images.length && visionOn()) {
         for (const im of images) conv.messages.push({ role: 'user', hidden: true, content: `[Imagem devolvida pela ferramenta ${im.name}]`, _images: im.images });
       }
@@ -2520,6 +2604,26 @@ function enabledGroups() { return TOOL_GROUPS.filter((g) => S.settings.tools[g])
 function visionOn() { return S.settings.vision === 'on' || (S.settings.vision === 'auto' && S.vision); }
 
 /** Executa uma ferramenta: as da interface aqui, as outras no servidor. */
+const FILE_MUT = new Set(['write_file', 'edit_file', 'create_directory']);
+/** Ferramentas só de leitura que podem rodar ao mesmo tempo (no agente e nos exploradores). */
+const PARALLEL_READS = new Set(['read_file', 'list_directory', 'search_files', 'read_skill_file', 'recall_history']);
+
+/** Desfaz as alterações de arquivo das mensagens de ferramenta dadas (da mais nova para a mais antiga). */
+async function undoTools(conv, tmsgs) {
+  const ids = []; const owners = [];
+  for (const m of [...tmsgs].reverse()) {
+    if (!m.cps?.length || m.undone) continue;
+    ids.push(...[...m.cps].reverse()); owners.push(m);
+  }
+  if (!ids.length) return { done: [], errors: [] };
+  const r = await api('/api/checkpoints/undo', { conv: conv.id, ids });
+  const failed = new Set(r.errors.map((e) => e.id));
+  for (const m of owners) if (!m.cps.some((c) => failed.has(c))) m.undone = true;
+  saveConvs();
+  if (wsOf(conv) === S.ws.path) refreshTree();
+  return r;
+}
+
 async function execTool(name, args, info, tctx, tmsg) {
   try {
     if (name === 'execute_code') return await runCode(args?.code ?? '', tctx, tmsg);
@@ -2532,7 +2636,16 @@ async function execTool(name, args, info, tctx, tmsg) {
       tctx.conv.extraTools = [...new Set([...(tctx.conv.extraTools || []), ...r.tools.map((t) => t.name)])];
       return { content: 'Ferramentas ativadas para os próximos passos:\n' + r.tools.map((t) => `- ${t.name} (${t.server}): ${t.description}`).join('\n'), isError: false };
     }
-    const r = await api('/api/tools/call', { name, arguments: typeof args === 'string' ? args : JSON.stringify(args ?? {}), allow: tctx.refs, ws: tctx.ws });
+    const body = { name, arguments: typeof args === 'string' ? args : JSON.stringify(args ?? {}), allow: tctx.refs, ws: tctx.ws };
+    // ponto de restauração: o servidor guarda o arquivo antes de mexer
+    const owner = tmsg?._cpOwner || tmsg;
+    if (FILE_MUT.has(name) && owner?.tool_call_id && tctx.conv) {
+      const cps = (owner.cps ||= []);
+      body.cp = cps.length ? `${owner.tool_call_id}_${cps.length}` : owner.tool_call_id;
+      body.conv = tctx.conv.id;
+      cps.push(body.cp);
+    }
+    const r = await api('/api/tools/call', body);
     return r;
   } catch (e) { return { content: 'Erro: ' + e.message, isError: true }; }
 }
@@ -2601,7 +2714,7 @@ function runCode(code, tctx, tmsg) {
         else {
           const step = { name: m.name, summary: toolSummary(m.name, m.args), status: 'running' };
           tmsg._sub.push(step); scheduleRender();
-          r = await execTool(m.name, m.args, {}, tctx, {});
+          r = await execTool(m.name, m.args, {}, tctx, { _cpOwner: tmsg });
           step.status = r.isError ? 'error' : 'ok'; scheduleRender();
         }
         if (!done) w.postMessage({ t: 'result', id: m.id, content: r.content, error: r.isError ? r.content : null });
@@ -2636,14 +2749,21 @@ async function runExplorer(args, tctx, tmsg) {
     const text = splitThink(m.content).text;
     if (!calls.length) return { content: text.trim() || 'O subagente terminou sem relatório.', isError: false };
     msgs.push({ role: 'assistant', content: text, tool_calls: calls.map((t) => ({ id: t.id, type: 'function', function: { name: t.function.name, arguments: validArgs(t.function.arguments, () => {}) } })) });
-    for (const t of calls) {
+    // leituras do mesmo passo rodam juntas; o navegador (uma página só) vai em ordem
+    const results = new Array(calls.length);
+    const pend = [];
+    for (let i = 0; i < calls.length; i++) {
+      const t = calls[i];
       const a = parseArgs(t.function.arguments) || {};
       const st = { name: t.function.name, summary: toolSummary(t.function.name, a), status: 'running' };
       tmsg._sub.push(st); scheduleRender();
-      const r = only.includes(t.function.name) ? await execTool(t.function.name, a, {}, tctx, {}) : { content: 'Ferramenta não permitida para o explorador.', isError: true };
-      st.status = r.isError ? 'error' : 'ok'; scheduleRender();
-      msgs.push({ role: 'tool', tool_call_id: t.id, content: String(r.content).slice(0, 24000) });
+      const run = () => (only.includes(t.function.name) ? execTool(t.function.name, a, {}, tctx, {}) : Promise.resolve({ content: 'Ferramenta não permitida para o explorador.', isError: true }))
+        .then((r) => { results[i] = r; st.status = r.isError ? 'error' : 'ok'; scheduleRender(); });
+      if (PARALLEL_READS.has(t.function.name)) pend.push(run());
+      else { await Promise.all(pend); pend.length = 0; await run(); }
     }
+    await Promise.all(pend);
+    calls.forEach((t, i) => msgs.push({ role: 'tool', tool_call_id: t.id, content: String(results[i].content).slice(0, 24000) }));
   }
   return { content: 'O subagente não concluiu.', isError: true };
 }
@@ -4379,6 +4499,7 @@ async function init() {
   $('#pick-ws').addEventListener('click', () => togglePop('#pop-ws', fillWsPop));
   $('#ctx-meter').addEventListener('click', () => togglePop('#pop-ctx', fillCtxPop));
   $('#pick-think').addEventListener('click', () => togglePop('#pop-think', fillThinkPop));
+  $('#pick-plan').addEventListener('click', togglePlan);
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && running(cur()) && S.view === 'chat' && !$('#modal-root').childElementCount && !mention) stop();
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); $('#search').focus(); $('#search').select(); }

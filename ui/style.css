@@ -226,6 +226,8 @@ svg { display: block; flex: none; width: 16px; height: 16px; }
 }
 .chip:hover { background: var(--hover); color: var(--text); }
 .chip svg { width: 13px; height: 13px; }
+.chip.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 500; }
+.chip.primary:hover { filter: brightness(1.08); background: var(--accent); color: #fff; }
 .msg-user .chips { opacity: 0; transition: opacity .15s; }
 .msg-user:hover .chips { opacity: 1; }
 
@@ -377,6 +379,9 @@ svg { display: block; flex: none; width: 16px; height: 16px; }
 .approval span { flex: 1; min-width: 180px; }
 .audit { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-top: 1px solid var(--line); font-size: 13px; background: var(--card); }
 .audit + .approval { border-top: 0; }
+.cp-row { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--muted); }
+.cp-row svg { width: 14px; height: 14px; flex: none; }
+.cp-row span { flex: 1; }
 .audit-ico { width: 24px; height: 24px; border-radius: 6px; flex: none; display: grid; place-items: center; background: var(--warn-soft); color: var(--warn); }
 .audit-ico svg { width: 14px; height: 14px; }
 .audit.ok .audit-ico { background: var(--ok-soft); color: var(--ok); }

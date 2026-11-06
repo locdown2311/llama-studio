@@ -7,6 +7,7 @@
 mod app;
 mod bench;
 mod bins;
+mod checkpoint;
 mod compact;
 mod browser;
 mod computer;
