@@ -171,11 +171,38 @@ async fn download(app: &App, url: &str) -> Result<Vec<u8>, String> {
     Ok(body)
 }
 
+/// Confere o SHA-256 do arquivo baixado com o SHA256SUMS.txt da mesma release.
+/// Sem a lista (ou sem a linha do arquivo) não troca nada.
+async fn verify(app: &App, rel: &Value, name: &str, bytes: &[u8]) -> Result<(), String> {
+    let url = asset_url(rel, "SHA256SUMS.txt").ok_or("Esta versão não publica o SHA256SUMS.txt; por segurança não vou instalar sem conferir.")?;
+    let sums = download(app, &url).await?;
+    let want = expected_hash(&String::from_utf8_lossy(&sums), name).ok_or(format!("O SHA256SUMS.txt não tem a linha do {name}; não vou instalar sem conferir."))?;
+    let got = sha256_hex(bytes);
+    if got != want {
+        return Err(format!("O {name} baixado não confere com o SHA256SUMS.txt (esperado {want}, veio {got}). Nada foi trocado; tente de novo."));
+    }
+    Ok(())
+}
+
+fn expected_hash(sums: &str, name: &str) -> Option<String> {
+    sums.lines().find_map(|l| {
+        let mut it = l.trim().trim_start_matches('\u{feff}').split_whitespace();
+        let (h, f) = (it.next()?, it.next()?);
+        (f.trim_start_matches('*').eq_ignore_ascii_case(name) && h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit())).then(|| h.to_lowercase())
+    })
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// Baixa e aplica a interface nova (não precisa reiniciar).
 pub async fn apply_ui(app: &App) -> Result<String, String> {
     let rel = latest_release(app).await?;
     let url = asset_url(&rel, "ui.zip").ok_or("Esta versão não tem ui.zip.")?;
     let bytes = download(app, &url).await?;
+    verify(app, &rel, "ui.zip", &bytes).await?;
     let dir = ui_dir(app);
     let tmp = app.root.join("ui.novo");
     let _ = std::fs::remove_dir_all(&tmp);
@@ -217,6 +244,7 @@ pub async fn apply_exe(app: &App) -> Result<(), String> {
     if bytes.len() < 1_000_000 || &bytes[..2] != b"MZ" {
         return Err("O arquivo baixado não parece um executável válido.".into());
     }
+    verify(app, &rel, "llama-studio.exe", &bytes).await?;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let dir = exe.parent().unwrap_or(Path::new("."));
     let new = dir.join("llama-studio.novo.exe");
@@ -255,5 +283,19 @@ pub fn cleanup() {
             let _ = std::fs::remove_file(dir.join("llama-studio.antigo.exe"));
             let _ = std::fs::remove_file(dir.join("llama-studio.novo.exe"));
         }
+    }
+}
+
+#[cfg(test)]
+mod t {
+    use super::*;
+    #[test]
+    fn confere_hash() {
+        let h = sha256_hex(b"abc");
+        assert_eq!(h, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        let sums = format!("\u{feff}{}  llama-studio.exe\r\n{h}  ui.zip\r\n", "0".repeat(64));
+        assert_eq!(expected_hash(&sums, "ui.zip").as_deref(), Some(h.as_str()));
+        assert_eq!(expected_hash(&sums, "llama-studio.exe").unwrap(), "0".repeat(64));
+        assert!(expected_hash(&sums, "outro.exe").is_none());
     }
 }

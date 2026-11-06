@@ -64,7 +64,7 @@ O instalador não pede administrador: instala em `%LOCALAPPDATA%\Programs\Llama 
 - **Hipótese testada**: o botão Testar de um cartão abre uma conversa que testa a hipótese no debugger e grava no cartão se foi confirmada ou descartada, com a evidência.
 - **Assinaturas de funções**: os bytes de uma função identificada (com curingas em chamadas, saltos e endereços) viram uma assinatura; num binário novo, o studio acha as funções conhecidas e cria os cartões. Sem o modelo.
 - **Habilidade a partir da conversa**: transforma uma conversa que deu certo num `SKILL.md` para revisar e salvar.
-- **Aprovação de ações** que alteram algo (sempre, só escrita ou nunca).
+- **Aprovação de ações** que alteram algo (sempre, só o que altera ou nunca). Vale também para os conectores: ferramentas que escrevem, apagam, enviam ou executam (pela anotação do servidor ou pelo nome) pedem confirmação; leituras não. Dá para marcar um conector como confiável.
 - **Auditor de ações**: um subagente lê cada ação que pediria permissão junto com o seu pedido, avalia o risco segundo uma política editável e aprova sozinho o que é seguro. O resto chega para você com a análise dele.
 
 ### Conversas
@@ -122,8 +122,8 @@ No sistema, o programa roda com prioridade abaixo do normal e no modo EcoQoS do 
 Cada release publica:
 
 - `llama-studio-setup-X.Y.Z.exe`: o instalador completo.
-- `llama-studio.exe`: o programa. O app baixa, troca o executável e reinicia.
-- `ui.zip`: só a interface. O app instala em `dados\ui` e recarrega, sem reiniciar.
+- `llama-studio.exe`: o programa. O app baixa, confere o SHA-256 com o `SHA256SUMS.txt` da release, troca o executável e reinicia.
+- `ui.zip`: só a interface, também conferida pelo `SHA256SUMS.txt`. O app instala em `dados\ui` e recarrega, sem reiniciar.
 
 Uma interface nova só é aplicada se o executável for compatível: o `ui/min-exe.txt` diz a versão mínima que ela exige.
 

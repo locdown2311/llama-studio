@@ -1243,6 +1243,7 @@ function renderTool(tc, res, live) {
         : name.startsWith('browser_') ? 'Permitir que o modelo execute código na página aberta?'
         : 'Permitir que o modelo altere arquivos no espaço de trabalho?'),
       h('button.btn.sm.danger', { onclick: () => answer('deny') }, 'Negar'),
+      source === 'mcp' && server ? h('button.btn.sm', { title: `Não pedir mais confirmação para as ferramentas do ${server} (dá para desfazer em Conectores)`, onclick: () => { trustMcp(server, true); answer('allow'); toast(`Confiando no conector ${server}`); } }, `Confiar no ${server}`) : null,
       h('button.btn.sm', { onclick: () => answer('always') }, 'Sempre nesta conversa'),
       h('button.btn.sm.primary', { onclick: () => answer('allow') }, 'Permitir')));
   }
@@ -2941,7 +2942,15 @@ function needsApproval(info, conv) {
   const mode = S.settings.approval;
   if (mode === 'never' || conv.autoApprove) return false;
   if (mode === 'all') return true;
+  // conectores também: o que altera algo (pela anotação do servidor ou pelo nome: write_, delete_,
+  // Execute..., Set...) pede confirmação, a não ser que você confie no conector
+  if (info.source === 'mcp') return !!info.mutating && !(S.settings.trustedMcp || []).includes(info.server);
   return (info.source === 'builtin' || info.source === 'client') && info.mutating;
+}
+function trustMcp(name, on) {
+  const set = new Set(S.settings.trustedMcp || []);
+  if (on) set.add(name); else set.delete(name);
+  S.settings.trustedMcp = [...set]; store.set('settings', S.settings);
 }
 
 function waitApproval(id, signal) {
@@ -3961,6 +3970,7 @@ function drawMcpList() {
           h('div.srv-cmd', { title: cmdLine(s.config || {}) }, cmdLine(s.config || {}))),
         h('div.srv-status', null, h('span.dot.' + st.dot), s.status === 'connected' ? (s.hidden?.length ? `${s.tools.length - s.tools.filter((t) => s.hidden.includes(t.name)).length} de ${s.tools.length} ferramentas` : `${s.tools.length} ferramentas`) : s.status === 'connecting' && s.since ? `conectando... ${Math.max(0, Math.round((Date.now() - s.since) / 1000))} s` : st.label),
         h('div.srv-actions', null,
+          (() => { const on = (S.settings.trustedMcp || []).includes(s.name); return h('button.icon-btn.sm' + (on ? '.on' : ''), { title: on ? 'Confiável: as ferramentas que alteram algo rodam sem pedir confirmação. Clique para voltar a pedir.' : 'Pede confirmação antes das ferramentas que alteram algo. Clique para confiar neste conector.', 'aria-label': 'Confiar no conector', html: svg('shield'), onclick: () => { trustMcp(s.name, !on); drawMcpList(); toast(on ? `${s.name}: volta a pedir confirmação` : `${s.name}: confiável`); } }); })(),
           h('button.icon-btn.sm', { title: 'Reconectar', 'aria-label': 'Reconectar', html: svg('refresh'), onclick: async () => { s.status = 'connecting'; drawMcpList(); try { await api('/api/mcp/reconnect', { name: s.name }); } catch (e) { toast(e.message, 'err'); } loadMcp(); } }),
           h('button.icon-btn.sm', { title: 'Editar', 'aria-label': 'Editar', html: svg('edit'), onclick: () => editServer(s.name, s.config) }),
           h('button.icon-btn.sm', { title: 'Remover', 'aria-label': 'Remover', html: svg('trash'), onclick: async () => {
@@ -4217,7 +4227,7 @@ function renderSettings() {
         field('Passos com ferramentas por resposta', input('input.input', { value: st.maxSteps, inputmode: 'numeric' }, (x) => put({ maxSteps: Number(x.value) || 30 })), 'O modelo para depois disso e pede para continuar.'),
         field('Passos de cada subagente', input('input.input', { value: st.explorerSteps, inputmode: 'numeric' }, (x) => put({ explorerSteps: Number(x.value) || 20 }))))),
     section('safety', 'Segurança', 'Quando o studio pede sua permissão antes de agir.',
-      field('Pedir confirmação antes de', seg([['writes', 'Alterar arquivos'], ['all', 'Qualquer ferramenta'], ['never', 'Nunca perguntar']], st.approval, (v) => put({ approval: v }))),
+      field('Pedir confirmação antes de', seg([['writes', 'O que altera algo'], ['all', 'Qualquer ferramenta'], ['never', 'Nunca perguntar']], st.approval, (v) => put({ approval: v }))),
       auditorSection()),
     section('context', 'Contexto', 'O que fazer quando a conversa fica longa demais para o modelo.',
       sw('Pré-leitura da pasta de trabalho', 'O modelo recebe um mapa curto da pasta (estrutura, tipos de arquivo, README) no começo da conversa, sem gastar chamadas de ferramenta. Montado sem o modelo.', st.projMap === true, (v) => put({ projMap: v })),

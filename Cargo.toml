@@ -1,6 +1,6 @@
 [package]
 name = "llama-studio"
-version = "2.24.2"
+version = "2.25.0"
 edition = "2021"
 description = "Interface local para o llama-server com pasta de trabalho, habilidades e conectores MCP"
 
@@ -9,6 +9,7 @@ default = ["desktop"]
 desktop = ["dep:wry", "dep:tao", "dep:tray-icon"]
 
 [dependencies]
+sha2 = "0.10"
 tokio = { version = "1.54", features = ["rt", "macros", "net", "process", "io-util", "fs", "time", "sync"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
 reqwest = { version = "0.13", default-features = false, features = ["native-tls", "stream", "http2"] }

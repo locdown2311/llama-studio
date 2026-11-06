@@ -177,8 +177,14 @@ pub fn build_tools(app: &App, groups: &[String], servers: &[String], with_skills
                 o.entry("type").or_insert(json!("object"));
                 o.entry("properties").or_insert(json!({}));
             }
-            let read_only = t.pointer("/annotations/readOnlyHint").and_then(Value::as_bool).unwrap_or(false);
-            add(name, cut(&desc, 700), schema, json!({"source":"mcp","server":sname,"label":format!("{sname} › {tname}"),"mutating":!read_only}));
+            let read_only = t.pointer("/annotations/readOnlyHint").and_then(Value::as_bool);
+            let destructive = t.pointer("/annotations/destructiveHint").and_then(Value::as_bool);
+            // sem anotação, o nome da ferramenta decide (get_/list_/read_... só leem)
+            let mutating = match read_only {
+                Some(ro) => !ro,
+                None => !mcp_reads(&tname),
+            } || destructive == Some(true);
+            add(name, cut(&desc, 700), schema, json!({"source":"mcp","server":sname,"label":format!("{sname} › {tname}"),"mutating":mutating,"readOnly":read_only,"destructive":destructive}));
         }
     }
     app.mcp.set_index(index);
@@ -189,6 +195,28 @@ pub fn build_tools(app: &App, groups: &[String], servers: &[String], with_skills
         format!("Catálogo de ferramentas dos conectores ativos (ainda não carregadas). Para usar uma, chame antes search_tools com names=[...] e ela fica disponível no passo seguinte. Carregue só as que for usar.\n\n{}", body.join("\n\n"))
     };
     json!({"tools": tools, "meta": meta, "catalog": catalog_text})
+}
+
+/// Ferramenta de conector que, pelo nome, só lê (sem anotação readOnlyHint do servidor).
+/// Na dúvida, conta como alteração: o studio pede confirmação.
+pub fn mcp_reads(tool: &str) -> bool {
+    let n = tool.to_lowercase().replace(['-', ' '], "_");
+    // camelCase também: GetRegisters -> get_registers
+    let mut snake = String::new();
+    for (i, ch) in tool.chars().enumerate() {
+        if ch.is_uppercase() && i > 0 && !tool.chars().nth(i - 1).is_some_and(|p| p.is_uppercase() || p == '_') {
+            snake.push('_');
+        }
+        snake.push(ch.to_ascii_lowercase());
+    }
+    let first = snake.split('_').find(|w| !w.is_empty()).unwrap_or("").to_string();
+    const READ: &[&str] = &["get", "list", "read", "search", "find", "query", "describe", "show", "view", "info", "status", "inspect", "lookup", "fetch", "dump", "disasm", "disassemble", "decompile", "resolve", "count", "check", "is", "has", "stat", "enumerate", "browse", "preview", "explain", "analyze", "analyse", "summarize", "print", "peek", "scan", "grep", "locate", "trace", "eval", "evaluate", "load", "open", "hex", "xrefs", "xref", "strings", "symbols", "imports", "exports", "modules", "threads", "registers", "memory", "stack", "callstack", "breakpoints"];
+    const WRITE: &[&str] = &["delete", "remove", "drop", "write", "set", "patch", "send", "post", "upload", "create", "update", "kill", "terminate", "exec", "execute", "run", "apply", "move", "rename", "install", "push", "commit", "publish", "restore", "force", "replace", "insert", "modify", "edit", "save", "format", "wipe", "clear", "reset", "assemble", "inject", "attach", "detach", "step", "continue", "pause", "start", "stop"];
+    let words: Vec<&str> = snake.split('_').filter(|w| !w.is_empty()).collect();
+    if words.iter().any(|w| WRITE.contains(w)) || n.contains("delete") || n.contains("remove") {
+        return false;
+    }
+    READ.contains(&first.as_str())
 }
 
 fn cut(s: &str, n: usize) -> String {
@@ -858,5 +886,19 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
             Ok(if looks_binary(&buf) { format!("Arquivo binário: {}", file.display()) } else { String::from_utf8_lossy(&buf).into_owned() })
         }
         _ => Err(format!("Ferramenta desconhecida: {name}")),
+    }
+}
+
+#[cfg(test)]
+mod mcp_le {
+    use super::mcp_reads;
+    #[test]
+    fn leitura_pelo_nome() {
+        for n in ["read_memory", "GetRegisters", "list_modules", "decompile_type", "search", "get_il", "DisasmAt", "ListClasses"] {
+            assert!(mcp_reads(n), "{n} devia ser leitura");
+        }
+        for n in ["ExecuteDebuggerCommand", "write_memory", "patch_il_instructions", "delete_file", "SetBreakpoint", "send_message", "force_return", "get_and_delete", "generate_model", "assembly_info"] {
+            assert!(!mcp_reads(n), "{n} devia pedir confirmação");
+        }
     }
 }
