@@ -125,13 +125,15 @@ jobs:
           merge-multiple: true
       - name: Conferir
         run: ls -la dist; test -n "$(ls dist/*.zip 2>/dev/null)"
-      - uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.prepare.outputs.tag }}
-          name: ik_llama.cpp ${{ needs.prepare.outputs.tag }}
-          prerelease: true
-          target_commitish: ${{ github.sha }}
-          body: |
-            Builds do [ik_llama.cpp](https://github.com/ikawrakow/ik_llama.cpp) para Windows x64, commit `${{ needs.prepare.outputs.sha }}`.
-            Instale pelo Llama Studio em **Servidor → Motor**. Licença MIT (a do ik_llama.cpp vai dentro de cada pacote).
-          files: dist/*.zip
+      - name: Publicar (pré-release)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          set -x
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            printf 'Builds do [ik_llama.cpp](https://github.com/ikawrakow/ik_llama.cpp) para Windows x64, commit `%s`.\n\nInstale pelo Llama Studio em **Servidor → Motor**. Licença MIT (a do ik_llama.cpp vai dentro de cada pacote).\n' "$SHA" > notes.md
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --prerelease --latest=false --target "$GITHUB_SHA" --title "ik_llama.cpp $TAG" --notes-file notes.md
+          fi
+          gh release upload "$TAG" dist/*.zip --repo "$GITHUB_REPOSITORY" --clobber
