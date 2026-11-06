@@ -147,3 +147,7 @@ Opções de linha de comando: `--navegador` (abre no navegador em vez da janela)
 **Publicar uma versão:** suba o `version` no `Cargo.toml` e faça push no `main`. O workflow `Release` compila no Windows, gera o instalador com o llama.cpp mais recente, cria o tag e publica tudo. Pushes sem mudança de versão só compilam.
 
 Bibliotecas de terceiros em `ui/vendor`: marked (MIT), DOMPurify (Apache-2.0/MPL-2.0) e highlight.js (BSD-3-Clause).
+
+## Licença
+
+O Llama Studio é software livre, sob a [GNU GPL v3](LICENSE) ou posterior: você pode usar, estudar, mudar e redistribuir, e quem distribuir uma versão modificada precisa publicar o código dela sob a mesma licença.

@@ -1,6 +1,7 @@
 [package]
 name = "llama-studio"
 version = "2.25.0"
+license = "GPL-3.0-or-later"
 edition = "2021"
 description = "Interface local para o llama-server com pasta de trabalho, habilidades e conectores MCP"
 

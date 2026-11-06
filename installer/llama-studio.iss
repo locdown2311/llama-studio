@@ -68,6 +68,7 @@ Name: "startup"; Description: "{cm:Startup}"; GroupDescription: "{cm:AdditionalI
 [Files]
 Source: "{#SourceDir}\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "llama-path\index.html"; DestDir: "{app}\llama-path"; Flags: ignoreversion
+Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
