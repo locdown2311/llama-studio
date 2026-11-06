@@ -329,7 +329,7 @@ pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[Strin
     parts.push(format!("Sistema do usuário: {}.", if app::IS_WIN { "Windows" } else { std::env::consts::OS }));
     if has("read") || has("write") || has("edit") || has("shell") {
         parts.push(format!(
-            "Pasta de trabalho: {}\nAs ferramentas de arquivo usam caminhos relativos a essa pasta e só escrevem dentro dela. Leia um arquivo antes de editá-lo.",
+            "Pasta de trabalho: {}\nAs ferramentas de arquivo usam caminhos relativos a essa pasta e só escrevem dentro dela. Leia um arquivo antes de editá-lo.\nEconomize contexto: arquivo grande vem como sumário; leia só os trechos (offset/limit) e procure dentro dele com search_files. Para mudar, use edit_file (start_line/end_line ou edits), nunca reescreva o arquivo inteiro. Não leia arquivos pelo terminal (Get-Content, cat, type).",
             ws.display()
         ));
         if !refs.is_empty() {
@@ -439,6 +439,9 @@ pub async fn call(app: &Arc<App>, ws: PathBuf, name: &str, args: Value, allow: &
     if name == "run_command" {
         let timeout = args.get("timeout").and_then(Value::as_u64).unwrap_or(120);
         if let Some(msg) = connector_launch(app, s(&args, "command")) {
+            return out(Err(msg));
+        }
+        if let Some(msg) = whole_read(&ws, s(&args, "cwd"), s(&args, "command")) {
             return out(Err(msg));
         }
         let fixed = fix_command(s(&args, "command"));
@@ -591,6 +594,69 @@ fn fit_args(schema: &Value, args: &mut Value) -> Result<(), String> {
 
 /// Busca por conteúdo com o ripgrep (respeita .gitignore e é bem mais rápida). None = usar a busca própria.
 const BIG_LINES: usize = 400;
+const MAX_SLICE: usize = 600;
+
+/// Reescreveu um arquivo grande para mudar pouco: diz quanto mudou e como gastar menos.
+fn rewrite_hint(before: &str, after: &str) -> String {
+    let a: Vec<&str> = before.lines().collect();
+    let b: Vec<&str> = after.lines().collect();
+    if a.len() < 150 {
+        return String::new();
+    }
+    let pre = a.iter().zip(&b).take_while(|(x, y)| x.trim_end() == y.trim_end()).count();
+    let suf = a[pre..].iter().rev().zip(b[pre..].iter().rev()).take_while(|(x, y)| x.trim_end() == y.trim_end()).count();
+    let changed = a.len().saturating_sub(pre + suf).max(b.len().saturating_sub(pre + suf));
+    if changed * 3 > a.len() {
+        return String::new();
+    }
+    format!("\n[dica: o arquivo tem {} linhas e só ~{changed} mudaram (a partir da linha {}). Da próxima vez use edit_file com start_line/end_line ou edits: gasta bem menos que reescrever tudo]", a.len(), pre + 1)
+}
+
+/// Comando que só despeja um arquivo grande inteiro (Get-Content x, cat x, type x): manda para read_file.
+fn whole_read(ws: &Path, cwd: &str, cmd: &str) -> Option<String> {
+    let c = cmd.trim();
+    if c.contains('|') || c.contains(';') || c.contains("&&") || c.contains('>') || c.contains('(') {
+        return None;
+    }
+    let toks: Vec<String> = c.split_whitespace().map(|t| t.trim_matches(|ch| ch == '"' || ch == '\'').to_string()).collect();
+    let verb = toks.first()?.to_lowercase();
+    if !matches!(verb.as_str(), "get-content" | "gc" | "cat" | "type" | "more" | "less" | "head" | "tail") {
+        return None;
+    }
+    if verb == "head" || verb == "tail" || toks.iter().any(|t| matches!(t.to_lowercase().as_str(), "-totalcount" | "-head" | "-tail" | "-first" | "-last" | "-n")) {
+        return None;
+    }
+    let mut i = 1;
+    let mut path = None;
+    while i < toks.len() {
+        let t = &toks[i];
+        if t.eq_ignore_ascii_case("-path") || t.eq_ignore_ascii_case("-literalpath") {
+            path = toks.get(i + 1).cloned();
+            break;
+        }
+        if t.eq_ignore_ascii_case("-encoding") {
+            i += 2;
+            continue;
+        }
+        if !t.starts_with('-') {
+            path = Some(t.clone());
+            break;
+        }
+        i += 1;
+    }
+    let p = path?;
+    let base = if cwd.is_empty() { ws.to_path_buf() } else { ws.join(cwd) };
+    let f = if Path::new(&p).is_absolute() { PathBuf::from(&p) } else { base.join(&p) };
+    let md = std::fs::metadata(&f).ok()?;
+    if !md.is_file() || md.len() as usize <= BIG_BYTES / 2 {
+        return None;
+    }
+    let lines = std::fs::read(&f).ok().filter(|b| !looks_binary(b)).map(|b| b.iter().filter(|&&x| x == b'\n').count())?;
+    if lines <= BIG_LINES && md.len() as usize <= BIG_BYTES {
+        return None;
+    }
+    Some(format!("{p} tem {lines} linhas ({}): ler inteiro pelo terminal enche o contexto. Use read_file com path=\"{p}\" (devolve um sumário com números de linha) e depois offset/limit no trecho, ou search_files com path=\"{p}\" e content=... para achar as linhas. Se precisar mesmo de uma parte pelo terminal: Get-Content {p} -TotalCount 100.", fmt_size(md.len())))
+}
 const BIG_BYTES: usize = 40 * 1024;
 
 /// Sumário de um arquivo grande: as linhas que marcam a estrutura, com o número.
@@ -841,7 +907,8 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
                 return Ok(format!("[linhas 1-{} de {total}; continue com offset/limit]\n{}", head.len(), head.join("\n")));
             }
             let off = a.get("offset").and_then(Value::as_u64).unwrap_or(1).max(1) as usize;
-            let lim = a.get("limit").and_then(Value::as_u64).unwrap_or(2000).max(1) as usize;
+            // trecho enorme é o mesmo que ler tudo: corta e diz como continuar
+            let lim = (a.get("limit").and_then(Value::as_u64).unwrap_or(2000).max(1) as usize).min(if total > BIG_LINES { MAX_SLICE } else { usize::MAX });
             let slice: Vec<&str> = lines.iter().skip(off - 1).take(lim).copied().collect();
             let mut out = slice.join("\n");
             if off > 1 || off - 1 + lim < total {
@@ -856,8 +923,13 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
             }
             let existed = file.exists();
             let content = s(a, "content");
+            let before = if existed { std::fs::read_to_string(&file).ok() } else { None };
+            // arquivo do Windows (CRLF) continua CRLF mesmo que o modelo mande só \n
+            let crlf_content;
+            let content = if before.as_deref().is_some_and(|b| b.contains("\r\n")) && !content.contains('\r') { crlf_content = content.replace('\n', "\r\n"); crlf_content.as_str() } else { content };
             std::fs::write(&file, content).map_err(e)?;
-            Ok(format!("{}: {} ({})", if existed { "Substituído" } else { "Criado" }, rel_to(ws, &file), fmt_size(content.len() as u64)))
+            let hint = before.map(|b| rewrite_hint(&b, content)).unwrap_or_default();
+            Ok(format!("{}: {} ({}){hint}", if existed { "Substituído" } else { "Criado" }, rel_to(ws, &file), fmt_size(content.len() as u64)))
         }
         "edit_file" => {
             let file = resolve_write(ws, s(a, "path"))?;
@@ -912,7 +984,8 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
                 out = if all { n += count; out.replace(old_f.as_str(), &new_f) } else { n += 1; out.replacen(old_f.as_str(), &new_f, 1) };
             }
             std::fs::write(&file, &out).map_err(e)?;
-            Ok(format!("Editado: {} ({n} substituição(ões))", rel_to(ws, &file)))
+            let big_old = pairs.iter().map(|(o, _)| o.lines().count()).max().unwrap_or(0) > 25;
+            Ok(format!("Editado: {} ({n} substituição(ões)){}", rel_to(ws, &file), if big_old { "\n[dica: para trocar um bloco grande, use start_line/end_line com só o texto novo; não precisa repetir o antigo]" } else { "" }))
         }
         "create_directory" => {
             let dir = resolve_write(ws, s(a, "path"))?;
