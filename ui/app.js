@@ -3,6 +3,7 @@
 
 /* ============================================================ ícones */
 const ICONS = {
+  lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
   hammer: '<path d="m15 12-8.5 8.5a2.12 2.12 0 0 1-3-3L12 9"/><path d="M17.64 15 22 10.64"/><path d="m20.91 11.7-1.25-1.25a1.5 1.5 0 0 1-.44-1.06V7.5l-2.6-2.6A5.5 5.5 0 0 0 12.69 3.3H10l.92.83A6.18 6.18 0 0 1 13 8.73V10l2 2h1.17a1.5 1.5 0 0 1 1.06.44l1.25 1.25"/>',
   palette: '<path d="M12 22a10 10 0 1 1 10-10c0 2.2-1.8 3.5-4 3.5h-2a2 2 0 0 0-1.5 3.3c.5.6.4 1.6-.3 2.2-.6.4-1.4 1-2.2 1z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="12" cy="7" r="1"/><circle cx="16.5" cy="10.5" r="1"/>',
   sliders: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
@@ -892,7 +893,7 @@ function scheduleRender() {
   if (S.runs.size) renderConvListSoon();
   if (rafPending) return;
   rafPending = true;
-  requestAnimationFrame(() => { rafPending = false; renderMessages(true); });
+  requestAnimationFrame(() => { rafPending = false; renderMessages(true); updateBusy(); });
 }
 
 const renderConvListSoon = debounce(() => renderConvList(), 300);
@@ -3297,6 +3298,7 @@ async function runAgent(conv) {
     const last = conv.messages[conv.messages.length - 1];
     if (last?.role === 'assistant' && !last.content && !last.reasoning && !last.tool_calls?.length) conv.messages.pop();
     S.runs.delete(conv.id); S.waiting.delete(conv.id);
+    updateBusy();
     conv.updatedAt = Date.now();
     saveConvs(); renderConvList();
     if (conv.id === S.curId) { renderMessages(false); renderComposer(); renderChatTitle(); }
@@ -3435,6 +3437,10 @@ async function undoTools(conv, tmsgs) {
 
 async function execTool(name, args, info, tctx, tmsg) {
   try {
+    if (['write_file', 'edit_file', 'create_directory'].includes(name) && args?.path && tctx.conv) {
+      const why = busyBlock(tctx.conv, tmsg?.tool_call_id, joinPath(tctx.ws, args.path));
+      if (why) return { content: why, isError: true };
+    }
     if (name === 'execute_code') return await runCode(args?.code ?? '', tctx, tmsg);
     if (name === 'recall_history') return recallHistory(args || {}, tctx.conv);
     if (name === 'update_todos') return await updateTodos(tctx.conv, args, tctx.signal);
@@ -3612,6 +3618,131 @@ async function loadDir(rel) {
   return r.items;
 }
 
+/* ---- em uso agora ----
+   Comandos longos que copiam/movem pastas: a origem fica "somente leitura" até o comando terminar
+   (nada do studio escreve nela) e o destino aparece como recebendo. Tudo sai dos argumentos das
+   ferramentas em execução, sem perguntar nada ao sistema. */
+const COPY_VERBS = /^(copy-item|cpi|cp|copy|xcopy|robocopy|move-item|mi|mv|move|compress-archive|expand-archive)$/;
+const MOVE_VERBS = /^(move-item|mi|mv|move)$/;
+const VAL_FLAGS = /^-(filter|include|exclude|credential|compressionlevel|encoding)$/i;
+function cmdTokens(s) { const out = []; const re = /"([^"]*)"|'([^']*)'|(\S+)/g; let m; while ((m = re.exec(s))) out.push(m[1] ?? m[2] ?? m[3]); return out; }
+function isAbs(p) { return /^[a-z]:[\\/]/i.test(p) || /^[\\/]{2}/.test(p); }
+function joinPath(base, p) {
+  p = String(p).replace(/^\.[\\/]/, '');
+  if (p === '.' || p === '') return base;
+  if (isAbs(p)) return p;
+  return base ? base.replace(/[\\/]+$/, '') + '\\' + p.replace(/\//g, '\\') : p;
+}
+/** Tira o curinga do fim: C:\fotos\*.jpg vira C:\fotos. */
+function stripGlob(p) { const parts = p.split(/[\\/]/); while (parts.length > 1 && /[*?]/.test(parts[parts.length - 1])) parts.pop(); return parts.join('\\'); }
+function busyFromCommand(cmd, base) {
+  const out = [];
+  let piped = null; // Get-ChildItem origem | Copy-Item -Destination x: a origem vem do lado esquerdo
+  for (const part of String(cmd || '').split(/(;|&&|\|\||\|)/)) {
+    if (/^(;|&&|\|\|)$/.test(part)) { piped = null; continue; }
+    if (part === '|') continue;
+    const t = cmdTokens(part.trim()); if (!t.length) continue;
+    const verb = t[0].replace(/\.exe$/i, '').toLowerCase();
+    if (/^(get-childitem|gci|ls|dir|get-item|gi)$/.test(verb)) {
+      const p0 = t.slice(1).find((a, i, arr) => !/^-/.test(a) && !/^-(filter|include|exclude|depth)$/i.test(arr[i - 1] || ''));
+      const pi = t.findIndex((a) => /^-(path|literalpath)$/i.test(a));
+      piped = pi > 0 ? t[pi + 1] : p0 || '.';
+      continue;
+    }
+    if (!COPY_VERBS.test(verb)) { piped = null; continue; }
+    const src = []; let dst = null; const pos = [];
+    for (let i = 1; i < t.length; i++) {
+      const a = t[i];
+      if (/^-(path|literalpath|source|sourcepath)$/i.test(a)) { if (t[i + 1]) src.push(...t[++i].split(',')); continue; }
+      if (/^-(destination|destinationpath)$/i.test(a)) { dst = t[++i]; continue; }
+      if (VAL_FLAGS.test(a)) { i++; continue; }
+      if (/^-/.test(a) || /^\/[a-z0-9:]{1,12}$/i.test(a) || a.startsWith('$') || a === '`') continue;
+      pos.push(a);
+    }
+    if (verb === 'robocopy') { if (pos[0]) src.push(pos[0]); if (pos[1]) dst = pos[1]; }
+    else if (pos.length) { if (!dst && (pos.length > 1 || piped)) dst = pos.pop(); src.push(...pos.flatMap((x) => x.split(','))); }
+    if (!src.length && piped) src.push(piped);
+    piped = null;
+    const clean = src.map((x) => x.trim()).filter(Boolean); src.length = 0; src.push(...clean);
+    const move = MOVE_VERBS.test(verb);
+    for (const x of src.map((x) => x.trim()).filter(Boolean)) out.push({ path: joinPath(base, stripGlob(x)), mode: move ? 'w' : 'r', what: move ? 'sendo movido' : 'sendo copiado', other: dst ? joinPath(base, dst) : '' });
+    if (dst) out.push({ path: joinPath(base, stripGlob(dst)), mode: 'w', what: move ? 'recebendo o que é movido' : 'recebendo a cópia', other: src[0] ? joinPath(base, src[0]) : '', more: src.length - 1 });
+  }
+  return out;
+}
+const normP = (p) => String(p || '').replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+const underP = (a, b) => { const x = normP(a); const y = normP(b); return x === y || x.startsWith(y + '\\'); };
+/** O que está em uso agora, em todas as conversas rodando. */
+function busyPaths() {
+  const out = [];
+  for (const c of S.convs) {
+    if (!S.runs.has(c.id)) continue;
+    const calls = new Map();
+    for (const m of c.messages) if (m.role === 'assistant') for (const tc of m.tool_calls || []) calls.set(tc.id, tc);
+    for (const m of c.messages) {
+      if (m.role !== 'tool' || m.status !== 'running') continue;
+      const tc = calls.get(m.tool_call_id);
+      if (tc?.function?.name !== 'run_command') continue;
+      const a = parseArgs(tc.function.arguments) || {};
+      const base = a.cwd ? joinPath(wsOf(c), a.cwd) : wsOf(c);
+      for (const b of busyFromCommand(a.command, base)) out.push({ ...b, conv: c, id: tc.id });
+    }
+  }
+  return out;
+}
+let busySig = '';
+let busyNow = [];
+function busyMark(abs) {
+  for (const b of busyNow) if (underP(abs, b.path)) return { cls: 'busy-' + b.mode, b };
+  for (const b of busyNow) if (underP(b.path, abs)) return { cls: 'busy-in', b };
+  return null;
+}
+/** Chamado a cada atualização da conversa; só mexe na tela quando o conjunto muda. */
+function updateBusy() {
+  const now = busyPaths();
+  const sig = now.map((b) => b.mode + b.path).join('|');
+  if (sig === busySig) return;
+  const ended = busySig && now.length < busyNow.length;
+  busySig = sig; busyNow = now;
+  drawBusy();
+  if (ended) refreshTree(); else applyBusyMarks();
+}
+function drawBusy() {
+  const box = $('#ws-busy'); box.innerHTML = '';
+  box.hidden = !busyNow.length;
+  if (!busyNow.length) return;
+  box.append(h('div.ws-busy-head', null, ic('lock'), 'Em uso agora'));
+  for (const b of busyNow) {
+    box.append(h('button.busy-row.' + b.mode, { title: b.path, onclick: () => revealInTree(b.path) },
+      ic(b.mode === 'r' ? 'lock' : 'download'),
+      h('span.busy-main', null, h('b', null, basename(b.path) || b.path),
+        h('small', null, (b.mode === 'r' ? 'Somente leitura: ' : '') + b.what + (b.other ? (b.mode === 'r' ? ' para ' : ' de ') + basename(b.other) + (b.more > 0 ? ` e mais ${b.more}` : '') : '') + (S.convs.length > 1 && b.conv.id !== S.curId ? ` · ${b.conv.title}` : '')))));
+  }
+}
+function applyBusyMarks() {
+  for (const n of $$('#ws-tree .node')) {
+    const m = n.dataset.abs ? busyMark(n.dataset.abs) : null;
+    n.classList.remove('busy-r', 'busy-w', 'busy-in');
+    n.querySelector('.lk')?.remove();
+    if (!m) continue;
+    n.classList.add(m.cls);
+    if (m.cls !== 'busy-in') n.querySelector('.nm').after(h('span.lk', { title: m.cls === 'busy-r' ? `Somente leitura: ${m.b.what}` : m.b.what, html: svg(m.cls === 'busy-r' ? 'lock' : 'download') }));
+  }
+}
+function revealInTree(abs) {
+  if (S.wsTab !== 'files') setWsTab('files');
+  const rel = relOf(abs);
+  if (isAbs(rel)) { api('/api/reveal', { path: abs, ws: S.ws.path }).catch(() => {}); return; }
+  const parts = rel.split('/'); let acc = '';
+  for (const part of parts.slice(0, -1)) { acc = acc ? acc + '/' + part : part; S.ws.expanded.add(acc); }
+  renderTree().then(() => $(`#ws-tree .node[data-rel="${CSS.escape(rel)}"]`)?.scrollIntoView({ block: 'center' }));
+}
+/** Escrita do studio dentro de algo que outra tarefa está copiando: espera o fim. */
+function busyBlock(conv, tcId, target) {
+  for (const b of busyPaths()) if (b.id !== tcId && b.mode === 'r' && underP(target, b.path)) return `${b.path} está ${b.what}${b.other ? ' para ' + b.other : ''} (somente leitura até o comando terminar). Espere ele acabar e tente de novo.`;
+  return '';
+}
+
 const refreshTree = debounce(async () => {
   S.ws.cache.clear();
   await renderTree();
@@ -3624,6 +3755,7 @@ async function renderTree() {
     await buildLevel(frag, '', 0);
     box.innerHTML = '';
     box.append(frag);
+    applyBusyMarks();
     if (!box.childElementCount) box.append(h('div.tree-empty', null, 'Pasta vazia. Peça ao modelo para criar algo aqui.'));
   } catch (e) {
     box.innerHTML = '';
@@ -3638,7 +3770,7 @@ async function buildLevel(parent, rel, depth) {
     const open = it.dir && S.ws.expanded.has(r);
     const ft = ftype(it.name, it.dir);
     const node = h('div.node' + (it.dir ? '.dir' : '') + (open ? '.open' : '') + (S.ws.fresh.has(r) ? '.fresh' : '') + (S.ws.selected === r ? '.sel' : ''),
-      { style: { paddingLeft: 6 + depth * 14 + 'px' }, title: it.path },
+      { style: { paddingLeft: 6 + depth * 14 + 'px' }, title: it.path, dataset: { rel: r, abs: it.path } },
       h('span', { html: svg('chev', 'tw' + (it.dir ? '' : ' blank')), style: { display: 'contents' } }),
       h('span', { html: svg(it.dir ? (open ? 'folderOpen' : 'folder') : ft.icon, 'fi'), style: { display: 'contents', '--c': ft.color } }),
       h('span.nm', null, it.name),

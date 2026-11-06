@@ -70,6 +70,7 @@ O instalador não pede administrador: instala em `%LOCALAPPDATA%\Programs\Llama 
 ### Conversas
 - **Projetos**: conversas que dividem a mesma pasta de trabalho, com instruções e personalidade padrão.
 - **Personalidades**: prompts de sistema com nome e cor, escolhidos por conversa.
+- **Em uso agora**: enquanto um comando copia ou move pastas (`Copy-Item`, `robocopy`, `xcopy`, `Move-Item`, `Compress-Archive`...), a aba Arquivos mostra a origem como somente leitura e o destino recebendo, com cadeado na árvore. Outra conversa não escreve na origem até o comando terminar.
 - **Respostas em segundo plano**: troque de conversa sem parar a que está respondendo.
 - **Fila de mensagens**: escreva enquanto o modelo responde, e as mensagens seguem em ordem. Com Ctrl+Enter (ou o ⚡ na fila), a mensagem entra logo depois do passo atual, sem esperar a resposta inteira.
 - **Linha do tempo**: raciocínio, falas e ferramentas num trilho único, e uma aba **Atividade** com a linha do tempo da conversa inteira.

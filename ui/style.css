@@ -1115,7 +1115,7 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .ws-tabs button { border: 0; background: none; font: inherit; font-size: 12.5px; font-weight: 500; color: var(--muted); padding: 5px 9px; border-radius: 7px; cursor: pointer; }
 .ws-tabs button:hover { color: var(--text); background: var(--hover); }
 .ws-tabs button.on { color: var(--text); background: var(--card); box-shadow: var(--sh-1); }
-#ws.tab-activity .ws-path, #ws.tab-activity .ws-tree, #ws.tab-activity .ws-preview, #ws.tab-activity .ws-actions { display: none; }
+#ws.tab-activity .ws-path, #ws.tab-activity .ws-busy, #ws.tab-activity .ws-tree, #ws.tab-activity .ws-preview, #ws.tab-activity .ws-actions { display: none; }
 .ws-activity { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 10px 16px; }
 .ws-activity[hidden] { display: none; }
 .act-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; padding: 40px 18px; font-size: 13px; color: var(--muted); line-height: 1.5; }
@@ -1417,3 +1417,22 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .set-pane .card-form { box-shadow: none; }
 .set-pane > [hidden] { display: none !important; }
 .set-pane .page-head .lead { max-width: none; }
+
+/* em uso agora: origem de cópia fica somente leitura; destino aparece recebendo */
+.ws-busy { max-height: 38%; overflow: auto; margin: 0 8px 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); overflow: hidden; flex: none; }
+.ws-busy-head { display: flex; align-items: center; gap: 6px; padding: 7px 10px 5px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.ws-busy-head svg { width: 13px; height: 13px; color: var(--warn); }
+.busy-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 10px; border: 0; border-top: 1px solid var(--line); background: transparent; font: inherit; color: var(--text); text-align: left; cursor: pointer; }
+.busy-row:hover { background: var(--hover); }
+.busy-row > svg { width: 15px; height: 15px; flex: none; }
+.busy-row.r > svg { color: var(--warn); }
+.busy-row.w > svg { color: var(--accent); }
+.busy-main { display: flex; flex-direction: column; min-width: 0; }
+.busy-main b { font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.busy-main small { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node .lk { display: grid; margin-left: 4px; flex: none; }
+.node .lk svg { width: 12px; height: 12px; }
+.node.busy-r .lk { color: var(--warn); }
+.node.busy-w .lk { color: var(--accent); }
+.node.busy-r .nm { color: var(--text-2); }
+.node.busy-in::after { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--warn); margin-left: 6px; flex: none; }
