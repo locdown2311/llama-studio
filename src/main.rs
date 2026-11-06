@@ -23,6 +23,7 @@ mod mcp;
 mod models;
 mod pe;
 mod projmap;
+mod share;
 mod server;
 mod skills;
 mod tools;

@@ -138,6 +138,10 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/arrumar/plan", post(arr_plan))
         .route("/api/arrumar/apply", post(arr_apply))
         .route("/api/arrumar/undo", post(arr_undo))
+        .route("/api/share/collect", post(share_collect))
+        .route("/api/share/save", post(share_save))
+        .route("/api/share/read", post(share_read))
+        .route("/api/share/apply", post(share_apply))
         .route("/api/sig", post(sig_list))
         .route("/api/sig/save", post(sig_save))
         .route("/api/sig/make", post(sig_make))
@@ -1003,6 +1007,59 @@ async fn arr_apply(State(app): S, b: Bytes) -> Res {
 async fn arr_undo(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     ok(crate::arrumar::undo(&app, st(&v, "run")).map_err(bad)?)
+}
+
+async fn share_collect(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    ok(crate::share::collect(&app, &strs(&v, "parts"), &strs(&v, "skills")))
+}
+
+/// Grava o pacote em Downloads (ou na pasta pedida) e devolve o caminho.
+async fn share_save(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let dir = if st(&v, "dir").is_empty() {
+        dirs_home().map(|h| h.join("Downloads")).filter(|d| d.is_dir()).unwrap_or_else(|| app.root.clone())
+    } else {
+        std::path::PathBuf::from(st(&v, "dir"))
+    };
+    let name: String = st(&v, "name").chars().filter(|c| c.is_alphanumeric() || " -_.".contains(*c)).collect();
+    let name = if name.trim().is_empty() { "llama-studio".to_string() } else { name.trim().to_string() };
+    let mut path = dir.join(format!("{name}.studio.json"));
+    let mut i = 2;
+    while path.exists() {
+        path = dir.join(format!("{name} ({i}).studio.json"));
+        i += 1;
+    }
+    std::fs::write(&path, serde_json::to_vec_pretty(&v["data"]).unwrap_or_default()).map_err(|e| bad(e.to_string()))?;
+    ok(json!({"path": path}))
+}
+
+fn dirs_home() -> Option<std::path::PathBuf> {
+    std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(std::path::PathBuf::from)
+}
+
+async fn share_read(b: Bytes) -> Res {
+    let v = body(&b);
+    let p = std::path::PathBuf::from(st(&v, "path"));
+    let md = std::fs::metadata(&p).map_err(|e| bad(format!("{}: {e}", p.display())))?;
+    if md.len() > 64 * 1024 * 1024 {
+        return Err(bad("Arquivo grande demais.".to_string()));
+    }
+    let data: Value = serde_json::from_slice(&std::fs::read(&p).map_err(|e| bad(e.to_string()))?).map_err(|e| bad(format!("Não é um pacote do Llama Studio: {e}")))?;
+    if data["format"] != crate::share::FORMAT {
+        return Err(bad("Não é um pacote do Llama Studio (.studio.json).".to_string()));
+    }
+    ok(data)
+}
+
+async fn share_apply(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let secrets = v["secrets"].as_object().cloned().unwrap_or_default();
+    let r = crate::share::apply(&app, &v["data"], &strs(&v, "parts"), v["overwrite"] == true, &secrets);
+    if strs(&v, "parts").iter().any(|p| p == "mcp") {
+        app.mcp.sync(&app.http, &app.mcp_file()).await;
+    }
+    ok(r)
 }
 
 async fn sig_list(State(app): S) -> Res {

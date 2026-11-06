@@ -1643,6 +1643,13 @@ function locKey(r) { return `${r.name}|${r.size}|${r.lastModified}`; }
 function refPillEls(r) { return $$(`.pill[data-ref="${r.id}"]`, editor()); }
 
 function updateRefPill(r) {
+  // pacote de configurações arrastado para a janela: abre a importação em vez de virar etiqueta
+  if (r.status === 'ok' && /\.studio\.json$/i.test(r.path || '') && !r.offered) {
+    r.offered = true;
+    for (const el of refPillEls(r)) el.remove();
+    importDialog(r.path);
+    return;
+  }
   for (const el of refPillEls(r)) {
     el.classList.remove('loading', 'missing', 'choose');
     if (r.status !== 'ok') el.classList.add(r.status);
@@ -2264,6 +2271,161 @@ function renderToolsPage() {
   drawBins();
   drawArr();
   loadBins(false).then(() => { if (!S.bins?.items.some((b) => 'latest' in b)) loadBins(true); });
+}
+
+/* ------------------------------------------------------------ compartilhar configurações */
+// Um arquivo .studio.json com as partes escolhidas. O que fica no navegador (configurações,
+// personalidades, projetos, etiquetas) sai daqui; habilidades, conectores (sem segredos),
+// assinaturas, regras de pastas e perfis de modelo saem do servidor.
+const SHARE_FORMAT = 'llama-studio/compartilhar';
+async function exportDialog() {
+  let models = [];
+  try { models = (await api('/api/models')).models || []; } catch { /* sem modelos */ }
+  let sigs = []; let rules = [];
+  try { sigs = (await api('/api/sig', {})).sigs || []; rules = (await api('/api/arrumar', {})).rules || []; } catch { /* vazio */ }
+  const secretsN = S.mcp.length;
+  const parts = [
+    ['settings', 'Configurações', 'Prompt de sistema, ferramentas, aprovação, auditor, recursos automáticos, aparência.', 1],
+    ['personas', 'Personalidades', `${S.personas.length} personalidade(s).`, S.personas.length],
+    ['projects', 'Projetos', `${S.projects.length} projeto(s), com instruções e regras aprendidas. A pasta vai como referência.`, S.projects.length],
+    ['tags', 'Etiquetas', `${S.tags.length} etiqueta(s) de cor (sem as conversas).`, S.tags.length],
+    ['skills', 'Habilidades', `${S.skills.length} habilidade(s), com os arquivos de cada uma.`, S.skills.length],
+    ['mcp', 'Conectores', `${secretsN} conector(es). Tokens, chaves e senhas são retirados.`, secretsN],
+    ['models', 'Perfis de modelo', `${models.length} perfil(is): contexto e argumentos. O arquivo do modelo não vai.`, models.length],
+    ['signatures', 'Assinaturas de funções', `${sigs.length} assinatura(s).`, sigs.length],
+    ['arrumar', 'Regras de pastas', `${rules.length} regra(s). Entram desligadas em quem importa.`, rules.length],
+  ];
+  const checks = {};
+  const skillChecks = {};
+  const name = h('input.input', { value: 'Meu Llama Studio', placeholder: 'Nome do pacote' });
+  const desc = h('textarea.textarea', { rows: 2, placeholder: 'Para que serve (opcional). Ex.: setup de engenharia reversa com x64dbg' });
+  const list = h('div.share-parts', null, parts.map(([id, label, d, n]) => {
+    const c = h('input', { type: 'checkbox', checked: n > 0 && id !== 'arrumar', disabled: n === 0 });
+    checks[id] = c;
+    const row = h('label.share-part' + (n ? '' : '.off'), null, c, h('span', null, h('b', null, label), h('small', null, d)));
+    if (id !== 'skills' || !S.skills.length) return row;
+    const sub = h('div.share-sub', null, S.skills.map((sk) => { const x = h('input', { type: 'checkbox', checked: true }); skillChecks[sk.id] = x; return h('label', null, x, sk.name); }));
+    c.addEventListener('change', () => { sub.hidden = !c.checked; });
+    return h('div', null, row, sub);
+  }));
+  const m = modal({ title: 'Exportar configurações', wide: true, body: h('div.form', null,
+    h('div.field', null, h('label', null, 'Nome'), name), h('div.field', null, h('label', null, 'Descrição'), desc),
+    h('div.field', null, h('label', null, 'O que vai no pacote'), list)),
+  foot: [h('button.btn', { onclick: () => m.close() }, 'Cancelar'), h('button.btn.primary', { onclick: async (e) => {
+    const sel = Object.keys(checks).filter((k) => checks[k].checked);
+    if (!sel.length) { toast('Escolha ao menos uma parte.'); return; }
+    e.currentTarget.disabled = true;
+    try {
+      const pkg = { format: SHARE_FORMAT, version: 1, app: S.info.version, name: name.value.trim() || 'Llama Studio', description: desc.value.trim(), at: new Date().toISOString(), parts: sel };
+      if (sel.includes('settings')) { const { ...st } = S.settings; pkg.settings = st; }
+      if (sel.includes('personas')) pkg.personas = S.personas;
+      if (sel.includes('projects')) pkg.projects = S.projects.map((p) => ({ ...p }));
+      if (sel.includes('tags')) pkg.tags = S.tags;
+      const srv = sel.filter((x) => ['skills', 'mcp', 'models', 'signatures', 'arrumar'].includes(x));
+      if (srv.length) Object.assign(pkg, await api('/api/share/collect', { parts: srv, skills: Object.keys(skillChecks).filter((k) => skillChecks[k].checked) }));
+      const r = await api('/api/share/save', { name: pkg.name, data: pkg });
+      m.close();
+      const secrets = pkg.mcp?.secrets?.length || 0;
+      modal({ title: 'Pacote exportado', body: h('div.form', null,
+        h('p', { style: { margin: 0 } }, 'Salvo em ', h('code', null, r.path)),
+        secrets ? h('p.muted', { style: { margin: 0 } }, `${secrets} segredo(s) dos conectores foram retirados. Quem importar vai preencher os dele.`) : null,
+        pkg.notes?.length ? h('p.muted', { style: { margin: 0 } }, pkg.notes.join(' ')) : null,
+        h('p.muted', { style: { margin: 0 } }, 'Para importar: Configurações → Compartilhar → Importar, ou arraste o arquivo para a janela.')),
+      foot: [h('button.btn', { onclick: () => api('/api/reveal', { path: r.path }).catch(() => {}) }, ic('folderOpen'), 'Mostrar na pasta')] });
+    } catch (err) { toast('Não consegui exportar: ' + err.message, 'err'); e.currentTarget.disabled = false; }
+  } }, 'Exportar')] });
+}
+async function importDialog(path) {
+  if (!path) path = await pickPath({ title: 'Escolha o pacote (.studio.json)', mode: 'file', start: S.info.home ? S.info.home.replace(/[\\/]+$/, '') + (S.info.home.includes('\\') ? '\\Downloads' : '/Downloads') : '' });
+  if (!path) return;
+  let pkg;
+  try { pkg = await api('/api/share/read', { path }); } catch (e) { toast(e.message, 'err'); return; }
+  const count = { settings: 1, personas: pkg.personas?.length, projects: pkg.projects?.length, tags: pkg.tags?.length, skills: pkg.skills?.length, mcp: Object.keys(pkg.mcp?.servers || {}).length, models: pkg.models?.length, signatures: pkg.signatures?.length, arrumar: pkg.arrumar?.length };
+  const label = { settings: 'Configurações', personas: 'Personalidades', projects: 'Projetos', tags: 'Etiquetas', skills: 'Habilidades', mcp: 'Conectores', models: 'Perfis de modelo', signatures: 'Assinaturas', arrumar: 'Regras de pastas' };
+  const exists = {
+    personas: (x) => S.personas.some((p) => p.id === x.id || p.name === x.name),
+    projects: (x) => S.projects.some((p) => p.id === x.id || p.name === x.name),
+    skills: (x) => S.skills.some((s) => s.id === x.id || s.name === x.name),
+    mcp: (n) => S.mcp.some((s) => s.name === n),
+  };
+  const conflicts = [
+    ...(pkg.personas || []).filter(exists.personas).map((x) => x.name),
+    ...(pkg.projects || []).filter(exists.projects).map((x) => x.name),
+    ...(pkg.skills || []).filter(exists.skills).map((x) => x.name),
+    ...Object.keys(pkg.mcp?.servers || {}).filter(exists.mcp),
+  ];
+  const checks = {};
+  const list = h('div.share-parts', null, (pkg.parts || []).filter((p) => count[p]).map((p) => {
+    const c = h('input', { type: 'checkbox', checked: p !== 'settings' });
+    checks[p] = c;
+    const extra = p === 'settings' ? 'Substitui as suas configurações gerais (as conversas não mudam).'
+      : p === 'mcp' ? `${count[p]} conector(es): ${Object.keys(pkg.mcp.servers).join(', ')}`
+      : p === 'skills' ? pkg.skills.map((x) => x.name).join(', ')
+      : p === 'models' ? 'O arquivo do modelo precisa já estar no seu PC (o studio procura pelo nome).'
+      : p === 'arrumar' ? 'Entram desligadas; confira as pastas antes de ligar.'
+      : p === 'projects' ? 'Projetos com pasta que não existe aqui ficam sem pasta até você escolher.' : `${count[p]} item(ns)`;
+    return h('label.share-part', null, c, h('span', null, h('b', null, `${label[p]}${p === 'settings' ? '' : ` (${count[p]})`}`), h('small', null, extra)));
+  }));
+  const secrets = (pkg.mcp?.secrets || []);
+  const secretInputs = {};
+  const secBox = secrets.length ? h('div.field', null, h('label', null, 'Segredos dos conectores'),
+    h('small', null, 'O pacote não traz tokens nem chaves. Preencha os seus; o que ficar em branco deixa o conector desligado até você completar.'),
+    h('div.share-secrets', null, secrets.map((x) => {
+      const key = `${x.server}:${x.where}:${x.key}`;
+      const inp = h('input.input.mono', { type: 'password', placeholder: x.key.replace(/^\d+:/, ''), autocomplete: 'off' });
+      secretInputs[key] = inp;
+      return h('label', null, h('span', null, h('b', null, x.server), ` · ${x.where === 'headers' ? 'cabeçalho' : x.where === 'env' ? 'variável' : x.where === 'args' ? 'argumento' : 'endereço'} ${x.key.replace(/^\d+:/, '')}`), inp);
+    }))) : null;
+  const pol = h('select.select', null, h('option', { value: 'keep' }, 'Manter o que eu já tenho com o mesmo nome'), h('option', { value: 'replace' }, 'Substituir pelo do pacote'));
+  const m = modal({ title: `Importar "${pkg.name}"`, wide: true, body: h('div.form', null,
+    h('p.muted', { style: { margin: 0 } }, [pkg.description, `Exportado do Llama Studio ${pkg.app || '?'} em ${new Date(pkg.at).toLocaleString('pt-BR')}.`].filter(Boolean).join(' · ')),
+    h('div.field', null, h('label', null, 'O que importar'), list),
+    conflicts.length ? h('div.field', null, h('label', null, `Já existe aqui: ${conflicts.slice(0, 6).join(', ')}${conflicts.length > 6 ? '...' : ''}`), pol) : null,
+    secBox),
+  foot: [h('button.btn', { onclick: () => m.close() }, 'Cancelar'), h('button.btn.primary', { onclick: async (e) => {
+    const sel = Object.keys(checks).filter((k) => checks[k].checked);
+    if (!sel.length) { toast('Escolha ao menos uma parte.'); return; }
+    e.currentTarget.disabled = true;
+    const overwrite = pol.value === 'replace';
+    const done = [];
+    const merge = (cur, items, same) => {
+      let n = 0;
+      for (const it of items || []) {
+        const i = cur.findIndex((x) => same(x, it));
+        if (i < 0) { cur.push({ ...it }); n++; } else if (overwrite) { cur[i] = { ...cur[i], ...it, id: cur[i].id }; n++; }
+      }
+      return n;
+    };
+    try {
+      if (sel.includes('settings')) { const keepTheme = S.settings.theme; S.settings = { ...S.settings, ...pkg.settings, tools: { ...S.settings.tools, ...(pkg.settings.tools || {}) }, theme: keepTheme }; store.set('settings', S.settings); done.push('configurações'); }
+      if (sel.includes('personas')) { done.push(`${merge(S.personas, pkg.personas, (a, b) => a.id === b.id || a.name === b.name)} personalidade(s)`); savePersonas(); }
+      if (sel.includes('tags')) { done.push(`${merge(S.tags, pkg.tags, (a, b) => a.name === b.name)} etiqueta(s)`); saveTags(); }
+      if (sel.includes('projects')) {
+        const n = merge(S.projects, pkg.projects, (a, b) => a.id === b.id || a.name === b.name);
+        saveProjects(); done.push(`${n} projeto(s)`);
+      }
+      const srv = sel.filter((x) => ['skills', 'mcp', 'models', 'signatures', 'arrumar'].includes(x));
+      let r = {};
+      if (srv.length) {
+        const vals = {}; for (const [k, inp] of Object.entries(secretInputs)) if (inp.value.trim()) vals[k] = inp.value.trim();
+        r = await api('/api/share/apply', { data: pkg, parts: srv, overwrite, secrets: vals });
+        if (r.skills) done.push(`${r.skills.added} habilidade(s)`);
+        if (r.mcp) done.push(`${r.mcp.added} conector(es)`);
+        if (r.models) done.push(`${r.models.added} perfil(is) de modelo`);
+        if (r.signatures) done.push(`${r.signatures.added} assinatura(s)`);
+        if (r.arrumar) done.push(`${r.arrumar.added} regra(s) de pastas`);
+      }
+      m.close();
+      await Promise.all([loadSkills(), loadMcp(), loadModels()].map((p) => p.catch?.(() => {})));
+      applyTheme(); renderConvList(); updatePickers(); if (S.view === 'settings') renderSettings();
+      const warn = [
+        r.mcp?.pending?.length ? `Conectores esperando o segredo (desligados): ${r.mcp.pending.join(', ')}.` : '',
+        r.models?.missing?.length ? `Modelos que não estão no seu PC: ${r.models.missing.join(', ')}. Baixe pelo Hugging Face e importe de novo.` : '',
+        ...(r.notes || []),
+      ].filter(Boolean);
+      modal({ title: 'Importado', body: h('div.form', null, h('p', { style: { margin: 0 } }, 'Entrou: ' + (done.join(', ') || 'nada novo') + '.'), ...warn.map((w) => h('p.muted', { style: { margin: 0 } }, w))), foot: [] });
+    } catch (err) { toast('Não consegui importar: ' + err.message, 'err'); e.currentTarget.disabled = false; }
+  } }, 'Importar')] });
 }
 
 /* ------------------------------------------------------------ arrumar pastas */
@@ -3989,6 +4151,10 @@ function renderSettings() {
       sw('Mostrar o raciocínio do modelo', 'Os blocos de "pensando" aparecem na conversa, recolhidos.', st.showThinking, (v) => { put({ showThinking: v }); renderMessages(); }),
       S.info.native ? sw('Usar a placa de vídeo para desenhar a janela', 'Desligado, a janela não ocupa VRAM do modelo. Vale na próxima vez que a janela abrir.', S.info.windowGpu, async (v) => { await api('/api/config', { windowGpu: v }); S.info.windowGpu = v; saved(); }) : null,
       S.info.native ? sw('Fechar a janela deixa o studio na bandeja', 'A janela é destruída e a memória dela volta para o sistema.', S.info.closeToTray !== false, async (v) => { await api('/api/config', { closeToTray: v }); S.info.closeToTray = v; saved(); }) : null),
+    section('share', 'Compartilhar', 'Exporte suas configurações num arquivo para outra pessoa (ou outro PC) importar. Tokens e chaves dos conectores nunca saem: quem importa preenche os dele.',
+      h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
+        h('button.btn', { type: 'button', onclick: exportDialog }, ic('download'), 'Exportar configurações'),
+        h('button.btn', { type: 'button', onclick: () => importDialog() }, ic('folderOpen'), 'Importar um pacote'))),
     section('updates', 'Atualizações', null, updateSection()),
     section('advanced', 'Avançado', null,
       field('Endereço do llama-server', input('input.input.mono', { value: S.info.llamaUrl || '' }, async (x) => {

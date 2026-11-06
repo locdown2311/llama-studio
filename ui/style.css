@@ -1367,3 +1367,16 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .pop-foot .link:hover { text-decoration: underline; }
 #pop-auto { width: 340px; }
 #pop-auto .mi-sub { white-space: normal; }
+
+/* compartilhar */
+.share-parts { display: flex; flex-direction: column; gap: 6px; }
+.share-part { display: flex; gap: 10px; align-items: flex-start; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); cursor: pointer; }
+.share-part input { margin-top: 3px; }
+.share-part span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.share-part small { color: var(--muted); font-size: 12.5px; }
+.share-part.off { opacity: .5; cursor: default; }
+.share-sub { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 6px 12px 2px 36px; font-size: 12.5px; color: var(--text-2); }
+.share-sub label { display: inline-flex; gap: 6px; align-items: center; }
+.share-secrets { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.share-secrets label { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 10px; align-items: center; font-size: 13px; }
+@media (max-width: 560px) { .share-secrets label { grid-template-columns: 1fr; } }
