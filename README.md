@@ -68,6 +68,9 @@ O instalador não pede administrador: instala em `%LOCALAPPDATA%\Programs\Llama 
 - **Fila de mensagens**: escreva enquanto o modelo responde, e as mensagens seguem em ordem.
 - **Linha do tempo**: raciocínio, falas e ferramentas num trilho único, e uma aba **Atividade** com a linha do tempo da conversa inteira.
 - **Arrastar arquivos**: entra o caminho absoluto, sem upload.
+- **Alterações** na aba Atividade: os arquivos que a conversa mudou, com a diferença de cada um, desfazer por arquivo ou tudo.
+- **Colar imagens** (Ctrl+V): a imagem vai para `anexos\` e, se o modelo enxerga, segue junto com a mensagem.
+- **Etiquetas de cor** nas conversas, com filtro e agrupamento como pastas.
 - Exportar a conversa em Markdown, histórico pesquisável e medidor de contexto.
 
 ### Modelos

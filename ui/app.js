@@ -47,6 +47,7 @@ const ICONS = {
   braces: '<path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1M16 21h1a2 2 0 0 0 2-2v-5a2 2 0 0 1 2-2 2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"/>',
   home: '<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   ban: '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
+  tag: '<path d="M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
   shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>',
   book: '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>',
   wrench: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
@@ -314,6 +315,8 @@ const S = {
   refs: [],
   projects: store.get('projects', []),
   personas: store.get('personas', null),
+  tags: store.get('tags', []),
+  tagFilter: store.get('tagFilter', null),
   draftPersona: undefined,
   draftModel: undefined,
   models: { models: [], active: null, found: [] },
@@ -454,12 +457,105 @@ async function deleteConv(c) {
 
 function convRow(c, nested) {
   const active = c.id === S.curId && S.view === 'chat';
-  const row = h('div.conv' + (active ? '.active' : '') + (nested ? '.nested' : ''), { onclick: () => selectConv(c.id), title: c.title },
+  const tags = tagsOf(c);
+  const row = h('div.conv' + (active ? '.active' : '') + (nested ? '.nested' : ''), { onclick: () => selectConv(c.id), title: c.title + (tags.length ? ' · ' + tags.map((t) => t.name).join(', ') : '') },
+    tags.length ? h('span.conv-tags', null, tags.slice(0, 3).map((t) => h('i', { style: { background: t.color } }))) : null,
     h('span.conv-name', null, c.title),
     S.waiting.has(c.id) ? h('span.wait-dot', { title: 'Esperando sua permissão' }) : running(c) ? h('span.run-dot', { title: 'Respondendo em segundo plano' }) : null,
+    h('button.icon-btn', { title: 'Etiquetas', 'aria-label': 'Etiquetas', html: svg('tag'), onclick: (e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); tagMenu(c, r.left, r.bottom + 4); } }),
     h('button.icon-btn', { title: 'Apagar', 'aria-label': 'Apagar', html: svg('trash'), onclick: (e) => { e.stopPropagation(); deleteConv(c); } }));
   row.addEventListener('dblclick', () => renameConv(c, row));
+  row.addEventListener('contextmenu', (e) => { e.preventDefault(); tagMenu(c, e.clientX, e.clientY); });
   return row;
+}
+
+/* ------------------------------------------------------------ etiquetas de cor */
+const TAG_COLORS = ['#e5484d', '#f76b15', '#e2a336', '#30a46c', '#12a594', '#0090ff', '#6e56cf', '#d6409f', '#8b8d98'];
+function saveTags() { store.set('tags', S.tags); }
+function tagsOf(c) { return (c?.tags || []).map((id) => S.tags.find((t) => t.id === id)).filter(Boolean); }
+function toggleTag(c, id) {
+  const set = new Set(c.tags || []);
+  if (set.has(id)) set.delete(id); else set.add(id);
+  c.tags = [...set]; saveConvs(); renderConvList();
+}
+/** Menu flutuante simples: itens {label, icon, color, check, onclick} ou 'sep'. */
+function floatMenu(x, y, items) {
+  $$('.fmenu').forEach((m) => m.remove());
+  const m = h('div.fmenu', { role: 'menu' });
+  for (const it of items) {
+    if (it === 'sep') { m.append(h('div.fm-sep')); continue; }
+    m.append(h('button.fm-item', { onclick: (e) => { e.stopPropagation(); if (!it.keep) close(); it.onclick?.(e); } },
+      it.color ? h('i.fm-dot', { style: { background: it.color } }) : it.icon ? ic(it.icon) : h('i.fm-dot.none'),
+      h('span', null, it.label),
+      it.check ? ic('check') : null));
+  }
+  document.body.append(m);
+  const r = m.getBoundingClientRect();
+  m.style.left = Math.max(6, Math.min(x, innerWidth - r.width - 6)) + 'px';
+  m.style.top = Math.max(6, Math.min(y, innerHeight - r.height - 6)) + 'px';
+  const close = () => { m.remove(); document.removeEventListener('pointerdown', out, true); document.removeEventListener('keydown', key); };
+  const out = (e) => { if (!m.contains(e.target)) close(); };
+  const key = (e) => { if (e.key === 'Escape') close(); };
+  setTimeout(() => { document.addEventListener('pointerdown', out, true); document.addEventListener('keydown', key); });
+  return { close, el: m };
+}
+function tagMenu(c, x, y) {
+  const has = new Set(c.tags || []);
+  floatMenu(x, y, [
+    ...S.tags.map((t) => ({ label: t.name, color: t.color, check: has.has(t.id), onclick: () => toggleTag(c, t.id) })),
+    S.tags.length ? 'sep' : null,
+    { label: 'Nova etiqueta...', icon: 'plus', onclick: async () => { const t = await editTag(null); if (t) toggleTag(c, t.id); } },
+    S.tags.length ? { label: 'Gerenciar etiquetas', icon: 'gear', onclick: manageTags } : null,
+  ].filter(Boolean));
+}
+async function editTag(t) {
+  const name = h('input.input', { value: t?.name || '', placeholder: 'Ex.: Trabalho, Instagram, Engenharia reversa' });
+  let color = t?.color || TAG_COLORS[S.tags.length % TAG_COLORS.length];
+  const sw = h('div.tag-swatches', null, TAG_COLORS.map((col) => h('button', { type: 'button', class: col === color ? 'on' : '', style: { background: col }, 'aria-label': col, onclick: (e) => { color = col; $$('button', sw).forEach((b) => b.classList.toggle('on', b === e.currentTarget)); } })));
+  return new Promise((resolve) => {
+    let m;
+    const save = () => {
+      const n = name.value.trim();
+      if (!n) { toast('Dê um nome à etiqueta.', 'err'); return; }
+      let out = t;
+      if (t) Object.assign(t, { name: n, color }); else { out = { id: uid(), name: n, color }; S.tags.push(out); }
+      saveTags(); renderConvList(); m.close(); resolve(out);
+    };
+    name.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
+    m = modal({ title: t ? 'Editar etiqueta' : 'Nova etiqueta', body: [h('div.field', null, h('label', null, 'Nome'), name), h('div.field', null, h('label', null, 'Cor'), sw)],
+      foot: [h('button.btn', { onclick: () => { m.close(); resolve(null); } }, 'Cancelar'), h('button.btn.primary', { onclick: save }, t ? 'Salvar' : 'Criar')] });
+    setTimeout(() => name.focus(), 30);
+  });
+}
+function manageTags() {
+  const list = h('div.tag-list');
+  const draw = () => {
+    list.innerHTML = '';
+    if (!S.tags.length) list.append(h('p.muted', null, 'Nenhuma etiqueta ainda.'));
+    for (const t of S.tags) {
+      const n = S.convs.filter((c) => c.tags?.includes(t.id)).length;
+      list.append(h('div.tag-row', null, h('i.fm-dot', { style: { background: t.color } }), h('span', null, t.name), h('small.muted', null, `${n} ${n === 1 ? 'conversa' : 'conversas'}`),
+        h('button.icon-btn.sm', { title: 'Editar', 'aria-label': 'Editar', html: svg('edit'), onclick: async () => { await editTag(t); draw(); } }),
+        h('button.icon-btn.sm', { title: 'Apagar', 'aria-label': 'Apagar', html: svg('trash'), onclick: async () => {
+          if (!(await confirmBox(`Apagar a etiqueta "${t.name}"? As conversas continuam, só perdem a etiqueta.`, 'Apagar', true))) return;
+          S.tags = S.tags.filter((x) => x.id !== t.id);
+          for (const c of S.convs) if (c.tags?.includes(t.id)) c.tags = c.tags.filter((x) => x !== t.id);
+          if (S.tagFilter === t.id) { S.tagFilter = null; store.set('tagFilter', null); }
+          saveTags(); saveConvs(); renderConvList(); draw();
+        } })));
+    }
+  };
+  draw();
+  const m = modal({ title: 'Etiquetas', body: [h('p.muted', { style: { marginTop: 0 } }, 'Etiquetas de cor organizam as conversas. Clique com o botão direito numa conversa para marcar.'), list],
+    foot: [h('button.btn', { onclick: async () => { await editTag(null); draw(); } }, ic('plus'), 'Nova etiqueta'), h('button.btn.primary', { onclick: () => m.close() }, 'Fechar')] });
+}
+function tagBar() {
+  if (!S.tags.length) return null;
+  const count = (id) => S.convs.filter((c) => c.tags?.includes(id)).length;
+  return h('div.tag-bar', null,
+    S.tags.map((t) => h('button.tag-chip' + (S.tagFilter === t.id ? '.on' : ''), { title: S.tagFilter === t.id ? 'Mostrar todas' : `Só "${t.name}"`, style: { '--c': t.color }, onclick: () => { S.tagFilter = S.tagFilter === t.id ? null : t.id; store.set('tagFilter', S.tagFilter); renderConvList(); } },
+      h('i', { style: { background: t.color } }), t.name, h('small', null, String(count(t.id))))),
+    h('button.icon-btn.sm', { title: 'Gerenciar etiquetas', 'aria-label': 'Gerenciar etiquetas', html: svg('gear'), onclick: manageTags }));
 }
 
 function secHead(key, label, extra) {
@@ -472,25 +568,28 @@ function secHead(key, label, extra) {
 function renderConvList() {
   const box = $('#conv-list'); box.innerHTML = '';
   const q = ($('#search').value || '').trim().toLowerCase();
-  const match = (c) => !q || c.title.toLowerCase().includes(q) || c.messages.some((m) => m.role === 'user' && (m.content || '').toLowerCase().includes(q));
+  if (S.tagFilter && !S.tags.some((t) => t.id === S.tagFilter)) S.tagFilter = null;
+  const tf = S.tagFilter;
+  const match = (c) => (!tf || c.tags?.includes(tf)) && (!q || c.title.toLowerCase().includes(q) || c.messages.some((m) => m.role === 'user' && (m.content || '').toLowerCase().includes(q)));
   const curProj = projectOf(cur());
+  const tb = tagBar(); if (tb) box.append(tb);
 
   // projetos
   const [phead, popen] = secHead('projects', 'Projetos', h('button.icon-btn.sm', { title: 'Novo projeto', 'aria-label': 'Novo projeto', html: svg('plus'), onclick: () => editProject(null) }));
   box.append(phead);
-  if (popen || q) {
+  if (popen || q || tf) {
     if (!S.projects.length && !q) box.append(h('div.side-empty', null, 'Projetos agrupam conversas que trabalham na mesma pasta.'));
     for (const p of [...S.projects].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))) {
       const convs = S.convs.filter((c) => c.projectId === p.id && match(c)).sort((a, b) => b.updatedAt - a.updatedAt);
-      if (q && !convs.length && !p.name.toLowerCase().includes(q)) continue;
+      if ((q || tf) && !convs.length && !(q && !tf && p.name.toLowerCase().includes(q))) continue;
       const busy = convs.some((c) => running(c));
       box.append(h('div.proj' + (curProj?.id === p.id ? '.active' : ''), { onclick: () => { p.open = !p.open; saveProjects(); renderConvList(); }, title: p.dir },
-        h('span', { html: svg(p.open || q ? 'folderOpen' : 'folder'), style: { display: 'contents' } }),
+        h('span', { html: svg(p.open || q || tf ? 'folderOpen' : 'folder'), style: { display: 'contents' } }),
         h('span.conv-name', null, p.name),
         busy ? h('span.run-dot', { title: 'Alguma conversa está respondendo' }) : h('span.proj-count', null, S.convs.filter((c) => c.projectId === p.id).length || ''),
         h('button.icon-btn', { title: 'Nova conversa neste projeto', 'aria-label': 'Nova conversa neste projeto', html: svg('plus'), onclick: (e) => { e.stopPropagation(); newConv(p.id); setView('chat'); } }),
         h('button.icon-btn', { title: 'Configurar projeto', 'aria-label': 'Configurar projeto', html: svg('gear'), onclick: (e) => { e.stopPropagation(); editProject(p); } })));
-      if (p.open || q) {
+      if (p.open || q || tf) {
         for (const c of convs) box.append(convRow(c, true));
         if (!convs.length && !q) box.append(h('button.side-empty.nested.link', { onclick: () => { newConv(p.id); setView('chat'); } }, '+ Começar uma conversa aqui'));
       }
@@ -498,19 +597,34 @@ function renderConvList() {
   }
 
   // conversas sem projeto
-  const [rhead, ropen] = secHead('recent', 'Conversas');
+  const byTag = store.get('groupByTag', false) && S.tags.length && !tf;
+  const [rhead, ropen] = secHead('recent', 'Conversas', S.tags.length ? h('button.icon-btn.sm' + (byTag ? '.on' : ''), { title: byTag ? 'Agrupar por data' : 'Agrupar por etiqueta (como pastas)', 'aria-label': 'Agrupar por etiqueta', html: svg('tag'), onclick: () => { store.set('groupByTag', !store.get('groupByTag', false)); renderConvList(); } }) : null);
   box.append(rhead);
   if (!ropen && !q) return;
   const now = new Date(); const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const groups = [['Hoje', (t) => t >= today], ['Ontem', (t) => t >= today - 864e5 && t < today], ['Últimos 7 dias', (t) => t >= today - 7 * 864e5 && t < today - 864e5], ['Mais antigas', (t) => t < today - 7 * 864e5]];
-  const sorted = S.convs.filter((c) => !projectOf(c) && match(c)).sort((a, b) => b.updatedAt - a.updatedAt);
-  for (const [label, test] of groups) {
+  let sorted = S.convs.filter((c) => !projectOf(c) && match(c)).sort((a, b) => b.updatedAt - a.updatedAt);
+  if (byTag) {
+    // etiquetas como pastas; uma conversa com duas etiquetas aparece nas duas
+    for (const t of [...S.tags].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))) {
+      const items = sorted.filter((c) => c.tags?.includes(t.id));
+      if (!items.length) continue;
+      const open = store.get('tagsec:' + t.id, true) || !!q;
+      box.append(h('div.proj.tag-folder', { onclick: () => { store.set('tagsec:' + t.id, !open); renderConvList(); } },
+        h('i.fm-dot', { style: { background: t.color } }), h('span.conv-name', null, t.name), h('span.proj-count', null, String(items.length)),
+        h('span', { html: svg('chev', open ? 'rot' : ''), style: { display: 'contents' } })));
+      if (open) for (const c of items) box.append(convRow(c, true));
+    }
+    sorted = sorted.filter((c) => !tagsOf(c).length);
+    if (sorted.length) box.append(h('div.conv-group', null, 'Sem etiqueta'));
+  }
+  for (const [label, test] of byTag ? [['', () => true]] : groups) {
     const items = sorted.filter((c) => test(c.updatedAt));
     if (!items.length) continue;
-    box.append(h('div.conv-group', null, label));
+    if (label) box.append(h('div.conv-group', null, label));
     for (const c of items) box.append(convRow(c, false));
   }
-  if (!sorted.length) box.append(h('div.side-empty', null, q ? 'Nada encontrado.' : 'Suas conversas aparecem aqui.'));
+  if (!sorted.length && !(byTag && S.convs.some((c) => !projectOf(c) && match(c)))) box.append(h('div.side-empty', null, q || tf ? 'Nada encontrado.' : 'Suas conversas aparecem aqui.'));
 }
 
 /** Criar ou configurar um projeto. */
@@ -835,8 +949,15 @@ function renderUser(m, idx, conv) {
       else bubble.append(pillEl(p));
     }
   } else bubble.append(m.content || '');
+  const imgRefs = (m.refs || []).filter(isImgRef);
+  const thumbs = imgRefs.length ? h('div.u-imgs', null, imgRefs.map((r) => {
+    const data = S.imgData.get(r.path);
+    if (data === undefined) loadImg(r.path, wsOf(conv)).then(() => scheduleRender());
+    return data ? h('img.u-img', { src: data, alt: r.name, title: r.path, onclick: () => api('/api/reveal', { path: r.path, ws: wsOf(conv) }).catch(() => {}) }) : null;
+  })) : null;
   return h('div.msg.msg-user', { dataset: { start: idx } },
     h('div.stamp', null, fmtStamp(m.ts)),
+    thumbs,
     bubble,
     h('div.chips', null,
       h('button.chip', { onclick: () => navigator.clipboard.writeText(m.content || '').then(() => toast('Copiado')) }, ic('copy'), 'Copiar'),
@@ -1600,6 +1721,42 @@ function statRef(p) {
   api('/api/stat', { path: p, ws: S.ws.path }).then((st) => { r.dir = st.dir; r.path = st.path; r.status = st.exists ? 'ok' : 'missing'; updateRefPill(r); });
 }
 
+/* ------------------------------------------------------------ imagens nas mensagens */
+// Imagem colada (Ctrl+V) vira um arquivo em anexos\ do espaço de trabalho e entra como etiqueta.
+// Etiquetas de imagem (coladas ou arrastadas) vão como imagem para modelos com visão.
+const IMG_RE = /\.(png|jpe?g|webp|gif|bmp)$/i;
+S.imgData = new Map();
+const imgLoading = new Set();
+function isImgRef(r) { return !!r?.path && !r.dir && IMG_RE.test(r.path); }
+async function loadImg(path, ws) {
+  if (S.imgData.has(path) || imgLoading.has(path)) return S.imgData.get(path);
+  imgLoading.add(path);
+  try { const r = await api('/api/img', { path, ws: ws || S.ws.path }); S.imgData.set(path, r.data); return r.data; }
+  catch { S.imgData.set(path, null); return null; }
+  finally { imgLoading.delete(path); }
+}
+async function pasteImage(file) {
+  const ext = ({ 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'image/bmp': 'bmp' })[file.type] || 'png';
+  const d = new Date(); const pad = (n) => String(n).padStart(2, '0');
+  const name = `colada-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.${ext}`;
+  const r = addRef({ name, status: 'loading' });
+  const data = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => res(null); fr.readAsDataURL(file); });
+  try {
+    const up = await api('/api/ws/upload?name=' + encodeURIComponent(name) + '&ws=' + encodeURIComponent(S.ws.path), file);
+    r.path = up.path; r.name = basename(up.path); r.status = 'ok';
+    if (data) S.imgData.set(up.path, data);
+    refreshTree();
+    if (!visionOn()) toast('Imagem salva em anexos. O modelo atual não enxerga imagens: ele recebe só o caminho.');
+  } catch (e) { r.status = 'missing'; toast('Não consegui salvar a imagem: ' + e.message, 'err'); }
+  updateRefPill(r); updatePickers();
+}
+/** Carrega as imagens da última mensagem do usuário antes de mandar ao modelo. */
+async function preloadImgs(conv) {
+  if (!visionOn()) return;
+  const m = [...conv.messages].reverse().find((x) => x.role === 'user' && !x.hidden);
+  await Promise.all((m?.refs || []).filter(isImgRef).map((r) => loadImg(r.path, wsOf(conv))));
+}
+
 function handleDrop(dt) {
   const internal = dt.getData('application/x-studio-path');
   if (internal) { try { addRef(JSON.parse(internal)); } catch { /* ok */ } return; }
@@ -1837,6 +1994,9 @@ function apiMessages(conv, system) {
   let lastAssistant = -1;
   msgs.forEach((m, i) => { if (m.role === 'assistant') lastAssistant = i; });
   msgs.forEach((m, i) => { m.__i = i; });
+  // imagens anexadas pelo usuário vão só durante o turno da mensagem dele
+  let lastUserIdx = -1;
+  msgs.forEach((m, i) => { if (m.role === 'user' && !m.hidden) lastUserIdx = i; });
   const cut = conv.compactCut || 0;
   const head = cut ? Math.min(conv.compactHead || 0, cut) : 0;
   let summaryDone = !(cut && conv.summary);
@@ -1856,7 +2016,11 @@ function apiMessages(conv, system) {
       else out.push({ role: 'user', content: m.content + ' [imagem omitida do histórico]' });
       continue;
     }
-    if (m.role === 'user') out.push({ role: 'user', content: userContent(m) + (m.plan ? PLAN_NOTE : '') });
+    if (m.role === 'user') {
+      const text = userContent(m) + (m.plan ? PLAN_NOTE : '');
+      const imgs = m.__i === lastUserIdx && visionOn() ? (m.refs || []).filter(isImgRef).map((r) => S.imgData.get(r.path)).filter(Boolean) : [];
+      out.push({ role: 'user', content: imgs.length ? [{ type: 'text', text }, ...imgs.map((url) => ({ type: 'image_url', image_url: { url } }))] : text });
+    }
     else if (m.role === 'assistant') {
       const text = splitThink(m.content).text;
       const calls = (m.tool_calls || []).filter((t) => t.function?.name);
@@ -2390,7 +2554,7 @@ async function runAgent(conv) {
       const msg = { role: 'assistant', content: '', reasoning: '', tool_calls: [], t0: step === 0 ? t0 : Date.now() };
       conv.messages.push(msg);
       scheduleRender();
-      if (step === 0) { await ensureModel(conv, ac.signal); await waitModel(conv, ac.signal); await assignSlot(conv); }
+      if (step === 0) { await ensureModel(conv, ac.signal); await waitModel(conv, ac.signal); await assignSlot(conv); await preloadImgs(conv); }
       if (ac.signal.aborted) throw new DOMException('abort', 'AbortError');
       await maybeCompact(conv, system, tools, ac.signal);
       try {
@@ -4373,6 +4537,158 @@ function jumpTo(start, toolId) {
   target.classList.add('flash'); setTimeout(() => target.classList.remove('flash'), 1400);
 }
 
+/* ------------------------------------------------------------ alterações (aba Atividade) */
+// Arquivos que a conversa alterou, a partir dos pontos de restauração: diff do estado
+// original até agora, desfazer por arquivo ou tudo, abrir e ir para a ferramenta.
+S.chg = { conv: '', key: '', list: {}, loading: false, open: new Set(), diffs: new Map(), section: store.get('chgOpen', true) };
+function chgKey(c) { return c.id + ':' + c.messages.reduce((n, m) => n + (m.cps?.length || 0) * 2 + (m.undone ? 1 : 0), 0); }
+async function refreshChanges(c, force) {
+  const key = chgKey(c);
+  if (!force && (S.chg.key === key || S.chg.loading)) return;
+  S.chg.loading = true;
+  try {
+    const list = await api('/api/checkpoints', { conv: c.id });
+    S.chg.list = list; S.chg.conv = c.id; S.chg.key = key; S.chg.diffs.clear();
+    // ações cujos pontos já foram desfeitos (por arquivo) contam como desfeitas
+    let changed = false;
+    for (const m of c.messages) if (m.cps?.length && !m.undone && !m.cps.some((id) => list[id])) { m.undone = true; changed = true; }
+    if (changed) { saveConvs(); scheduleRender(); S.chg.key = chgKey(c); }
+  } catch { /* sem pontos */ }
+  S.chg.loading = false;
+  drawActivitySoon();
+}
+function chgGroups(c) {
+  if (S.chg.conv !== c.id) return [];
+  const by = new Map();
+  for (const [id, v] of Object.entries(S.chg.list)) {
+    const p = String(v.path || '');
+    if (!by.has(p)) by.set(p, []);
+    by.get(p).push({ id, ...v });
+  }
+  return [...by.entries()].map(([path, items]) => {
+    items.sort((a, b) => (a.at || 0) - (b.at || 0));
+    return { path, items, first: items[0], last: items[items.length - 1] };
+  }).sort((a, b) => (b.last.at || 0) - (a.last.at || 0));
+}
+/** Diff de linhas (LCS) com trechos de contexto. */
+function lineDiff(a, b) {
+  const A = a.split('\n'); const B = b.split('\n');
+  let pre = 0; while (pre < A.length && pre < B.length && A[pre] === B[pre]) pre++;
+  let suf = 0; while (suf < A.length - pre && suf < B.length - pre && A[A.length - 1 - suf] === B[B.length - 1 - suf]) suf++;
+  const a2 = A.slice(pre, A.length - suf); const b2 = B.slice(pre, B.length - suf);
+  const ops = A.slice(0, pre).map((l) => [' ', l]);
+  if (a2.length * b2.length > 4e6) { a2.forEach((l) => ops.push(['-', l])); b2.forEach((l) => ops.push(['+', l])); }
+  else {
+    const n = a2.length; const m = b2.length;
+    const dp = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) dp[i][j] = a2[i] === b2[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    let i = 0; let j = 0;
+    while (i < n || j < m) {
+      if (i < n && j < m && a2[i] === b2[j]) { ops.push([' ', a2[i]]); i++; j++; }
+      else if (i < n && (j >= m || dp[i + 1][j] >= dp[i][j + 1])) { ops.push(['-', a2[i]]); i++; }
+      else { ops.push(['+', b2[j]]); j++; }
+    }
+  }
+  A.slice(A.length - suf).forEach((l) => ops.push([' ', l]));
+  return ops;
+}
+function diffEl(ops, ctx = 2) {
+  const box = h('div.diff');
+  const keep = ops.map(() => false);
+  ops.forEach((o, i) => { if (o[0] !== ' ') for (let k = Math.max(0, i - ctx); k <= Math.min(ops.length - 1, i + ctx); k++) keep[k] = true; });
+  let gap = false;
+  ops.forEach((o, i) => {
+    if (!keep[i]) { if (!gap) { box.append(h('div.gap', null, '⋯')); gap = true; } return; }
+    gap = false;
+    box.append(h('div' + (o[0] === '-' ? '.del' : o[0] === '+' ? '.add' : '.ctx'), null, o[1] || ' '));
+  });
+  return box;
+}
+function chgOwner(c, id) { return c.messages.find((m) => m.role === 'tool' && m.cps?.includes(id)); }
+function jumpToTool(c, tmsg) {
+  if (!tmsg) return;
+  const i = c.messages.indexOf(tmsg);
+  const b = blocksOf(c).filter((x) => x.start <= i).pop();
+  if (b) jumpTo(b.start, tmsg.tool_call_id);
+}
+async function undoChange(c, g) {
+  const ids = [...g.items].reverse().map((x) => x.id);
+  try {
+    const r = await api('/api/checkpoints/undo', { conv: c.id, ids });
+    if (r.errors.length) toast('Não consegui desfazer: ' + r.errors.map((x) => x.error).join('; '), 'err');
+    else toast(`${basename(g.path)}: ${g.first.existed ? 'voltou ao original' : 'removido (foi criado pela conversa)'}`);
+  } catch (e) { toast('Erro: ' + e.message, 'err'); }
+  if (wsOf(c) === S.ws.path) refreshTree();
+  await refreshChanges(c, true);
+}
+function changesSection(c) {
+  const groups = chgGroups(c);
+  if (!groups.length) return null;
+  const sec = h('details.chg', { open: S.chg.section });
+  listen(sec, 'toggle', () => { S.chg.section = sec.open; store.set('chgOpen', sec.open); });
+  sec.append(h('summary.chg-head', null, ic('filePen'), h('span', null, 'Alterações'), h('span.chg-n', null, `${groups.length} ${groups.length === 1 ? 'arquivo' : 'arquivos'}`),
+    groups.length > 1 ? h('button.btn.sm', { onclick: async (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (!(await confirmBox(`Desfazer as alterações em ${groups.length} arquivos? Arquivos criados pela conversa são apagados.`, 'Desfazer tudo', true))) return;
+      for (const g of groups) await undoChange(c, g);
+    } }, 'Desfazer tudo') : null));
+  for (const g of groups) {
+    const key = g.first.id + ':' + g.last.id;
+    const open = S.chg.open.has(g.path);
+    const d = S.chg.diffs.get(key);
+    let counts = null;
+    if (d?.ops) { const add = d.ops.filter((o) => o[0] === '+').length; const del = d.ops.filter((o) => o[0] === '-').length; counts = h('span.chg-cnt', null, h('b.a', null, '+' + add), h('b.d', null, '−' + del)); }
+    const rel = relOf(g.path);
+    const item = h('details.chg-file', { open });
+    listen(item, 'toggle', () => {
+      if (item.open) { S.chg.open.add(g.path); if (!S.chg.diffs.has(key)) loadDiff(c, g, key); } else S.chg.open.delete(g.path);
+    });
+    item.append(h('summary', { title: g.path },
+      h('span', { html: svg(g.first.existed ? 'filePen' : 'plus'), class: 'chg-ico' + (g.first.existed ? '' : ' new') }),
+      h('span.chg-name', null, basename(rel), h('small', null, rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '')),
+      counts || h('span.chg-cnt', null, g.items.length > 1 ? `${g.items.length} vezes` : g.first.existed ? 'editado' : 'novo')));
+    const body = h('div.chg-body');
+    if (open) {
+      if (!d) { body.append(h('div.chg-note', null, 'Carregando...')); if (!S.chg.diffs.has(key)) loadDiff(c, g, key); }
+      else if (d.note) body.append(h('div.chg-note', null, d.note));
+      else body.append(diffEl(d.ops));
+      const owner = chgOwner(c, g.last.id);
+      body.append(h('div.chg-acts', null,
+        h('button.btn.sm', { onclick: () => undoChange(c, g) }, ic('history'), g.first.existed ? 'Desfazer' : 'Remover arquivo'),
+        d?.exists !== false ? h('button.btn.sm', { onclick: () => api('/api/reveal', { path: g.path, ws: wsOf(c) }).catch((e) => toast(e.message, 'err')) }, ic('external'), 'Mostrar na pasta') : null,
+        owner ? h('button.btn.sm', { onclick: () => jumpToTool(c, owner) }, ic('chat'), 'Ver na conversa') : null));
+    }
+    item.append(body);
+    sec.append(item);
+  }
+  return sec;
+}
+async function loadDiff(c, g, key) {
+  S.chg.diffs.set(key, null);
+  try {
+    const r = await api('/api/checkpoints/diff', { conv: c.id, id: g.first.id });
+    const txt = (x) => (x && typeof x.text === 'string' ? x.text : null);
+    let v;
+    if (r.error) v = { note: r.error };
+    else if (r.before?.tooBig || r.after?.tooBig) v = { note: 'Arquivo grande demais para mostrar a diferença.' };
+    else if (r.before?.binary || r.after?.binary) v = { note: 'Arquivo binário: a diferença não é mostrada.' };
+    else if (r.after?.dir || r.before?.dir) v = { note: 'Pasta criada pela conversa.' };
+    else if (r.after === null) v = { note: 'O arquivo não existe mais.', exists: false };
+    else {
+      const a = txt(r.before) ?? ''; const b = txt(r.after) ?? '';
+      v = a === b ? { note: 'Sem diferença: o arquivo está igual ao original.' } : { ops: lineDiff(a, b) };
+    }
+    S.chg.diffs.set(key, v);
+  } catch (e) { S.chg.diffs.set(key, { note: 'Erro: ' + e.message }); }
+  drawActivity();
+}
+
+/** Texto de uma mensagem do usuário como ele digitou (etiquetas viram o nome). */
+function plainOf(m) {
+  if (!m.parts?.length) return m.content || '';
+  return m.parts.map((p) => (p.t === 'text' ? p.v : p.t === 'br' ? ' ' : p.name ? `[${p.name}]` : '')).join('');
+}
+
 function drawActivity() {
   const box = $('#ws-activity'); if (!box || box.hidden) return;
   const c = cur();
@@ -4385,7 +4701,7 @@ function drawActivity() {
   blocks.forEach((b, bi) => {
     if (b.type === 'user') {
       const m = b.msgs[0];
-      list.append(h('button.act-user', { onclick: () => jumpTo(b.start) }, h('span.act-time', null, fmtStamp(m.ts).slice(11)), h('span.act-u', null, (m.content || '').replace(/\s+/g, ' ').slice(0, 140))));
+      list.append(h('button.act-user', { onclick: () => jumpTo(b.start) }, h('span.act-time', null, fmtStamp(m.ts).slice(11)), h('span.act-u', null, plainOf(m).replace(/\s+/g, ' ').slice(0, 140))));
       return;
     }
     if (b.type === 'error') { list.append(h('button.act-row.err', { onclick: () => jumpTo(b.start) }, h('span.act-ico', { html: svg('alert') }), h('span.act-main', null, h('span.act-name', null, 'Erro'), h('span.act-sub', null, b.msgs[0].content.slice(0, 120))))); return; }
@@ -4415,7 +4731,11 @@ function drawActivity() {
   box.append(h('div.act-stats', null,
     h('div', null, h('b', null, String(nTools)), h('span', null, 'ferramentas')),
     h('div', { class: nErr ? 'bad' : '' }, h('b', null, String(nErr)), h('span', null, 'erros')),
-    h('div', null, h('b', null, fmtMs(ms)), h('span', null, 'em ferramentas'))), list);
+    h('div', null, h('b', null, fmtMs(ms)), h('span', null, 'em ferramentas'))));
+  const chg = changesSection(c);
+  if (chg) box.append(chg);
+  box.append(list);
+  if (chgKey(c) !== S.chg.key) refreshChanges(c);
   box.scrollTop = atEnd ? box.scrollHeight : keep;
 }
 
@@ -4485,6 +4805,8 @@ async function init() {
   ed.addEventListener('blur', () => { saveRange(); setTimeout(closeMention, 150); });
   ed.addEventListener('paste', (e) => {
     e.preventDefault();
+    const imgs = [...(e.clipboardData?.items || [])].filter((i) => i.kind === 'file' && i.type.startsWith('image/')).map((i) => i.getAsFile()).filter(Boolean);
+    if (imgs.length) { saveRange(); imgs.forEach(pasteImage); return; }
     if (e.clipboardData?.files?.length) { saveRange(); handleDrop(e.clipboardData); return; }
     const text = e.clipboardData.getData('text/plain');
     if (text) document.execCommand('insertText', false, text);

@@ -131,6 +131,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/kvcache/prune", post(kv_prune))
         .route("/api/checkpoints", post(cp_list))
         .route("/api/checkpoints/undo", post(cp_undo))
+        .route("/api/checkpoints/diff", post(cp_diff))
+        .route("/api/img", post(img_data))
         .route("/api/checkpoints/prune", post(cp_prune))
         .route("/api/bench", get(bench_status))
         .route("/api/bench/start", post(bench_start))
@@ -951,6 +953,34 @@ async fn engines_cancel(State(app): S, b: Bytes) -> Res {
 async fn cp_list(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     ok(crate::checkpoint::list(&app, st(&v, "conv")))
+}
+
+async fn cp_diff(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    ok(crate::checkpoint::diff(&app, st(&v, "conv"), st(&v, "id")))
+}
+
+/// Imagem referenciada na mensagem, como data URL (para modelos com visão e miniaturas).
+async fn img_data(State(app): S, b: Bytes) -> Res {
+    use base64::Engine;
+    let v = body(&b);
+    let ws = ws_of(&app, st(&v, "ws"));
+    let file = resolve(&ws, st(&v, "path"));
+    let ext = file.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let mime = match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        _ => return Err(bad("Não é uma imagem.".to_string())),
+    };
+    let md = std::fs::metadata(&file).map_err(|e| bad(e.to_string()))?;
+    if md.len() > 15 * 1024 * 1024 {
+        return Err(bad("Imagem grande demais (mais de 15 MB).".to_string()));
+    }
+    let buf = std::fs::read(&file).map_err(|e| bad(e.to_string()))?;
+    ok(json!({"data": format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(buf))}))
 }
 
 async fn cp_undo(State(app): S, b: Bytes) -> Res {

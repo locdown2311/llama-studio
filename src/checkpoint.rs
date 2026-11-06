@@ -71,7 +71,7 @@ pub fn list(app: &App, conv: &str) -> Value {
             }
             if let Some(v) = std::fs::read(&p).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()) {
                 let id = p.file_stem().and_then(|x| x.to_str()).unwrap_or("").to_string();
-                out.insert(id, json!({"path": v["path"], "existed": v["existed"], "tooBig": v["tooBig"]}));
+                out.insert(id, json!({"path": v["path"], "existed": v["existed"], "tooBig": v["tooBig"], "at": v["at"]}));
             }
         }
     }
@@ -141,4 +141,33 @@ pub fn prune(app: &App, keep: &[String]) {
             }
         }
     }
+}
+
+fn text_of(p: &Path) -> Value {
+    match std::fs::metadata(p) {
+        Err(_) => Value::Null,
+        Ok(m) if m.is_dir() => json!({"dir": true}),
+        Ok(m) if m.len() > 1024 * 1024 => json!({"tooBig": true, "size": m.len()}),
+        Ok(m) => match std::fs::read(p) {
+            Ok(b) if b.iter().take(8000).any(|&c| c == 0) => json!({"binary": true, "size": m.len()}),
+            Ok(b) => json!({"text": String::from_utf8_lossy(&b), "size": m.len()}),
+            Err(_) => Value::Null,
+        },
+    }
+}
+
+/// O arquivo antes da ação `id` e como ele está agora.
+pub fn diff(app: &App, conv: &str, id: &str) -> Value {
+    let d = dir(app, conv);
+    let id = clean(id);
+    let Some(v) = std::fs::read(d.join(format!("{id}.json"))).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()) else {
+        return json!({"error": "ponto não encontrado"});
+    };
+    let path = PathBuf::from(v["path"].as_str().unwrap_or(""));
+    let before = if v["existed"] == true {
+        if v["tooBig"] == true { json!({"tooBig": true}) } else { text_of(&d.join(format!("{id}.bin"))) }
+    } else {
+        Value::Null
+    };
+    json!({"path": path, "before": before, "after": text_of(&path)})
 }
