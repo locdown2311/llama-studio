@@ -1409,6 +1409,15 @@ function userContent(m) {
   return c;
 }
 
+/** Argumentos de uma chamada como JSON de objeto válido; senão '{}'. */
+function validArgs(a, onBroken) {
+  if (a == null || (typeof a === 'string' && !a.trim())) return '{}';
+  if (typeof a === 'object') return JSON.stringify(a);
+  try { const v = JSON.parse(a); if (v && typeof v === 'object' && !Array.isArray(v)) return a; } catch { /* inválido */ }
+  onBroken();
+  return '{}';
+}
+
 function apiMessages(conv, system) {
   const out = [];
   if (system) out.push({ role: 'system', content: system });
@@ -1432,11 +1441,15 @@ function apiMessages(conv, system) {
       const calls = (m.tool_calls || []).filter((t) => t.function?.name);
       if (!text.trim() && !calls.length) continue;
       const o = { role: 'assistant', content: text };
-      if (calls.length) o.tool_calls = calls.map((t) => ({ id: t.id, type: 'function', function: { name: t.function.name, arguments: t.function.arguments || '{}' } }));
+      // argumentos cortados (resposta interrompida no meio da chamada) ou JSON inválido do próprio modelo:
+      // o llama-server recusa o pedido inteiro (erro 500), então vão como {} com um aviso no resultado
+      const broken = new Set();
+      if (calls.length) o.tool_calls = calls.map((t) => ({ id: t.id, type: 'function', function: { name: t.function.name, arguments: validArgs(t.function.arguments, () => broken.add(t.id)) } }));
       out.push(o);
       for (const t of calls) {
         const r = msgs.find((x) => x.role === 'tool' && x.tool_call_id === t.id);
         let c = r && r.content ? r.content : 'Execução cancelada pelo usuário.';
+        if (broken.has(t.id)) c = 'A chamada foi interrompida antes de os argumentos terminarem de ser gerados (JSON incompleto) e não foi executada.' + (r?.content ? '\n' + r.content : '');
         if (r?.short && c.length > 1500) c = c.slice(0, 1500) + '\n[... resultado antigo encurtado pela compactação]';
         out.push({ role: 'tool', tool_call_id: t.id, content: c });
       }
@@ -1990,7 +2003,7 @@ async function runExplorer(args, tctx, tmsg) {
     calls.forEach((t) => { if (!t.id) t.id = 'call_' + uid(); });
     const text = splitThink(m.content).text;
     if (!calls.length) return { content: text.trim() || 'O subagente terminou sem relatório.', isError: false };
-    msgs.push({ role: 'assistant', content: text, tool_calls: calls.map((t) => ({ id: t.id, type: 'function', function: { name: t.function.name, arguments: t.function.arguments || '{}' } })) });
+    msgs.push({ role: 'assistant', content: text, tool_calls: calls.map((t) => ({ id: t.id, type: 'function', function: { name: t.function.name, arguments: validArgs(t.function.arguments, () => {}) } })) });
     for (const t of calls) {
       const a = parseArgs(t.function.arguments) || {};
       const st = { name: t.function.name, summary: toolSummary(t.function.name, a), status: 'running' };
