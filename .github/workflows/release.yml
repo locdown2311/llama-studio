@@ -39,6 +39,9 @@ jobs:
       - name: Conferir a interface
         run: node --check ui/app.js
 
+      - name: Testar os recursos automáticos
+        run: node tests/rotas/run.mjs
+
       - name: Compilar
         run: cargo build --release --locked
 

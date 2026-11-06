@@ -1872,22 +1872,65 @@ async function submit(conv, item) {
 // ele vai precisar: grupos de ferramentas, conectores, habilidades e o raciocínio. Só acrescenta,
 // nunca desliga o que você escolheu. O que foi ligado aparece na mensagem, com "desfazer".
 const ROUTES = [
-  { id: 're', label: 'Engenharia reversa', think: 'on', groups: ['notebook', 'explore', 'read'], mcp: /dbg|debug|ida\b|ghidra|binja|binary.?ninja|radare|r2|cheat.?engine/i,
-    re: /x(32|64)dbg|\bdbg\b|debug|depur|breakpoint|desassembl|disassembl|engenharia reversa|reverse.?engineer|\bida\b|ghidra|radare|assembly|assembler|registrador|\b[er]?(ax|bx|cx|dx)\b|\b0x[0-9a-f]{4,}\b|\.(exe|dll|sys)\b|\bpatch|offset|\bcrack|serial|anti.?debug|ofusca|unpack|desempacot/i },
+  // strong: um sinal basta; weak: precisa de dois sinais diferentes (evita "serial killer", "patch na moda")
+  { id: 're', label: 'Engenharia reversa', think: 'on', groups: ['notebook', 'explore', 'read'], mcp: /dbg|debug|ida\b|ghidra|binja|binary.?ninja|radare|r2|cheat.?engine/i, skills: /dbg|debug|revers|engenharia/i,
+    strong: /x(32|64)dbg|\bdbg\b|\bdebugger\b|breakpoint|\bbps?\b|\bdlls?\b|endere[cç]o\s+(0x)?[0-9a-f]{6,}|desassembl|disassembl|\bida\b|ghidra|radare|cheat.?engine|(?<!(erro|error|c[oó]digo|code)\s{0,3})\b0x[0-9a-f]{4,}\b|\.(exe|dll|sys)\b|anti.?debug|desempacot|unpack|\bupx\b|\bsub_[0-9a-f]{3,}|\bdump\b.{0,30}(m[oó]dulo|mem[oó]ria|processo)|\b[er](ax|bx|cx|dx|si|di)\b/i,
+    weak: /debug|depura|engenharia reversa|reverse|assembly|registrador|\bpatch|offset|\bserial\b|licen[cç]a|execut[aá]vel|bin[aá]rio|mem[oó]ria|processo|\bstrings?\b|referen[cç]i|m[oó]dulo|\bdump\b|senha|compar[ae]|rotina|criptograf|\bimports?\b|\bexports?\b|endere[cç]o|ponteiro|\bhook|inje[cç]|\bjogo\b/gi },
   { id: 'code', label: 'Programação', groups: ['read', 'edit', 'write', 'shell', 'explore'],
-    re: /c[oó]digo|compil|\bbuild\b|\bbug|stack.?trace|exce[cç][aã]o|exception|refator|\btestes?\b|cargo|\bnpm\b|\bpip\b|python|\brust\b|javascript|typescript|c\+\+|\.(rs|js|ts|py|cs|cpp|c|h|go|java|kt|php|rb)\b|\bgit\b|commit|fun[cç][aã]o|script/i },
+    strong: /\.(rs|js|mjs|ts|tsx|jsx|py|cs|cpp|hpp|go|java|kt|php|rb|sh|ps1|lua|sql|html?|css|vue|svelte)\b|\b(sql|query|queries)\b|\b(cargo|npm|pnpm|yarn|pip|pytest|gradle|maven|dotnet|cmake)\b|stack.?trace|\bcommit|\bgit\b|pull request|\b(react|vue|svelte|django|flask|express|node\.?js)\b|typescript|javascript|python|\brust\b|c\+\+|\bc#|\bsrc\//i,
+    weak: /c[oó]digo|compil|\bbuild\b|\bbug|\berros?\b|exce[cç][aã]o|refator|\btestes?\b|script|componente|fun[cç][aã]o|m[oó]dulo|classe|\bapi\b|deploy|login|programa[cç][aã]o|\bmerge\b|\bbranch\b|quebr/gi },
   { id: 'web', label: 'Web', groups: ['browser'],
-    re: /pesquis|procur[ae] na (web|internet)|na internet|google|\bsite\b|p[aá]gina|https?:\/\/|not[ií]cia|pre[cç]o|cota[cç][aã]o|naveg/i },
+    strong: /https?:\/\/|www\.|\bsites?\b|pesquis|procur[ae] na (web|internet)|na internet|\bgoogle\b(?!\s*(drive|docs|sheets|agenda|calendar|fotos|photos))|not[ií]cias?|cota[cç][aã]o|previs[aã]o do tempo|naveg/i,
+    weak: /pre[cç]os?|\bhoje\b|p[aá]gina|\blink|atual|tutorial|lan[cç]amento|\blojas?\b|promo[cç]|onde comprar/gi },
   { id: 'pc', label: 'Computador', groups: ['computer'],
-    re: /abr[ae] o (app|programa|aplicativo)|\bclique\b|clicar|na tela|janela d[oe]|captura de tela|print da tela|controle o/i },
+    strong: /abr[ae] o (app|programa|aplicativo)|\bclic(a|ar|ue|k)\b|\bna (minha )?tela\b|tir[ae]r? (um )?print|captura de tela|fech[ae]r? a janela|\bdigit[ae]r?\b.{0,30}\b(campo|caixa|barra)\b/i,
+    weak: /photoshop|spotify|\bpaint\b|\bword\b|\bexcel\b|bot[aã]o|\bmenu\b|aplicativo/gi },
   { id: 'files', label: 'Arquivos', groups: ['read', 'write', 'shell'],
-    re: /\bpastas?\b|\barquivos?\b|renome|\bmov[ae]\b|organiz|planilha|\bpdf\b|docx|xlsx|\bzip\b|extra[ií]|compact/i },
+    need: /\b(arquivos?|pastas?|fotos?|planilhas?|pdfs?|zip|documentos?|imagens?|v[ií]deos?|prints?)\b/i,
+    strong: /\.(pdf|zip|rar|7z|docx?|xlsx?|csv|txt|png|jpe?g|mp4|mp3)\b|\b(docx|xlsx|pptx)\b|\bdownloads\b|[aá]rea de trabalho|\bdesktop\b/i,
+    weak: /renome|organiz|extra[ií]|compact|\bjunt[ae]|mescl|convert|planilha|\bpdfs?\b|\bfotos\b|\barquivos?\b|\bpastas?\b|espa[cç]o|duplicad|\bmov[ae]\b|\bapag[ae]|\bmaiores\b/gi },
   { id: 'social', label: 'Conteúdo', think: 'off', skills: /instagram|social|post|legenda|conte[uú]do/i,
-    re: /instagram|\bposts?\b|legenda|hashtag|\breels?\b|stories|carrossel|tiktok/i },
+    strong: /instagram|\breels?\b|\bstories\b|carrossel|tiktok|hashtags?|legenda/i,
+    weak: /\bposts?\b|engajamento|seguidores|\bfeed\b/gi },
 ];
+// pergunta de conceito ("o que é um debugger?", "qual a diferença entre site e app?") não liga nada,
+// a não ser que fale de algo concreto: "esse", "meu", "quando abro", um arquivo, um link, um endereço
+const ASK_RE = /^\s*(me\s+)?(o que (é|e|são|significa)|explica|explique|como funciona|qual (a|é a|e a) diferen[cç]a|qual o significado|por ?que|quem (foi|é))/i;
+const CONCRETE_RE = /\b(esse|essa|este|esta|isso|isto|aqui|nesse|nessa|neste|nesta|meu|minha|meus|minhas|abro|uso|rodo|tento|estou|t[oô])\b|https?:\/\/|\b0x[0-9a-f]{4,}\b|\b\w+\.(exe|dll|sys|rs|js|ts|py|cs|cpp|go|java|pdf|zip|docx?|xlsx?|csv|txt|png|jpe?g|json|md)\b/i;
+function routeProfiles(text) {
+  const t = String(text).replace(/(ik_)?llama\.cpp/gi, 'llama');
+  if (ASK_RE.test(t) && !CONCRETE_RE.test(t)) return [];
+  const strongHit = ROUTES.filter((r) => r.strong.test(t));
+  const weakHit = (r) => (!r.need || r.need.test(t)) && new Set((t.match(r.weak) || []).map((x) => x.toLowerCase().slice(0, 5))).size >= 2;
+  const out = ROUTES.filter((r) => strongHit.includes(r) || weakHit(r));
+  // engenharia reversa explícita: "função", "compila" e "erro" ali não são pedido de programação
+  return strongHit.some((r) => r.id === 're') && !strongHit.some((r) => r.id === 'code') ? out.filter((r) => r.id !== 'code') : out;
+}
 const STOP = new Set('para como sobre quando entre depois antes mesmo ainda cada todos todas outro outra sendo usar use usa esta este isso essa esse aqui onde qual quais pelo pela pelos pelas fazer feito skill skills habilidade arquivo arquivos'.split(' '));
 const norm = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 const words = (t) => new Set(norm(t).split(/[^a-z0-9]+/).filter((w) => w.length >= 5 && !STOP.has(w)));
+
+/** Conectores citados pelo nome e habilidades cujo nome ou descrição batem com o pedido. */
+function routeExtras(text, skills, mcps) {
+  if (ASK_RE.test(text) && !CONCRETE_RE.test(text)) return { mcp: [], skills: [] };
+  const low = ' ' + norm(text).replace(/[^a-z0-9]+/g, ' ') + ' ';
+  const mcp = mcps.filter((s) => {
+    const key = norm(s.name).replace(/mcp|server|servidor/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
+    return key.length >= 3 && low.includes(' ' + key + ' ');
+  }).map((s) => s.name);
+  const ws = words(text);
+  const out = [];
+  for (const sk of skills) {
+    const nameKey = norm(sk.name || sk.id).replace(/[^a-z0-9]+/g, ' ').trim();
+    const nameWs = words(sk.name + ' ' + sk.id);
+    const nameHit = [...nameWs].filter((w) => ws.has(w)).length;
+    const descHit = [...words(sk.description)].filter((w) => !nameWs.has(w) && ws.has(w)).length;
+    // nome completo citado; ou parte do nome + assunto da descrição; ou três palavras do assunto
+    const sc = low.includes(' ' + nameKey + ' ') || low.includes(' ' + nameKey + 's ') ? 10 : nameHit && descHit ? 5 + descHit : descHit >= 3 ? descHit : 0;
+    if (sc) out.push([sk.id, sc]);
+  }
+  return { mcp, skills: out.sort((a, b) => b[1] - a[1]).slice(0, 2).map((x) => x[0]) };
+}
 
 async function autoRoute(conv, msg) {
   const text = plainOf(msg) + ' ' + (msg.refs || []).map((r) => r.name).join(' ');
@@ -1896,24 +1939,17 @@ async function autoRoute(conv, msg) {
   const have = { groups: new Set([...enabledGroups(), ...auto.groups]), mcp: new Set([...activeSel(conv).mcp, ...auto.mcp]), skills: new Set([...activeSel(conv).skills, ...auto.skills]) };
   const added = { groups: [], mcp: [], skills: [], profiles: [] };
   const add = (k, v) => { if (!have[k].has(v)) { have[k].add(v); added[k].push(v); } };
-  for (const r of ROUTES) {
-    if (!r.re.test(text)) continue;
+  for (const r of routeProfiles(text)) {
     added.profiles.push(r.label);
     for (const g of r.groups || []) add('groups', g);
     if (r.mcp) for (const s of S.mcp) if (r.mcp.test(s.name)) add('mcp', s.name);
     if (r.skills) for (const sk of S.skills) if (r.skills.test(sk.name + ' ' + sk.id)) add('skills', sk.id);
     if (r.think && !conv.think && !conv.autoThink) conv.autoThink = r.think;
   }
-  // conectores e habilidades citados pelo nome (ex.: "meshy", "unity")
-  for (const s of S.mcp) if (norm(s.name).split(/[^a-z0-9]+/).some((w) => w.length >= 4 && low.includes(w))) add('mcp', s.name);
-  const ws = words(text);
-  const scored = S.skills.map((sk) => {
-    const name = norm(sk.name + ' ' + sk.id);
-    let sc = [...words(sk.name + ' ' + sk.id)].some((w) => low.includes(w)) ? 3 : 0;
-    for (const w of words(sk.description)) if (ws.has(w)) sc++;
-    return [sk.id, sc, name];
-  }).filter((x) => x[1] >= 3).sort((a, b) => b[1] - a[1]).slice(0, 2);
-  for (const [id] of scored) add('skills', id);
+  // conectores e habilidades citados pelo nome ou pelo assunto
+  const ex = routeExtras(text, S.skills, S.mcp);
+  for (const n of ex.mcp) add('mcp', n);
+  for (const id of ex.skills) add('skills', id);
   // conector desligado que o pedido precisa: liga e espera conectar (até 8 s)
   for (const n of added.mcp) {
     const s = S.mcp.find((x) => x.name === n);
