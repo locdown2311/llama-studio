@@ -305,7 +305,7 @@ document.addEventListener('click', (e) => {
 
 /* ============================================================ estado */
 const TOOL_GROUPS = ['read', 'write', 'edit', 'shell', 'code', 'browser', 'computer', 'history', 'toolsearch', 'explore', 'todo', 'notebook'];
-const DEFAULT_SETTINGS = { systemPrompt: '', temperature: '', topP: '', maxTokens: '', maxSteps: 30, approval: 'writes', auditor: false, auditMax: 'baixo', auditMcp: false, auditPolicy: '', theme: 'light', showThinking: true, vision: 'auto', explorerSteps: 20, autoCompact: true, compactAt: 75, compactMode: 'meio', lazyLoad: true, projMap: false, projSummary: false, tools: Object.fromEntries(TOOL_GROUPS.map((g) => [g, true])) };
+const DEFAULT_SETTINGS = { systemPrompt: '', temperature: '', topP: '', maxTokens: '', maxSteps: 30, approval: 'writes', auditor: false, auditMax: 'baixo', auditMcp: false, auditPolicy: '', theme: 'light', showThinking: true, vision: 'auto', explorerSteps: 20, autoCompact: true, compactAt: 75, compactMode: 'meio', lazyLoad: true, autoRoute: true, projMap: false, projSummary: false, tools: Object.fromEntries(TOOL_GROUPS.map((g) => [g, true])) };
 const S = {
   view: 'chat',
   convs: store.get('convs', []),
@@ -967,6 +967,7 @@ function renderUser(m, idx, conv) {
     h('div.stamp', null, fmtStamp(m.ts)),
     thumbs,
     bubble,
+    autoChip(conv, m),
     h('div.chips', null,
       h('button.chip', { onclick: () => navigator.clipboard.writeText(m.content || '').then(() => toast('Copiado')) }, ic('copy'), 'Copiar'),
       h('button.chip', { onclick: () => editFrom(conv, idx) }, ic('edit'), 'Editar'),
@@ -1860,9 +1861,93 @@ async function submit(conv, item) {
     conv.title = (plain || parts.map((p) => p.name).filter(Boolean).join(', ')).slice(0, 60);
   }
   conv.updatedAt = Date.now();
+  if (S.settings.autoRoute !== false) await autoRoute(conv, conv.messages[conv.messages.length - 1]);
   saveConvs(); renderConvList();
-  if (conv.id === S.curId) { renderChatTitle(); renderMessages(false); }
+  if (conv.id === S.curId) { renderChatTitle(); renderMessages(false); updatePickers(); }
   await runAgent(conv);
+}
+
+/* ============================================================ recursos automáticos */
+// Lê o pedido (sem o modelo: só padrões de texto, zero tokens) e liga para esta conversa o que
+// ele vai precisar: grupos de ferramentas, conectores, habilidades e o raciocínio. Só acrescenta,
+// nunca desliga o que você escolheu. O que foi ligado aparece na mensagem, com "desfazer".
+const ROUTES = [
+  { id: 're', label: 'Engenharia reversa', think: 'on', groups: ['notebook', 'explore', 'read'], mcp: /dbg|debug|ida\b|ghidra|binja|binary.?ninja|radare|r2|cheat.?engine/i,
+    re: /x(32|64)dbg|\bdbg\b|debug|depur|breakpoint|desassembl|disassembl|engenharia reversa|reverse.?engineer|\bida\b|ghidra|radare|assembly|assembler|registrador|\b[er]?(ax|bx|cx|dx)\b|\b0x[0-9a-f]{4,}\b|\.(exe|dll|sys)\b|\bpatch|offset|\bcrack|serial|anti.?debug|ofusca|unpack|desempacot/i },
+  { id: 'code', label: 'Programação', groups: ['read', 'edit', 'write', 'shell', 'explore'],
+    re: /c[oó]digo|compil|\bbuild\b|\bbug|stack.?trace|exce[cç][aã]o|exception|refator|\btestes?\b|cargo|\bnpm\b|\bpip\b|python|\brust\b|javascript|typescript|c\+\+|\.(rs|js|ts|py|cs|cpp|c|h|go|java|kt|php|rb)\b|\bgit\b|commit|fun[cç][aã]o|script/i },
+  { id: 'web', label: 'Web', groups: ['browser'],
+    re: /pesquis|procur[ae] na (web|internet)|na internet|google|\bsite\b|p[aá]gina|https?:\/\/|not[ií]cia|pre[cç]o|cota[cç][aã]o|naveg/i },
+  { id: 'pc', label: 'Computador', groups: ['computer'],
+    re: /abr[ae] o (app|programa|aplicativo)|\bclique\b|clicar|na tela|janela d[oe]|captura de tela|print da tela|controle o/i },
+  { id: 'files', label: 'Arquivos', groups: ['read', 'write', 'shell'],
+    re: /\bpastas?\b|\barquivos?\b|renome|\bmov[ae]\b|organiz|planilha|\bpdf\b|docx|xlsx|\bzip\b|extra[ií]|compact/i },
+  { id: 'social', label: 'Conteúdo', think: 'off', skills: /instagram|social|post|legenda|conte[uú]do/i,
+    re: /instagram|\bposts?\b|legenda|hashtag|\breels?\b|stories|carrossel|tiktok/i },
+];
+const STOP = new Set('para como sobre quando entre depois antes mesmo ainda cada todos todas outro outra sendo usar use usa esta este isso essa esse aqui onde qual quais pelo pela pelos pelas fazer feito skill skills habilidade arquivo arquivos'.split(' '));
+const norm = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const words = (t) => new Set(norm(t).split(/[^a-z0-9]+/).filter((w) => w.length >= 5 && !STOP.has(w)));
+
+async function autoRoute(conv, msg) {
+  const text = plainOf(msg) + ' ' + (msg.refs || []).map((r) => r.name).join(' ');
+  const low = norm(text);
+  const auto = conv.auto || { groups: [], mcp: [], skills: [] };
+  const have = { groups: new Set([...enabledGroups(), ...auto.groups]), mcp: new Set([...activeSel(conv).mcp, ...auto.mcp]), skills: new Set([...activeSel(conv).skills, ...auto.skills]) };
+  const added = { groups: [], mcp: [], skills: [], profiles: [] };
+  const add = (k, v) => { if (!have[k].has(v)) { have[k].add(v); added[k].push(v); } };
+  for (const r of ROUTES) {
+    if (!r.re.test(text)) continue;
+    added.profiles.push(r.label);
+    for (const g of r.groups || []) add('groups', g);
+    if (r.mcp) for (const s of S.mcp) if (r.mcp.test(s.name)) add('mcp', s.name);
+    if (r.skills) for (const sk of S.skills) if (r.skills.test(sk.name + ' ' + sk.id)) add('skills', sk.id);
+    if (r.think && !conv.think && !conv.autoThink) conv.autoThink = r.think;
+  }
+  // conectores e habilidades citados pelo nome (ex.: "meshy", "unity")
+  for (const s of S.mcp) if (norm(s.name).split(/[^a-z0-9]+/).some((w) => w.length >= 4 && low.includes(w))) add('mcp', s.name);
+  const ws = words(text);
+  const scored = S.skills.map((sk) => {
+    const name = norm(sk.name + ' ' + sk.id);
+    let sc = [...words(sk.name + ' ' + sk.id)].some((w) => low.includes(w)) ? 3 : 0;
+    for (const w of words(sk.description)) if (ws.has(w)) sc++;
+    return [sk.id, sc, name];
+  }).filter((x) => x[1] >= 3).sort((a, b) => b[1] - a[1]).slice(0, 2);
+  for (const [id] of scored) add('skills', id);
+  // conector desligado que o pedido precisa: liga e espera conectar (até 8 s)
+  for (const n of added.mcp) {
+    const s = S.mcp.find((x) => x.name === n);
+    if (s && s.status === 'disabled') {
+      try { S.mcp = (await api('/api/mcp/toggle', { name: n, disabled: false })).servers; } catch { /* segue sem */ }
+    }
+  }
+  if (added.mcp.length) {
+    for (let i = 0; i < 16 && added.mcp.some((n) => !['connected', 'error'].includes(S.mcp.find((x) => x.name === n)?.status)); i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      try { S.mcp = (await api('/api/mcp')).servers; } catch { break; }
+    }
+  }
+  if (!added.groups.length && !added.mcp.length && !added.skills.length) return;
+  conv.auto = { groups: [...auto.groups, ...added.groups], mcp: [...auto.mcp, ...added.mcp], skills: [...auto.skills, ...added.skills] };
+  msg.auto = added;
+}
+function undoAuto(conv, msg) {
+  const a = msg.auto; if (!a || !conv.auto) return;
+  for (const k of ['groups', 'mcp', 'skills']) conv.auto[k] = conv.auto[k].filter((x) => !a[k].includes(x));
+  msg.auto = { ...a, undone: true };
+  saveConvs(); renderMessages(); updatePickers();
+  toast('Recursos automáticos desta mensagem removidos para as próximas respostas');
+}
+function autoChip(conv, m) {
+  const a = m.auto; if (!a || a.undone) return null;
+  const names = [
+    ...a.mcp,
+    ...a.skills.map((id) => S.skills.find((s) => s.id === id)?.name || id),
+    ...a.groups.map((g) => TOOL_INFO[g]?.short || TOOL_INFO[g]?.title || g),
+  ];
+  return h('div.auto-chip', { title: `Ligado automaticamente pelo pedido${a.profiles.length ? ` (${a.profiles.join(', ')})` : ''}. Vale para esta conversa.` },
+    ic('sparkles'), h('span', null, 'Ativado: ' + names.join(', ')),
+    h('button', { title: 'Desfazer', 'aria-label': 'Desfazer', html: svg('x'), onclick: () => undoAuto(conv, m) }));
 }
 
 /* ============================================================ lista de tarefas do modelo */
@@ -2369,7 +2454,7 @@ async function runPlan(conv) {
   await submit(conv, { content: text, parts: [{ t: 'text', v: text }], refs: [] });
 }
 
-function thinkOf(c) { return (c ? c.think : S.draftThink) || 'auto'; }
+function thinkOf(c) { return (c ? c.think || c.autoThink : S.draftThink) || 'auto'; }
 function requestExtras(conv) {
   const x = {};
   const t = thinkOf(conv);
@@ -2721,7 +2806,10 @@ async function runAgent(conv) {
   const t0 = Date.now();
   try {
     const act = activeSel(conv);
-    const groups = enabledGroups();
+    const au = conv.auto || {};
+    const groups = [...new Set([...enabledGroups(), ...(au.groups || [])])].filter((g) => TOOL_GROUPS.includes(g));
+    act.mcp = [...new Set([...act.mcp, ...(au.mcp || [])])];
+    act.skills = [...new Set([...act.skills, ...(au.skills || [])])].filter((id) => S.skills.some((s) => s.id === id));
     const sel = { groups, mcp: act.mcp.filter((n) => S.mcp.some((s) => s.name === n && s.status === 'connected')), skills: act.skills };
     const refs = collectRefs(conv);
     const lazy = S.settings.lazyLoad !== false;
@@ -3812,6 +3900,7 @@ function renderSettings() {
         field('Máximo de tokens', input('input.input', { value: st.maxTokens, placeholder: 'sem limite', inputmode: 'numeric' }, (x) => put({ maxTokens: x.value.trim() })))),
       field('Enviar imagens ao modelo', seg([['auto', `Automático (${S.vision ? 'tem visão' : 'sem visão'})`], ['on', 'Sempre'], ['off', 'Nunca']], st.vision, (v) => put({ vision: v })), 'Capturas de tela e imagens coladas na mensagem.')),
     section('tools', 'Ferramentas', 'O que o modelo pode usar. Também dá para ligar e desligar pela barra do chat.',
+      sw('Ativar recursos automaticamente', 'Pelo pedido, liga sozinho o que ele precisa nesta conversa: ferramentas, conectores (ex.: x64dbg ao falar de depuração), habilidades e o raciocínio. Sem gastar tokens; dá para desfazer na mensagem.', st.autoRoute !== false, (v) => put({ autoRoute: v })),
       toolGrid,
       h('div.row', null,
         field('Passos com ferramentas por resposta', input('input.input', { value: st.maxSteps, inputmode: 'numeric' }, (x) => put({ maxSteps: Number(x.value) || 30 })), 'O modelo para depois disso e pede para continuar.'),
