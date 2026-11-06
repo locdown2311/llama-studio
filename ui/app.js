@@ -2041,6 +2041,12 @@ async function autoRoute(conv, msg) {
   // conector citado pelo nome vai completo (sem catálogo) e, em engenharia reversa, a tela fica de fora:
   // o modelo usa o x64dbg pelo conector em vez de clicar na janela dele
   for (const n of ex.mcp) if (!(auto.eager || []).includes(n)) added.eager.push(n);
+  // o que o pedido indicou vira o mesmo aviso que o @ gera ("Conector:x64dbg"), que o modelo segue
+  const said = [...new Set([...ex.mcp, ...added.mcp.filter((n) => ROUTES[0].mcp.test(n))])];
+  const pills = new Set((msg.parts || []).filter((p) => p.kind === 'mcp' || p.kind === 'skill').map((p) => p.name));
+  const use = [...said.filter((n) => !pills.has(n)).map((n) => `Conector:${n}`),
+    ...ex.skills.map((id) => S.skills.find((x) => x.id === id)?.name || id).filter((n) => !pills.has(n)).map((n) => `Habilidade:${n}`)];
+  if (use.length) msg.use = use;
   const reMcp = profs.some((r) => r.id === 're') && [...have.mcp].some((n) => ROUTES[0].mcp.test(n));
   const namedDbg = ex.mcp.some((n) => ROUTES[0].mcp.test(n)); // "abre o programa no x64dbg": é o debugger, não a tela
   if (reMcp && (namedDbg || !profs.some((r) => r.id === 'pc')) && !(auto.block || []).includes('computer')) added.block.push('computer');
@@ -2241,7 +2247,7 @@ function apiMessages(conv, system) {
       continue;
     }
     if (m.role === 'user') {
-      const text = userContent(m) + (m.plan ? PLAN_NOTE : '');
+      const text = userContent(m) + (m.use?.length && !m.auto?.undone ? `\n\n(Use ${m.use.join(' e ')} para isso.)` : '') + (m.plan ? PLAN_NOTE : '');
       const imgs = m.__i === lastUserIdx && visionOn() ? (m.refs || []).filter(isImgRef).map((r) => S.imgData.get(r.path)).filter(Boolean) : [];
       out.push({ role: 'user', content: imgs.length ? [{ type: 'text', text }, ...imgs.map((url) => ({ type: 'image_url', image_url: { url } }))] : text });
     }
@@ -3093,7 +3099,9 @@ async function runAgent(conv) {
     const sel = { groups, mcp: act.mcp.filter((n) => S.mcp.some((s) => s.name === n && s.status === 'connected')), skills: act.skills };
     const refs = collectRefs(conv);
     const lazy = S.settings.lazyLoad !== false;
-    const fetchTools = () => api('/api/tools', { ...sel, extra: conv.extraTools || [], lazy, eager: (conv.auto?.eager || []).filter((n) => sel.mcp.includes(n)) });
+    const lastUserMsg = [...conv.messages].reverse().find((m) => m.role === 'user' && !m.hidden);
+    const mentioned = (lastUserMsg?.parts || []).filter((p) => p.kind === 'mcp').map((p) => p.id);
+    const fetchTools = () => api('/api/tools', { ...sel, extra: conv.extraTools || [], lazy, eager: [...new Set([...(conv.auto?.eager || []), ...mentioned])].filter((n) => sel.mcp.includes(n)) });
     let [{ tools, meta, catalog }, ctx] = await Promise.all([
       fetchTools(),
       // o prompt de sistema precisa ficar idêntico entre mensagens para o llama-server reaproveitar o cache:

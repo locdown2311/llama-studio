@@ -297,6 +297,7 @@ pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[Strin
             parts.push(format!("Terminal: PowerShell; use comandos dele para o resto. Atalhos instalados: {}.", tips.join("; ")));
         }
         if !app.mcp.status_json().is_empty() {
+            parts.push("Quando o pedido indicar um conector ou habilidade (Conector:nome, Habilidade:nome), use exatamente esse; não tente outros caminhos antes dele.".into());
             parts.push("Conectores MCP já estão rodando no studio: para o que um conector faz, chame as ferramentas dele (nome_do_conector__ferramenta, ou ache com search_tools). Nunca inicie o servidor de um conector pelo terminal (uvx, npx, python, node).".into());
         }
     }
