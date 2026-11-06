@@ -91,6 +91,9 @@ O instalador não pede administrador: instala em `%LOCALAPPDATA%\Programs\Llama 
 - **Arrumar pastas**: regras que movem arquivos para subpastas por tipo, nome e data (`Capturas\{ano}\{mesnome}`), com prévia, desfazer e modo automático. O modelo só ajuda a montar a regra a partir de uma frase.
 - **Calendário de conteúdo**: posts por dia com situação, legenda, hashtags e imagem; cada post pode ter a própria conversa, e o modelo sugere temas para os dias vazios com base nos posts que foram bem.
 
+### Configurações
+Divididas em subpáginas com menu lateral: Modelo, Ferramentas, Recursos automáticos, Conectores (modo de carregamento e confiança de cada um num lugar só), Segurança, Auditor, Contexto, Aparência, Janela, Compartilhar, Atualizações e Avançado. Tudo salva sozinho, e o studio volta na última subpágina aberta.
+
 ### Compartilhar
 - **Exportar e importar configurações** num arquivo `.studio.json`: configurações, personalidades, projetos, etiquetas, habilidades (com os arquivos), conectores, perfis de modelo, assinaturas e regras de pastas. Você escolhe o que vai.
 - **Segredos nunca saem**: tokens, chaves e senhas dos conectores viram campos que quem importa preenche; conector sem segredo entra desligado.

@@ -1532,7 +1532,7 @@ function fillMcpPop() {
   const pop = $('#pop-mcp'); pop.className = 'popover pop-mcp'; pop.innerHTML = '';
   pop.append(h('div.pop-head', null, h('span', null, 'Ferramentas disponíveis ao modelo')));
   const on = enabledGroups();
-  pop.append(h('button.menu-item', { onclick: () => { closePops(); setView('settings'); setTimeout(() => $('#tools-section')?.scrollIntoView({ behavior: 'smooth' }), 80); } },
+  pop.append(h('button.menu-item', { onclick: () => { closePops(); openSettings('tools'); } },
     ic('wrench'), h('span.mi-main', null, `Ferramentas internas: ${on.length} de ${TOOL_GROUPS.length} ativas`, h('span.mi-sub', null, on.map((g) => TOOL_INFO[g].short).join(', ') || 'nenhuma')), h('span.tag', null, 'Configurar')));
   pop.append(h('div.menu-sep'));
   if (!S.mcp.length) pop.append(h('div.pop-empty', null, 'Nenhum conector MCP configurado.'));
@@ -1985,7 +1985,7 @@ function fillAutoPop() {
       closePops(); updatePickers();
     } }, ic(v === 'desligado' ? 'ban' : 'signpost'), h('span.mi-main', null, l, h('span.mi-sub', null, d)), v === cur0 ? ic('check') : null));
   }
-  pop.append(h('div.pop-foot', null, h('button.link', { onclick: () => { closePops(); setView('settings'); setTimeout(() => $('#set-tools')?.scrollIntoView({ block: 'start' }), 60); } }, 'Padrão para novas conversas')));
+  pop.append(h('div.pop-foot', null, h('button.link', { onclick: () => { closePops(); openSettings('auto'); } }, 'Padrão para novas conversas')));
 }
 
 // Qual conector de engenharia reversa o pedido quer: o citado (x64dbg, dnspy...) ou o indicado
@@ -4231,58 +4231,121 @@ function renderSettings() {
     return h('label.tcard', null, h('span.tc-main', null, h('span.tc-title', null, title), desc ? h('span.tc-desc', { title: desc }, desc) : null), h('span.switch', null, i, h('span')));
   };
   const field = (label, ctl, hint) => h('div.field', null, h('label', null, label), ctl, hint ? h('small', null, hint) : null);
-  const sections = [];
-  const section = (id, title, desc, ...body) => { sections.push([id, title]); return h('section.set-sec', { id: 'set-' + id }, h('div.section-title' + (id === 'tools' ? '#tools-section' : ''), null, title), desc ? h('p.set-desc', null, desc) : null, ...body.flat().filter(Boolean)); };
+  // cada seção é uma subpágina: o menu à esquerda troca qual aparece
+  const pages = [];
+  const section = (id, title, icon, desc, ...body) => { pages.push({ id, title, icon, desc, body: body.flat().filter(Boolean) }); };
+  const group = (title, ...body) => h('div.set-group', null, h('div.set-group-title', null, title), ...body.flat().filter(Boolean));
 
   // ferramentas
   const groupsBySec = {};
   for (const g of ['browser', 'computer', 'read', 'edit', 'write', 'shell', 'code', 'history', 'toolsearch', 'explore', 'todo', 'notebook']) (groupsBySec[TOOL_INFO[g].sec] ||= []).push(g);
   const toolGrid = h('div.tgrid', null, Object.values(groupsBySec).flat().map((g) => sw(TOOL_INFO[g].title, TOOL_INFO[g].desc, S.settings.tools[g], (v) => { S.settings.tools[g] = v; store.set('settings', S.settings); saveKit(); updatePickers(); saved(); })));
 
-  const body = [
-    section('model', 'Modelo', 'Como o modelo responde em todas as conversas.',
-      field('Prompt de sistema', input('textarea.textarea', { rows: 4, value: st.systemPrompt, placeholder: 'Ex.: Responda sempre em português do Brasil, de forma direta.' }, (x) => put({ systemPrompt: x.value })), 'Vai antes das informações do espaço de trabalho e das habilidades.'),
+  section('model', 'Modelo', 'cpu', 'Como o modelo responde em todas as conversas.',
+    field('Prompt de sistema', input('textarea.textarea', { rows: 5, value: st.systemPrompt, placeholder: 'Ex.: Responda sempre em português do Brasil, de forma direta.' }, (x) => put({ systemPrompt: x.value })), 'Vai antes das informações do espaço de trabalho e das habilidades.'),
+    group('Amostragem',
       h('div.row', null,
         field('Temperatura', input('input.input', { value: st.temperature, placeholder: 'padrão do servidor', inputmode: 'decimal' }, (x) => put({ temperature: x.value.trim() }))),
         field('Top P', input('input.input', { value: st.topP, placeholder: 'padrão do servidor', inputmode: 'decimal' }, (x) => put({ topP: x.value.trim() }))),
-        field('Máximo de tokens', input('input.input', { value: st.maxTokens, placeholder: 'sem limite', inputmode: 'numeric' }, (x) => put({ maxTokens: x.value.trim() })))),
-      field('Enviar imagens ao modelo', seg([['auto', `Automático (${S.vision ? 'tem visão' : 'sem visão'})`], ['on', 'Sempre'], ['off', 'Nunca']], st.vision, (v) => put({ vision: v })), 'Capturas de tela e imagens coladas na mensagem.')),
-    section('tools', 'Ferramentas', 'O que o modelo pode usar. Também dá para ligar e desligar pela barra do chat.',
-      field('Recursos automáticos (padrão das conversas novas)', (() => { const x = h('select.select', null, AUTO_LEVELS.map(([v, l, d]) => h('option', { value: v }, `${l}: ${d}`))); x.value = st.autoRoute === false ? 'desligado' : (st.autoLevel || 'equilibrado'); x.addEventListener('change', () => put({ autoLevel: x.value, autoRoute: x.value !== 'desligado' })); return x; })(),
-        'Pelo pedido, o studio liga sozinho ferramentas, conectores, habilidades e o raciocínio da conversa, sem gastar tokens. Cada conversa pode mudar pelo botão de placa na barra do chat.'),
-      toolGrid,
+        field('Máximo de tokens', input('input.input', { value: st.maxTokens, placeholder: 'sem limite', inputmode: 'numeric' }, (x) => put({ maxTokens: x.value.trim() }))))),
+    field('Enviar imagens ao modelo', seg([['auto', `Automático (${S.vision ? 'tem visão' : 'sem visão'})`], ['on', 'Sempre'], ['off', 'Nunca']], st.vision, (v) => put({ vision: v })), 'Capturas de tela e imagens coladas na mensagem.'));
+
+  section('tools', 'Ferramentas', 'wrench', 'O que o modelo pode usar. Também dá para ligar e desligar pela barra do chat.',
+    toolGrid,
+    group('Limites',
       h('div.row', null,
         field('Passos com ferramentas por resposta', input('input.input', { value: st.maxSteps, inputmode: 'numeric' }, (x) => put({ maxSteps: Number(x.value) || 30 })), 'O modelo para depois disso e pede para continuar.'),
-        field('Passos de cada subagente', input('input.input', { value: st.explorerSteps, inputmode: 'numeric' }, (x) => put({ explorerSteps: Number(x.value) || 20 }))))),
-    section('safety', 'Segurança', 'Quando o studio pede sua permissão antes de agir.',
-      field('Pedir confirmação antes de', seg([['writes', 'O que altera algo'], ['all', 'Qualquer ferramenta'], ['never', 'Nunca perguntar']], st.approval, (v) => put({ approval: v }))),
-      auditorSection()),
-    section('context', 'Contexto', 'O que fazer quando a conversa fica longa demais para o modelo.',
+        field('Passos de cada subagente', input('input.input', { value: st.explorerSteps, inputmode: 'numeric' }, (x) => put({ explorerSteps: Number(x.value) || 20 }))))));
+
+  const autoCur = st.autoRoute === false ? 'desligado' : (st.autoLevel || 'equilibrado');
+  const autoList = h('div.set-choices', null, AUTO_LEVELS.map(([v, l, d]) => {
+    const r = h('input', { type: 'radio', name: 'autoLevel', value: v, checked: v === autoCur });
+    r.addEventListener('change', () => put({ autoLevel: v, autoRoute: v !== 'desligado' }));
+    return h('label.set-choice', null, r, h('span', null, h('b', null, l), h('small', null, d)));
+  }));
+  section('auto', 'Recursos automáticos', 'signpost', 'Pelo pedido, o studio liga sozinho ferramentas, conectores, habilidades e o raciocínio da conversa, sem gastar tokens. Este é o padrão das conversas novas; cada conversa pode mudar pelo botão de placa na barra do chat.',
+    autoList);
+
+  const mcpBox = h('div.set-mcp', null, h('small.muted', null, 'Carregando conectores…'));
+  const drawMcpBox = () => {
+    mcpBox.innerHTML = '';
+    if (!S.mcp?.length) { mcpBox.append(h('p.set-empty', null, 'Nenhum conector configurado. Adicione na página Conectores.')); return; }
+    mcpBox.append(...S.mcp.map((sv) => {
+      const sel = h('select.select', null, MCP_LOAD.map(([v, l]) => h('option', { value: v }, l)));
+      sel.value = mcpLoadOf(sv.name);
+      sel.addEventListener('change', () => { setMcpLoad(sv.name, sel.value); saved(); });
+      const tr = h('input', { type: 'checkbox', checked: (st.trustedMcp || []).includes(sv.name) });
+      tr.addEventListener('change', () => { trustMcp(sv.name, tr.checked); saved(); });
+      const n = sv.tools?.length || 0;
+      return h('div.set-mcp-row', null,
+        h('div.set-mcp-name', null, h('span.dot.' + statusInfo(sv.status).dot), h('b', null, sv.name), h('small', null, sv.status === 'connected' ? `${n} ferramentas` : statusInfo(sv.status).label)),
+        h('label.set-mini', { title: 'Como as ferramentas entram no contexto' }, h('span', null, 'Carregar'), sel),
+        h('label.set-mini.set-trust', { title: 'Ações que alteram algo não pedem confirmação' }, tr, h('span', null, 'Confiar')));
+    }));
+  };
+  if (S.mcp) drawMcpBox(); else api('/api/mcp').then((r) => { S.mcp = r.servers; drawMcpBox(); }).catch(() => drawMcpBox());
+  section('connectors', 'Conectores', 'plug', 'Como as ferramentas de cada conector entram no contexto e quais você confia.',
+    mcpBox,
+    h('div.set-legend', null, MCP_LOAD.map(([, l, d]) => h('div', null, h('b', null, l + ': '), d)), h('div', null, h('b', null, 'Confiar: '), 'o que altera algo nesse conector roda sem pedir confirmação.')));
+
+  section('safety', 'Segurança', 'shield', 'Quando o studio pede sua permissão antes de agir.',
+    field('Pedir confirmação antes de', seg([['writes', 'O que altera algo'], ['all', 'Qualquer ferramenta'], ['never', 'Nunca perguntar']], st.approval, (v) => put({ approval: v })), 'Arquivos, comandos e ações de conectores que alteram algo. Conectores marcados como confiáveis não perguntam.'));
+
+  section('auditor', 'Auditor', 'eye', 'Um subagente que lê cada ação, avalia o risco e aprova sozinho o que é seguro. Funciona até em "Nunca perguntar".',
+    auditorSection());
+
+  section('context', 'Contexto', 'brain', 'O que o modelo recebe no começo e o que fazer quando a conversa fica longa demais.',
+    group('Pré-leitura',
       sw('Pré-leitura da pasta de trabalho', 'O modelo recebe um mapa curto da pasta (estrutura, tipos de arquivo, README) no começo da conversa, sem gastar chamadas de ferramenta. Montado sem o modelo.', st.projMap === true, (v) => put({ projMap: v })),
-      sw('Resumir a pasta com o modelo', 'Uma vez por pasta, quando o servidor estiver livre, o modelo escreve um resumo de 6 linhas que vai junto com o mapa.', st.projSummary === true, (v) => put({ projSummary: v })),
+      sw('Resumir a pasta com o modelo', 'Uma vez por pasta, quando o servidor estiver livre, o modelo escreve um resumo de 6 linhas que vai junto com o mapa.', st.projSummary === true, (v) => put({ projSummary: v }))),
+    group('Compactação',
       sw('Compactar automaticamente', `Resume a conversa quando passar do limite abaixo${S.nCtx ? ` (contexto de ${S.nCtx.toLocaleString('pt-BR')} tokens)` : ''}.`, st.autoCompact, (v) => put({ autoCompact: v })),
       h('div.row', null,
         field('Compactar ao chegar em', (() => { const sl = slider({ min: 30, max: 95, step: 5, fmt: (v) => v + '% do contexto' }, st.compactAt, { optional: false }); sl.el.addEventListener('change', () => put({ compactAt: Number(sl.get()) })); return sl.el; })()),
-        field('O que resumir', (() => { const x = h('select.select', null, h('option', { value: 'meio' }, 'O meio (guarda início e fim)'), h('option', { value: 'inicio' }, 'O começo (guarda só o fim)')); x.value = st.compactMode || 'meio'; x.addEventListener('change', () => put({ compactMode: x.value })); return x; })()))),
-    section('look', 'Aparência', null,
-      field('Tema', seg([['auto', 'Automático'], ['dark', 'Escuro'], ['light', 'Claro']], st.theme, (v) => { put({ theme: v }); applyTheme(); })),
-      sw('Mostrar o raciocínio do modelo', 'Os blocos de "pensando" aparecem na conversa, recolhidos.', st.showThinking, (v) => { put({ showThinking: v }); renderMessages(); }),
-      S.info.native ? sw('Usar a placa de vídeo para desenhar a janela', 'Desligado, a janela não ocupa VRAM do modelo. Vale na próxima vez que a janela abrir.', S.info.windowGpu, async (v) => { await api('/api/config', { windowGpu: v }); S.info.windowGpu = v; saved(); }) : null,
-      S.info.native ? sw('Fechar a janela deixa o studio na bandeja', 'A janela é destruída e a memória dela volta para o sistema.', S.info.closeToTray !== false, async (v) => { await api('/api/config', { closeToTray: v }); S.info.closeToTray = v; saved(); }) : null),
-    section('share', 'Compartilhar', 'Exporte suas configurações num arquivo para outra pessoa (ou outro PC) importar. Tokens e chaves dos conectores nunca saem: quem importa preenche os dele.',
-      h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
-        h('button.btn', { type: 'button', onclick: exportDialog }, ic('download'), 'Exportar configurações'),
-        h('button.btn', { type: 'button', onclick: () => importDialog() }, ic('folderOpen'), 'Importar um pacote'))),
-    section('updates', 'Atualizações', null, updateSection()),
-    section('advanced', 'Avançado', null,
-      field('Endereço do llama-server', input('input.input.mono', { value: S.info.llamaUrl || '' }, async (x) => {
-        const v = x.value.trim(); if (!v || v === S.info.llamaUrl) return;
-        await api('/api/config', { llamaUrl: v }); S.info.llamaUrl = v; checkHealth(); saved();
-      }), 'Muda sozinho quando você salva a página Servidor. Ajuste só se o llama-server roda em outro lugar.')),
-  ];
-  const nav = h('nav.set-nav', null, sections.map(([id, title]) => h('button', { type: 'button', onclick: () => $('#set-' + id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, title)));
-  f.append(nav, ...body);
+        field('O que resumir', (() => { const x = h('select.select', null, h('option', { value: 'meio' }, 'O meio (guarda início e fim)'), h('option', { value: 'inicio' }, 'O começo (guarda só o fim)')); x.value = st.compactMode || 'meio'; x.addEventListener('change', () => put({ compactMode: x.value })); return x; })()))));
+
+  section('look', 'Aparência', 'sparkles', null,
+    field('Tema', seg([['auto', 'Automático'], ['dark', 'Escuro'], ['light', 'Claro']], st.theme, (v) => { put({ theme: v }); applyTheme(); })),
+    sw('Mostrar o raciocínio do modelo', 'Os blocos de "pensando" aparecem na conversa, recolhidos.', st.showThinking, (v) => { put({ showThinking: v }); renderMessages(); }));
+
+  if (S.info.native) section('window', 'Janela', 'monitor', 'Como a janela do studio usa o sistema.',
+    sw('Usar a placa de vídeo para desenhar a janela', 'Desligado, a janela não ocupa VRAM do modelo. Vale na próxima vez que a janela abrir.', S.info.windowGpu, async (v) => { await api('/api/config', { windowGpu: v }); S.info.windowGpu = v; saved(); }),
+    sw('Fechar a janela deixa o studio na bandeja', 'A janela é destruída e a memória dela volta para o sistema.', S.info.closeToTray !== false, async (v) => { await api('/api/config', { closeToTray: v }); S.info.closeToTray = v; saved(); }));
+
+  section('share', 'Compartilhar', 'download', 'Exporte suas configurações num arquivo para outra pessoa (ou outro PC) importar. Tokens e chaves dos conectores nunca saem: quem importa preenche os dele.',
+    h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
+      h('button.btn', { type: 'button', onclick: exportDialog }, ic('download'), 'Exportar configurações'),
+      h('button.btn', { type: 'button', onclick: () => importDialog() }, ic('folderOpen'), 'Importar um pacote')));
+
+  section('updates', 'Atualizações', 'refresh', null, updateSection());
+
+  section('advanced', 'Avançado', 'gear', null,
+    field('Endereço do llama-server', input('input.input.mono', { value: S.info.llamaUrl || '' }, async (x) => {
+      const v = x.value.trim(); if (!v || v === S.info.llamaUrl) return;
+      await api('/api/config', { llamaUrl: v }); S.info.llamaUrl = v; checkHealth(); saved();
+    }), 'Muda sozinho quando você salva a página Servidor. Ajuste só se o llama-server roda em outro lugar.'));
+
+  let cur = setPage && pages.some((p) => p.id === setPage) ? setPage : (store.get('setPage') || 'model');
+  setPage = null;
+  if (!pages.some((p) => p.id === cur)) cur = pages[0].id;
+  const pane = h('div.set-pane');
+  const nav = h('nav.set-nav', null, pages.map((p) => h('button', { type: 'button', 'data-id': p.id, onclick: () => show(p.id) }, ic(p.icon), h('span', null, p.title))));
+  function show(id) {
+    cur = id; store.set('setPage', id);
+    const p = pages.find((x) => x.id === id);
+    $$('button', nav).forEach((b) => b.classList.toggle('on', b.dataset.id === id));
+    pane.innerHTML = '';
+    pane.append(h('section.set-sec', { id: 'set-' + id }, h('h2.set-title', null, p.title), p.desc ? h('p.set-desc', null, p.desc) : null, ...p.body));
+    pane.scrollTop = 0;
+    $('button.on', nav)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+  f.classList.add('set-layout');
+  f.append(nav, pane);
+  show(cur);
 }
+/** Abre as configurações já numa subpágina. */
+let setPage = null;
+function openSettings(page) { setPage = page; setView('settings'); }
 
 /* ============================================================ servidor (llama-server) */
 async function startLlama() {
