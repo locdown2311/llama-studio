@@ -36,15 +36,14 @@ jobs:
           tag="ik-$(date -u +%Y%m%d)-${sha:0:7}"
           echo "sha=$sha" >> $GITHUB_OUTPUT
           echo "tag=$tag" >> $GITHUB_OUTPUT
-          # pula só se essa build já saiu completa (cpu, vulkan e cuda)
+          # pula só se essa build já saiu completa (cpu e vulkan)
           n=$(gh release view "$tag" --repo "${{ github.repository }}" --json assets --jq '[.assets[].name | select(endswith(".zip"))] | length' 2>/dev/null || echo 0)
-          if [ "$n" -ge 3 ]; then echo "skip=true" >> $GITHUB_OUTPUT; else echo "skip=false" >> $GITHUB_OUTPUT; fi
+          if [ "$n" -ge 2 ]; then echo "skip=true" >> $GITHUB_OUTPUT; else echo "skip=false" >> $GITHUB_OUTPUT; fi
           echo "ik_llama.cpp $sha -> $tag"
 
   build:
     needs: prepare
     if: needs.prepare.outputs.skip != 'true'
-    # imagem com o Visual Studio 2022: o CUDA 12 não aceita o compilador do VS 2026
     runs-on: windows-2022
     strategy:
       fail-fast: false
@@ -54,8 +53,6 @@ jobs:
             cmake: -DGGML_NATIVE=OFF -DGGML_AVX2=ON
           - name: vulkan
             cmake: -DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_VULKAN=ON
-          - name: cuda-12.8
-            cmake: -DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -74,14 +71,6 @@ jobs:
           "VULKAN_SDK=C:\VulkanSDK\$env:VULKAN_VERSION" | Out-File -FilePath $env:GITHUB_ENV -Append
           "C:\VulkanSDK\$env:VULKAN_VERSION\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append
 
-      - name: CUDA
-        if: startsWith(matrix.name, 'cuda')
-        uses: Jimver/cuda-toolkit@v0.2.24
-        with:
-          cuda: '12.8.1'
-          method: network
-          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "thrust", "visual_studio_integration"]'
-
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
@@ -90,7 +79,7 @@ jobs:
         shell: pwsh
         working-directory: ik
         run: |
-          # Ninja + MSVC do ambiente: não depende da integração do CUDA com a versão do Visual Studio
+          # Ninja + MSVC do ambiente
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DLLAMA_CURL=OFF -DBUILD_SHARED_LIBS=ON ${{ matrix.cmake }}
           if ($LASTEXITCODE -ne 0) { throw "configuração falhou" }
           cmake --build build -j 4 --target llama-server llama-bench
@@ -102,9 +91,6 @@ jobs:
           $out = "ik_llama-${{ needs.prepare.outputs.tag }}-bin-win-${{ matrix.name }}-x64"
           New-Item -ItemType Directory $out | Out-Null
           Get-ChildItem ik/build/bin -Include *.exe,*.dll -Recurse | Copy-Item -Destination $out
-          if ("${{ matrix.name }}".StartsWith("cuda")) {
-            Get-ChildItem "$env:CUDA_PATH\bin" -Include cudart64_*.dll,cublas64_*.dll,cublasLt64_*.dll -Recurse | Copy-Item -Destination $out
-          }
           if (-not (Test-Path "$out/llama-server.exe")) { throw "sem llama-server.exe" }
           Copy-Item ik/LICENSE "$out/LICENSE-ik_llama.txt" -ErrorAction SilentlyContinue
           7z a -tzip "$out.zip" "./$out/*" | Out-Null

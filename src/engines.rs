@@ -30,7 +30,6 @@ pub const VARIANTS: &[Variant] = &[
     Variant { id: "cpu", family: "llama", name: "Só CPU", desc: "Sem placa de vídeo. Funciona em qualquer computador.", pat: r"-bin-win-cpu-x64\.zip$", runtime: None },
     Variant { id: "ik-cpu", family: "ik", name: "CPU", desc: "ik_llama.cpp: bem mais rápido que o llama.cpp para MoE na CPU e quantizações IQ_K.", pat: r"^ik_llama-.*-bin-win-cpu-x64\.zip$", runtime: None },
     Variant { id: "ik-vulkan", family: "ik", name: "Vulkan", desc: "ik_llama.cpp com Vulkan (AMD, NVIDIA, Intel). Suporte mais novo que o de CUDA.", pat: r"^ik_llama-.*-bin-win-vulkan-x64\.zip$", runtime: None },
-    Variant { id: "ik-cuda", family: "ik", name: "CUDA", desc: "ik_llama.cpp com CUDA (NVIDIA): o backend mais maduro do fork, com camadas MoE na CPU.", pat: r"^ik_llama-.*-bin-win-cuda-(\d[\d.]*)-x64\.zip$", runtime: None },
 ];
 
 fn engines_dir(app: &App) -> PathBuf {
