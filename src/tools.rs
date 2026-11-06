@@ -126,7 +126,7 @@ fn mcp_entries(app: &App, servers: Option<&[String]>) -> Vec<(String, String, Va
 }
 
 /// Monta a lista de ferramentas no formato OpenAI e os metadados para a interface.
-pub fn build_tools(app: &App, groups: &[String], servers: &[String], with_skills: bool, extra: &[String], only: Option<&[String]>, lazy: bool) -> Value {
+pub fn build_tools(app: &App, groups: &[String], servers: &[String], with_skills: bool, extra: &[String], only: Option<&[String]>, lazy: bool, eager: &[String]) -> Value {
     let mut tools = vec![];
     let mut meta = Map::new();
     let mut add = |name: String, desc: String, params: Value, info: Value| {
@@ -159,7 +159,8 @@ pub fn build_tools(app: &App, groups: &[String], servers: &[String], with_skills
             let tname = t.get("name").and_then(Value::as_str).unwrap_or("").to_string();
             let desc = t.get("description").and_then(Value::as_str).unwrap_or("").to_string();
             index.insert(name.clone(), (sname.clone(), tname.clone()));
-            if lazy_on && selected {
+            // conector que o usuário citou no pedido: vai com as ferramentas completas, sem catálogo
+            if lazy_on && selected && !eager.contains(&sname) {
                 // o catálogo lista tudo (carregadas ou não) para o prompt não mudar entre passos
                 let line = format!("{name}: {}", first_sentence(&desc, 90));
                 match catalog.iter_mut().find(|(s, _)| *s == sname) {
@@ -303,7 +304,7 @@ pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[Strin
         parts.push("Navegador: as ferramentas browser_* controlam uma janela própria do Edge que o usuário vê. Leia a página (browser_read) e use os números dos elementos para clicar e digitar.".into());
     }
     if has("computer") {
-        parts.push("Computador: as ferramentas computer_* controlam a área de trabalho do usuário. Prefira computer_elements (lista numerada) a coordenadas. Confirme o resultado depois de cada ação.".into());
+        parts.push("Computador: as ferramentas computer_* controlam a área de trabalho do usuário. Prefira computer_elements (lista numerada) a coordenadas. Confirme o resultado depois de cada ação. Se o programa tem conector MCP (x64dbg, dnspy, Unity...), use as ferramentas do conector em vez de controlar a janela dele.".into());
     }
     if has("todo") {
         parts.push("Tarefas com vários passos: comece criando a lista com update_todos e mantenha-a atualizada; ela mostra ao usuário o que já foi feito e o que falta. Não termine com itens pendentes sem explicar por quê.".into());
@@ -368,6 +369,9 @@ pub async fn call(app: &Arc<App>, ws: PathBuf, name: &str, args: Value, allow: &
         return out(app.browser.tool(&app.http, &ws, name, &args).await);
     }
     if name.starts_with("computer_") && def(name).is_some() {
+        if let Some(msg) = app_has_connector(app, &args) {
+            return out(Err(msg));
+        }
         return out(crate::computer::tool(&ws, name, &args).await);
     }
     let (compact_on, rtk_on) = {
@@ -578,6 +582,26 @@ fn resolve_read(app: &App, ws: &Path, p: &str, allow: &[PathBuf]) -> Result<Path
         return Ok(full);
     }
     Err(format!("Acesso negado: \"{p}\" está fora da pasta de trabalho ({}).", ws.display()))
+}
+
+/// Controlar pela tela um programa que tem conector (ex.: a janela do x64dbg) é lento e erra muito:
+/// recusa e aponta as ferramentas do conector.
+fn app_has_connector(app: &App, args: &Value) -> Option<String> {
+    let low = args.to_string().to_lowercase();
+    for sv in app.mcp.status_json() {
+        let name = sv["name"].as_str().unwrap_or("");
+        let key: String = name.to_lowercase().replace("mcp", "").chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+        if key.len() < 4 || !low.contains(&key) || sv["status"] != "connected" {
+            continue;
+        }
+        let tools: Vec<String> = sv["tools"].as_array().into_iter().flatten().filter_map(|t| t["name"].as_str()).take(8).map(|t| format!("{}__{}", safe_name(name), safe_name(t))).collect();
+        return Some(format!(
+            "Não controlei a tela: o programa \"{name}\" tem conector conectado no studio. Use as ferramentas dele ({}{}); são mais rápidas e precisas que clicar na janela. Se precisar de uma que não está carregada, use search_tools.",
+            tools.join(", "),
+            if tools.len() == 8 { ", ..." } else { "" }
+        ));
+    }
+    None
 }
 
 /// O modelo às vezes tenta rodar pelo terminal o servidor de um conector (ex.: `uvx mcp-server-fetch`),

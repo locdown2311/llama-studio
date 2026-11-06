@@ -2010,10 +2010,11 @@ async function autoRoute(conv, msg) {
   const low = norm(text);
   const auto = conv.auto || { groups: [], mcp: [], skills: [] };
   const have = { groups: new Set([...enabledGroups(), ...auto.groups]), mcp: new Set([...activeSel(conv).mcp, ...auto.mcp]), skills: new Set([...activeSel(conv).skills, ...auto.skills]) };
-  const added = { groups: [], mcp: [], skills: [], profiles: [] };
+  const added = { groups: [], mcp: [], skills: [], profiles: [], eager: [], block: [] };
   const add = (k, v) => { if (!have[k].has(v)) { have[k].add(v); added[k].push(v); } };
   const level = autoLevelOf(conv);
-  for (const r of routeProfiles(text, level)) {
+  const profs = routeProfiles(text, level);
+  for (const r of profs) {
     added.profiles.push(r.label);
     for (const g of r.groups || []) add('groups', g);
     if (r.mcp) for (const n of pickConnectors(r, text, S.mcp)) add('mcp', n);
@@ -2037,13 +2038,19 @@ async function autoRoute(conv, msg) {
       try { S.mcp = (await api('/api/mcp')).servers; } catch { break; }
     }
   }
-  if (!added.groups.length && !added.mcp.length && !added.skills.length) return;
-  conv.auto = { groups: [...auto.groups, ...added.groups], mcp: [...auto.mcp, ...added.mcp], skills: [...auto.skills, ...added.skills] };
+  // conector citado pelo nome vai completo (sem catálogo) e, em engenharia reversa, a tela fica de fora:
+  // o modelo usa o x64dbg pelo conector em vez de clicar na janela dele
+  for (const n of ex.mcp) if (!(auto.eager || []).includes(n)) added.eager.push(n);
+  const reMcp = profs.some((r) => r.id === 're') && [...have.mcp].some((n) => ROUTES[0].mcp.test(n));
+  const namedDbg = ex.mcp.some((n) => ROUTES[0].mcp.test(n)); // "abre o programa no x64dbg": é o debugger, não a tela
+  if (reMcp && (namedDbg || !profs.some((r) => r.id === 'pc')) && !(auto.block || []).includes('computer')) added.block.push('computer');
+  if (!added.groups.length && !added.mcp.length && !added.skills.length && !added.eager.length && !added.block.length) return;
+  conv.auto = { groups: [...auto.groups, ...added.groups], mcp: [...auto.mcp, ...added.mcp], skills: [...auto.skills, ...added.skills], eager: [...(auto.eager || []), ...added.eager], block: [...(auto.block || []), ...added.block] };
   msg.auto = added;
 }
 function undoAuto(conv, msg) {
   const a = msg.auto; if (!a || !conv.auto) return;
-  for (const k of ['groups', 'mcp', 'skills']) conv.auto[k] = conv.auto[k].filter((x) => !a[k].includes(x));
+  for (const k of ['groups', 'mcp', 'skills', 'eager', 'block']) conv.auto[k] = (conv.auto[k] || []).filter((x) => !(a[k] || []).includes(x));
   msg.auto = { ...a, undone: true };
   saveConvs(); renderMessages(); updatePickers();
   toast('Recursos automáticos desta mensagem removidos para as próximas respostas');
@@ -2055,6 +2062,7 @@ function autoChip(conv, m) {
     ...a.skills.map((id) => S.skills.find((s) => s.id === id)?.name || id),
     ...a.groups.map((g) => TOOL_INFO[g]?.short || TOOL_INFO[g]?.title || g),
   ];
+  if (a.block?.includes('computer')) names.push('sem controle da tela');
   return h('div.auto-chip', { title: `Ligado automaticamente pelo pedido${a.profiles.length ? ` (${a.profiles.join(', ')})` : ''}. Vale para esta conversa.` },
     ic('sparkles'), h('span', null, 'Ativado: ' + names.join(', ')),
     h('button', { title: 'Desfazer', 'aria-label': 'Desfazer', html: svg('x'), onclick: () => undoAuto(conv, m) }));
@@ -3079,13 +3087,13 @@ async function runAgent(conv) {
   try {
     const act = activeSel(conv);
     const au = conv.auto || {};
-    const groups = [...new Set([...enabledGroups(), ...(au.groups || [])])].filter((g) => TOOL_GROUPS.includes(g));
+    const groups = [...new Set([...enabledGroups(), ...(au.groups || [])])].filter((g) => TOOL_GROUPS.includes(g) && !(au.block || []).includes(g));
     act.mcp = [...new Set([...act.mcp, ...(au.mcp || [])])];
     act.skills = [...new Set([...act.skills, ...(au.skills || [])])].filter((id) => S.skills.some((s) => s.id === id));
     const sel = { groups, mcp: act.mcp.filter((n) => S.mcp.some((s) => s.name === n && s.status === 'connected')), skills: act.skills };
     const refs = collectRefs(conv);
     const lazy = S.settings.lazyLoad !== false;
-    const fetchTools = () => api('/api/tools', { ...sel, extra: conv.extraTools || [], lazy });
+    const fetchTools = () => api('/api/tools', { ...sel, extra: conv.extraTools || [], lazy, eager: (conv.auto?.eager || []).filter((n) => sel.mcp.includes(n)) });
     let [{ tools, meta, catalog }, ctx] = await Promise.all([
       fetchTools(),
       // o prompt de sistema precisa ficar idêntico entre mensagens para o llama-server reaproveitar o cache:
