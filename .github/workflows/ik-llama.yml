@@ -36,7 +36,9 @@ jobs:
           tag="ik-$(date -u +%Y%m%d)-${sha:0:7}"
           echo "sha=$sha" >> $GITHUB_OUTPUT
           echo "tag=$tag" >> $GITHUB_OUTPUT
-          if gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then echo "skip=true" >> $GITHUB_OUTPUT; else echo "skip=false" >> $GITHUB_OUTPUT; fi
+          # pula só se essa build já saiu completa (cpu, vulkan e cuda)
+          n=$(gh release view "$tag" --repo "${{ github.repository }}" --json assets --jq '[.assets[].name | select(endswith(".zip"))] | length' 2>/dev/null || echo 0)
+          if [ "$n" -ge 3 ]; then echo "skip=true" >> $GITHUB_OUTPUT; else echo "skip=false" >> $GITHUB_OUTPUT; fi
           echo "ik_llama.cpp $sha -> $tag"
 
   build:
@@ -51,7 +53,7 @@ jobs:
             cmake: -DGGML_NATIVE=OFF -DGGML_AVX2=ON
           - name: vulkan
             cmake: -DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_VULKAN=ON
-          - name: cuda-12.4
+          - name: cuda-12.8
             cmake: -DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89" -DCMAKE_CUDA_FLAGS="-allow-unsupported-compiler"
     steps:
       - uses: actions/checkout@v4
@@ -62,25 +64,35 @@ jobs:
 
       - name: Vulkan SDK
         if: matrix.name == 'vulkan'
-        uses: humbletim/install-vulkan-sdk@v1.2
-        with:
-          version: latest
-          cache: true
+        shell: pwsh
+        env:
+          VULKAN_VERSION: 1.4.309.0
+        run: |
+          curl.exe -sSL -o "$env:RUNNER_TEMP\vk.exe" "https://sdk.lunarg.com/sdk/download/$env:VULKAN_VERSION/windows/VulkanSDK-$env:VULKAN_VERSION-Installer.exe"
+          & "$env:RUNNER_TEMP\vk.exe" --accept-licenses --default-answer --confirm-command install | Out-Null
+          "VULKAN_SDK=C:\VulkanSDK\$env:VULKAN_VERSION" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "C:\VulkanSDK\$env:VULKAN_VERSION\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append
 
       - name: CUDA
         if: startsWith(matrix.name, 'cuda')
         uses: Jimver/cuda-toolkit@v0.2.24
         with:
-          cuda: '12.4.1'
+          cuda: '12.8.1'
           method: network
           sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "thrust", "visual_studio_integration"]'
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
 
       - name: Compilar
         shell: pwsh
         working-directory: ik
         run: |
-          cmake -B build -A x64 -DLLAMA_CURL=OFF -DBUILD_SHARED_LIBS=ON ${{ matrix.cmake }}
-          cmake --build build --config Release -j 4 --target llama-server llama-bench
+          # Ninja + MSVC do ambiente: não depende da integração do CUDA com a versão do Visual Studio
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DLLAMA_CURL=OFF -DBUILD_SHARED_LIBS=ON ${{ matrix.cmake }}
+          if ($LASTEXITCODE -ne 0) { throw "configuração falhou" }
+          cmake --build build -j 4 --target llama-server llama-bench
           if ($LASTEXITCODE -ne 0) { throw "falhou" }
 
       - name: Empacotar
@@ -88,7 +100,7 @@ jobs:
         run: |
           $out = "ik_llama-${{ needs.prepare.outputs.tag }}-bin-win-${{ matrix.name }}-x64"
           New-Item -ItemType Directory $out | Out-Null
-          Get-ChildItem ik/build/bin/Release -Include *.exe,*.dll -Recurse | Copy-Item -Destination $out
+          Get-ChildItem ik/build/bin -Include *.exe,*.dll -Recurse | Copy-Item -Destination $out
           if ("${{ matrix.name }}".StartsWith("cuda")) {
             Get-ChildItem "$env:CUDA_PATH\bin" -Include cudart64_*.dll,cublas64_*.dll,cublasLt64_*.dll -Recurse | Copy-Item -Destination $out
           }

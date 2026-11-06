@@ -3750,7 +3750,14 @@ function editModel(m, path) {
       list.splice(at < 0 ? list.length : at, 0, p);
       md.close();
       await saveModels(list);
-      if (p.id === S.models.active && S.llama?.running) toast('Salvo. Recarregue o modelo para aplicar.');
+      if (p.id === S.models.active) {
+        if (S.llama?.running) {
+          if (await confirmBox(`Recarregar ${p.name} agora para aplicar as mudanças?`, 'Recarregar')) { try { await activateModel(p.id); } catch (e) { toast(e.message, 'err'); } }
+          else toast('Salvo. Vale na próxima vez que o modelo for carregado.');
+        } else {
+          try { S.llama = await api('/api/llama/config', { config: { Model: p.model, Context: p.context, CpuMoe: p.cpuMoe, Threads: p.threads, ExtraArgs: p.extraArgs } }); } catch { /* ok */ }
+        }
+      }
     } }, m ? 'Salvar' : 'Adicionar')],
   });
 }
@@ -3775,38 +3782,31 @@ function drawServerStatus() {
 }
 
 function drawServerForm() {
+  // as opções de cada modelo ficam no próprio modelo (lápis na lista acima); aqui só o que vale para todos
   const c = S.llama.config; const f = $('#srv-form'); f.innerHTML = '';
   const inp = (v, mono = true, extra = {}) => h('input.input' + (mono ? '.mono' : ''), { value: v ?? '', ...extra });
-  const exe = inp(c.ServerExe); const model = inp(c.Model);
+  const exe = inp(c.ServerExe);
   const host = inp(c.BindHost); const port = inp(c.Port, true, { inputmode: 'numeric' });
-  const ctx = slider({ opts: [2048, 4096, 8192, 16384, 24576, 32768, 49152, 65536, 98304, 131072, 196608, 262144], fmt: (v) => (v >= 1024 ? v / 1024 + 'k' : v) }, c.Context || 32768, { optional: false });
-  const moe = slider({ min: 0, max: 99, fmt: (v) => (v == 0 ? 'nenhuma' : v) }, c.CpuMoe || 0, { optional: false });
-  const thr = slider({ min: 0, max: Math.max(4, navigator.hardwareConcurrency || 16), fmt: (v) => (v == 0 ? 'automático' : v) }, c.Threads || 0, { optional: false });
-  const hip = inp(c.HipDevices);
-  const extra = argsEditor(c.ExtraArgs || '');
+  const hip = inp(c.HipDevices, true, { placeholder: 'todas' });
   const auto = h('input', { type: 'checkbox', checked: !!c.AutoStart });
-  const browse = (target, title, mode) => h('button.btn', { type: 'button', onclick: async () => {
-    const start = target.value ? target.value.replace(/[\\/][^\\/]*$/, '') : S.info.home;
-    const p = await pickPath({ title, mode, start }); if (p) target.value = p;
-  } }, 'Procurar');
   const row = (label, input, btn, small) => h('div.field', null, h('label', null, label), btn ? h('div.inline', null, input, btn) : input, small ? h('small', null, small) : null);
-  const act = modelById(S.models.active);
+  const browse = h('button.btn', { type: 'button', onclick: async () => {
+    const start = exe.value ? exe.value.replace(/[\\/][^\\/]*$/, '') : S.info.home;
+    const p = await pickPath({ title: 'Escolher o llama-server', mode: 'file', start }); if (p) exe.value = p;
+  } }, 'Procurar');
   f.append(
-    h('div.form-sec', null, act ? `Modelo carregado: ${act.name}` : 'Modelo', h('small', null, 'Arquivo, contexto, MoE, threads e argumentos extras valem só para este modelo.')),
-    row('Modelo (.gguf)', model, browse(model, 'Escolher o modelo (.gguf)', 'file')),
-    h('div.row.sld-row', null, row('Contexto (tokens)', ctx.el), row('Camadas MoE na CPU', moe.el), row('Threads', thr.el)),
-    extra.el,
-    h('div.form-sec', null, 'Servidor', h('small', null, 'Vale para todos os modelos.')),
-    row('llama-server', exe, browse(exe, 'Escolher o llama-server', 'file')),
-    h('div.row', null, row('Host', host), row('Porta', port), row('HIP_VISIBLE_DEVICES', hip)),
+    h('div.form-sec', null, 'Servidor', h('small', null, 'Vale para todos os modelos. Contexto, MoE, threads e argumentos ficam em cada modelo (lápis na lista de modelos).')),
+    h('div.row', null, row('Host', host), row('Porta', port), row('Placas (HIP_VISIBLE_DEVICES)', hip, null, 'Ex.: 0 para só a primeira')),
     h('label.opt', { style: { padding: '2px 0' } }, auto, h('span.check', { html: svg('check'), style: { background: auto.checked ? 'var(--accent)' : '' } }), h('span.opt-main', null, h('span.opt-title', null, 'Iniciar o servidor quando o studio abrir'))),
+    h('details.adv', null, h('summary', null, 'Avançado: usar outro llama-server'),
+      row('Executável', exe, browse, 'Normalmente é escolhido em Motor, acima. Use para apontar uma build sua.')),
     h('div.form-foot', null, h('button.btn.primary', { type: 'button', onclick: async () => {
       const num = (x) => Math.max(0, parseInt(x.value, 10) || 0);
       try {
-        S.llama = await api('/api/llama/config', { config: { ServerExe: exe.value.trim().replace(/^"|"$/g, ''), Model: model.value.trim().replace(/^"|"$/g, ''), BindHost: host.value.trim() || '127.0.0.1', Port: num(port) || 1235, Context: Number(ctx.get()), CpuMoe: Number(moe.get()), Threads: Number(thr.get()), HipDevices: hip.value.trim(), ExtraArgs: extra.get(), AutoStart: auto.checked } });
+        S.llama = await api('/api/llama/config', { config: { ServerExe: exe.value.trim().replace(/^"|"$/g, ''), BindHost: host.value.trim() || '127.0.0.1', Port: num(port) || 1235, HipDevices: hip.value.trim(), AutoStart: auto.checked } });
         S.info.llamaUrl = S.llama.url; lastHealth = '';
         toast(S.llama.running ? 'Salvo. Reinicie o servidor para aplicar.' : 'Configuração salva');
-        drawServerStatus(); checkHealth(); loadModels();
+        drawServerStatus(); checkHealth(); loadEngines(false);
       } catch (e) { toast(e.message, 'err'); }
     } }, 'Salvar')));
   auto.addEventListener('change', () => { auto.nextElementSibling.style.background = auto.checked ? 'var(--accent)' : ''; });

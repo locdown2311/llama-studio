@@ -1184,3 +1184,6 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .eng-fam { display: flex; align-items: baseline; gap: 10px; margin: 12px 0 8px; font-size: 13.5px; }
 .eng-fam:first-child { margin-top: 0; }
 .eng-fam span { font-size: 12px; color: var(--muted); }
+
+.adv summary { cursor: pointer; font-size: 13px; color: var(--muted); padding: 4px 0; }
+.adv[open] summary { margin-bottom: 8px; }
