@@ -486,7 +486,16 @@ impl Mcp {
         }
         let conn = e.conn.lock().unwrap().clone().filter(|c| c.alive.load(Ordering::SeqCst)).ok_or_else(|| format!("Servidor MCP \"{server}\" não está conectado."))?;
         let args = if args.is_object() { args } else { json!({}) };
-        let r = conn.request("tools/call", json!({"name": tool, "arguments": args}), Duration::from_secs(600)).await?;
+        let a = args.to_string();
+        push_log(&e.log, &format!("→ tools/call {tool} {}\n", cut_log(&a, 400)));
+        let r = match conn.request("tools/call", json!({"name": tool, "arguments": args}), Duration::from_secs(600)).await {
+            Ok(r) => r,
+            Err(err) => {
+                push_log(&e.log, &format!("← {tool}: erro: {err}\n"));
+                return Err(err);
+            }
+        };
+        push_log(&e.log, &format!("← {tool}{}: {}\n", if r.get("isError").and_then(Value::as_bool).unwrap_or(false) { " (isError)" } else { "" }, cut_log(&result_to_text(&r).replace('\n', " "), 300)));
         let images = r.get("content").and_then(Value::as_array).map(|a| a.iter().filter(|c| c["type"] == "image").filter_map(|c| Some(format!("data:{};base64,{}", c["mimeType"].as_str().unwrap_or("image/png"), c["data"].as_str()?))).collect()).unwrap_or_default();
         Ok((result_to_text(&r), r.get("isError").and_then(Value::as_bool).unwrap_or(false), images))
     }
@@ -526,24 +535,44 @@ async fn connect(e: Arc<Entry>, http: reqwest::Client) {
     }
 }
 
+fn cut_log(s: &str, n: usize) -> String {
+    if s.chars().count() <= n { s.to_string() } else { s.chars().take(n).collect::<String>() + "…" }
+}
+
 async fn connect_inner(e: Arc<Entry>, http: reqwest::Client) {
     let kind = kind_of(&e.cfg);
     let url_is_sse = e.cfg.get("url").and_then(Value::as_str).is_some_and(|u| u.trim_end_matches('/').ends_with("/sse"));
     let result = match kind {
         "stdio" => connect_stdio(&e, http).await,
-        "http" => match connect_http(&e, http.clone()).await {
-            Err(err) if url_is_sse => {
-                push_log(&e.log, &format!("HTTP falhou ({err}); o endereço termina em /sse, tentando SSE...\n"));
-                let r = connect_sse(&e, http).await;
-                if r.is_ok() {
-                    *e.kind.lock().unwrap() = "sse".into();
+        "http" => {
+            let url = e.cfg.get("url").and_then(Value::as_str).unwrap_or("").to_string();
+            // ex.: x64dbg-mcp: Streamable HTTP fica na raiz e /sse é o transporte antigo
+            let root = url_is_sse.then(|| url.trim_end_matches('/').trim_end_matches("/sse").to_string() + "/");
+            let mut r = Err(String::new());
+            if let Some(root) = &root {
+                r = connect_http(&e, http.clone(), root).await;
+                match &r {
+                    Ok(_) => push_log(&e.log, &format!("Conectado por Streamable HTTP em {root} (o endereço /sse é do transporte antigo).\n")),
+                    Err(err) => push_log(&e.log, &format!("Streamable HTTP em {root} falhou ({err}); tentando {url}...\n")),
                 }
-                r
             }
-            r => r,
-        },
+            if r.is_err() {
+                r = connect_http(&e, http.clone(), &url).await;
+            }
+            match r {
+                Err(err) if url_is_sse => {
+                    push_log(&e.log, &format!("HTTP falhou ({err}); o endereço termina em /sse, tentando SSE...\n"));
+                    let r = connect_sse(&e, http).await;
+                    if r.is_ok() {
+                        *e.kind.lock().unwrap() = "sse".into();
+                    }
+                    r
+                }
+                r => r,
+            }
+        }
         "sse" => connect_sse(&e, http).await,
-        _ => match connect_http(&e, http.clone()).await {
+        _ => match connect_http(&e, http.clone(), e.cfg.get("url").and_then(Value::as_str).unwrap_or("")).await {
             Ok(c) => {
                 *e.kind.lock().unwrap() = "http".into();
                 Ok(c)
@@ -630,8 +659,8 @@ async fn connect_stdio(e: &Arc<Entry>, http: reqwest::Client) -> Result<Arc<Conn
     Ok(conn)
 }
 
-async fn connect_http(e: &Arc<Entry>, http: reqwest::Client) -> Result<Arc<Conn>, String> {
-    let url = e.cfg["url"].as_str().unwrap_or("").to_string();
+async fn connect_http(e: &Arc<Entry>, http: reqwest::Client, url: &str) -> Result<Arc<Conn>, String> {
+    let url = url.to_string();
     reqwest::Url::parse(&url).map_err(|err| format!("URL inválida: {err}"))?;
     let conn = Conn::new(Tx::Http { url, headers: headers_of(&e.cfg), session: Mutex::new(None), proto: Mutex::new(None) }, http, e.log.clone());
     conn.initialize().await?;

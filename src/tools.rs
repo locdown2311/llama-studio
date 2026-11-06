@@ -464,7 +464,9 @@ fn fit_args(schema: &Value, args: &mut Value) -> Result<(), String> {
                 }
             }
             (Some("number"), Value::String(t)) => {
-                if let Ok(n) = t.trim().parse::<f64>() {
+                if let Ok(n) = t.trim().parse::<i64>() {
+                    *v = json!(n);
+                } else if let Ok(n) = t.trim().parse::<f64>() {
                     *v = json!(n);
                 }
             }
