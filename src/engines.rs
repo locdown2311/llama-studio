@@ -12,6 +12,8 @@ use crate::app::App;
 
 pub struct Variant {
     pub id: &'static str,
+    /// "llama" (ggml-org/llama.cpp) ou "ik" (builds do ik_llama.cpp feitas no CI deste repositório)
+    pub family: &'static str,
     pub name: &'static str,
     pub desc: &'static str,
     /// padrão do nome do pacote principal
@@ -21,11 +23,14 @@ pub struct Variant {
 }
 
 pub const VARIANTS: &[Variant] = &[
-    Variant { id: "vulkan", name: "Vulkan", desc: "AMD, NVIDIA e Intel. A escolha mais segura para placas de vídeo.", pat: r"-bin-win-vulkan-x64\.zip$", runtime: None },
-    Variant { id: "cuda", name: "CUDA", desc: "Placas NVIDIA. Em geral o mais rápido nelas; vem com as bibliotecas de runtime.", pat: r"-bin-win-cuda-(\d[\d.]*)-x64\.zip$", runtime: Some(r"^cudart-llama-bin-win-cuda-{V}-x64\.zip$") },
-    Variant { id: "rocm", name: "ROCm (HIP)", desc: "Placas AMD Radeon compatíveis com ROCm. Pode ser mais rápido que o Vulkan na leitura do prompt.", pat: r"-bin-win-(rocm|hip)[^/]*-x64\.zip$", runtime: None },
-    Variant { id: "sycl", name: "SYCL", desc: "Placas Intel Arc e iGPUs Intel recentes.", pat: r"-bin-win-sycl-x64\.zip$", runtime: None },
-    Variant { id: "cpu", name: "Só CPU", desc: "Sem placa de vídeo. Funciona em qualquer computador.", pat: r"-bin-win-cpu-x64\.zip$", runtime: None },
+    Variant { id: "vulkan", family: "llama", name: "Vulkan", desc: "AMD, NVIDIA e Intel. A escolha mais segura para placas de vídeo.", pat: r"-bin-win-vulkan-x64\.zip$", runtime: None },
+    Variant { id: "cuda", family: "llama", name: "CUDA", desc: "Placas NVIDIA. Em geral o mais rápido nelas; vem com as bibliotecas de runtime.", pat: r"-bin-win-cuda-(\d[\d.]*)-x64\.zip$", runtime: Some(r"^cudart-llama-bin-win-cuda-{V}-x64\.zip$") },
+    Variant { id: "rocm", family: "llama", name: "ROCm (HIP)", desc: "Placas AMD Radeon compatíveis com ROCm. Pode ser mais rápido que o Vulkan na leitura do prompt.", pat: r"-bin-win-(rocm|hip)[^/]*-x64\.zip$", runtime: None },
+    Variant { id: "sycl", family: "llama", name: "SYCL", desc: "Placas Intel Arc e iGPUs Intel recentes.", pat: r"-bin-win-sycl-x64\.zip$", runtime: None },
+    Variant { id: "cpu", family: "llama", name: "Só CPU", desc: "Sem placa de vídeo. Funciona em qualquer computador.", pat: r"-bin-win-cpu-x64\.zip$", runtime: None },
+    Variant { id: "ik-cpu", family: "ik", name: "CPU", desc: "ik_llama.cpp: bem mais rápido que o llama.cpp para MoE na CPU e quantizações IQ_K.", pat: r"^ik_llama-.*-bin-win-cpu-x64\.zip$", runtime: None },
+    Variant { id: "ik-vulkan", family: "ik", name: "Vulkan", desc: "ik_llama.cpp com Vulkan (AMD, NVIDIA, Intel). Suporte mais novo que o de CUDA.", pat: r"^ik_llama-.*-bin-win-vulkan-x64\.zip$", runtime: None },
+    Variant { id: "ik-cuda", family: "ik", name: "CUDA", desc: "ik_llama.cpp com CUDA (NVIDIA): o backend mais maduro do fork, com camadas MoE na CPU.", pat: r"^ik_llama-.*-bin-win-cuda-(\d[\d.]*)-x64\.zip$", runtime: None },
 ];
 
 fn engines_dir(app: &App) -> PathBuf {
@@ -36,23 +41,28 @@ fn server_name() -> String {
     format!("llama-server{}", std::env::consts::EXE_SUFFIX)
 }
 
-static RELEASES: Mutex<Option<(Instant, Vec<Value>)>> = Mutex::new(None);
+static RELEASES: Mutex<Option<std::collections::HashMap<&'static str, (Instant, Vec<Value>)>>> = Mutex::new(None);
 
-async fn releases(app: &App, force: bool) -> Result<Vec<Value>, String> {
-    if !force {
-        if let Some((t, v)) = RELEASES.lock().unwrap().as_ref() {
-            if t.elapsed() < Duration::from_secs(1800) {
-                return Ok(v.clone());
-            }
+fn repo_of(family: &str) -> &'static str {
+    if family == "ik" { crate::update::REPO } else { "ggml-org/llama.cpp" }
+}
+
+async fn releases(app: &App, family: &'static str) -> Result<Vec<Value>, String> {
+    if let Some((t, v)) = RELEASES.lock().unwrap().as_ref().and_then(|m| m.get(family)) {
+        if t.elapsed() < Duration::from_secs(1800) {
+            return Ok(v.clone());
         }
     }
     let base = std::env::var("STUDIO_GITHUB_API").unwrap_or_else(|_| "https://api.github.com".into());
-    let (status, body) = crate::update::fetch(app, &format!("{base}/repos/ggml-org/llama.cpp/releases?per_page=30"), true, Duration::from_secs(25)).await?;
+    let (status, body) = crate::update::fetch(app, &format!("{base}/repos/{}/releases?per_page=30", repo_of(family)), true, Duration::from_secs(25)).await?;
     if status != 200 {
         return Err(format!("GitHub respondeu {status}."));
     }
-    let v: Vec<Value> = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
-    *RELEASES.lock().unwrap() = Some((Instant::now(), v.clone()));
+    let mut v: Vec<Value> = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
+    if family == "ik" {
+        v.retain(|r| r["tag_name"].as_str().is_some_and(|t| t.starts_with("ik-")));
+    }
+    RELEASES.lock().unwrap().get_or_insert_with(Default::default).insert(family, (Instant::now(), v.clone()));
     Ok(v)
 }
 
@@ -158,18 +168,22 @@ pub async fn list(app: &App, check: bool) -> Value {
     out["suggest"] = json!(suggest(&g));
     out["gpus"] = json!(g);
     if check {
-        match releases(app, false).await {
-            Ok(rels) => {
-                out["available"] = json!(VARIANTS
-                    .iter()
-                    .map(|v| match pick(&rels, v) {
-                        Some((tag, label, size, _)) => json!({"id": v.id, "name": v.name, "desc": v.desc, "tag": tag, "label": label, "size": size}),
-                        None => json!({"id": v.id, "name": v.name, "desc": v.desc, "missing": true}),
-                    })
-                    .collect::<Vec<_>>());
+        let mut avail = vec![];
+        for fam in ["llama", "ik"] {
+            match releases(app, fam).await {
+                Ok(rels) => {
+                    for v in VARIANTS.iter().filter(|v| v.family == fam) {
+                        avail.push(match pick(&rels, v) {
+                            Some((tag, label, size, _)) => json!({"id": v.id, "family": fam, "name": v.name, "desc": v.desc, "tag": tag, "label": label, "size": size}),
+                            None => json!({"id": v.id, "family": fam, "name": v.name, "desc": v.desc, "missing": true}),
+                        });
+                    }
+                }
+                Err(e) if fam == "llama" => out["error"] = json!(e),
+                Err(_) => {}
             }
-            Err(e) => out["error"] = json!(e),
         }
+        out["available"] = json!(avail);
     }
     out
 }
@@ -210,7 +224,7 @@ pub fn cancel(id: &str) {
 
 pub async fn install(app: &Arc<App>, variant: &str, activate: bool) -> Result<Value, String> {
     let v = VARIANTS.iter().find(|v| v.id == variant).ok_or("Motor desconhecido.")?;
-    let rels = releases(app, false).await?;
+    let rels = releases(app, v.family).await?;
     let (tag, _, size, files) = pick(&rels, v).ok_or_else(|| format!("Não há pacote {} para Windows nas releases recentes do llama.cpp.", v.name))?;
     if JOBS.lock().unwrap().iter().any(|j| j.variant == variant && *j.status.lock().unwrap() == "downloading") {
         return Err("Esse motor já está sendo baixado.".into());

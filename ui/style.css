@@ -1181,3 +1181,6 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .td-ask { display: flex; align-items: center; gap: 8px; padding: 8px 12px 10px; border-top: 1px solid var(--line); background: var(--accent-soft); font-size: 13px; font-weight: 500; }
 .td-ask > span { flex: 1; }
 .td-head.ask .td-title::after { content: ' · aguardando você'; font-weight: 400; color: var(--accent); }
+.eng-fam { display: flex; align-items: baseline; gap: 10px; margin: 12px 0 8px; font-size: 13.5px; }
+.eng-fam:first-child { margin-top: 0; }
+.eng-fam span { font-size: 12px; color: var(--muted); }

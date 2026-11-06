@@ -3454,8 +3454,13 @@ function engineCards(box, { compact = false } = {}) {
   const job = (v) => E.jobs?.find((j) => j.variant === v && j.status === 'downloading');
   const inst = (v) => (E.installed || []).filter((x) => x.id.startsWith(v + '-'));
   if (E.error) box.append(h('div.eng-err', null, ic('alert'), E.error));
+  const fams = [['llama', 'llama.cpp', 'O oficial. Suporte a tudo que sai de novo.'], ['ik', 'ik_llama.cpp', 'Fork focado em velocidade na CPU e em MoE com camadas na CPU (como o Qwen 35B-A3B). Compilado pelo projeto do Llama Studio.']];
+  for (const [fam, title, sub] of fams) {
+  const list = (E.available || []).filter((a) => (a.family || 'llama') === fam);
+  if (!list.length || (compact && fam !== 'llama')) continue;
+  if (!compact) box.append(h('div.eng-fam', null, h('b', null, title), h('span', null, sub)));
   const grid = h('div.eng-grid');
-  for (const a of E.available || []) {
+  for (const a of list) {
     const mine = inst(a.id); const act = mine.find((x) => x.active); const jb = job(a.id);
     const newer = mine.length && a.tag && !mine.some((x) => x.id === `${a.id}-${a.tag}`);
     const rec = E.suggest === a.id;
@@ -3464,7 +3469,7 @@ function engineCards(box, { compact = false } = {}) {
       const pct = jb.total ? Math.min(100, jb.done / jb.total * 100) : 0;
       action = h('div.eng-prog', null, h('div.dl-bar', null, h('i', { style: { width: pct.toFixed(1) + '%' } })), h('span', null, `${fmtBytes(jb.done)} de ${fmtBytes(jb.total)}`),
         h('button.icon-btn.sm', { title: 'Cancelar', 'aria-label': 'Cancelar', html: svg('x'), onclick: async () => { await api('/api/engines/cancel', { id: jb.id }); loadEngines(false); } }));
-    } else if (a.missing) action = h('span.muted', null, 'Sem pacote para Windows agora');
+    } else if (a.missing) action = h('span.muted', null, a.family === 'ik' ? 'Ainda não compilado' : 'Sem pacote para Windows agora');
     else if (act && !newer) action = h('span.tag.ok', null, 'em uso');
     else if (mine.length && !newer) action = h('button.btn.sm', { onclick: async () => { try { S.llama = await api('/api/engines/use', { path: mine[0].path }); toast('Motor trocado'); loadEngines(false); drawServerStatus?.(); } catch (e) { toast(e.message, 'err'); } } }, ic('play'), 'Usar');
     else action = h('button.btn.sm' + (rec || newer ? '.primary' : ''), { onclick: () => installEngine(a.id) }, ic('download'), newer ? `Atualizar para ${a.tag}` : `Instalar · ${fmtBytes(a.size)}`);
@@ -3474,6 +3479,7 @@ function engineCards(box, { compact = false } = {}) {
       h('div.eng-foot', null, action)));
   }
   box.append(grid);
+  }
   if (!compact) {
     const cur = E.current;
     box.append(h('div.eng-cur', null, ic(E.currentExists ? 'check' : 'alert'),

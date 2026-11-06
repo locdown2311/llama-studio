@@ -1,0 +1,124 @@
+name: ik_llama.cpp (Windows)
+
+# Compila o ik_llama.cpp (fork do llama.cpp, mais rápido com MoE na CPU) para Windows,
+# porque ele não publica binários. Sai como pré-release "ik-AAAAMMDD-<commit>" neste
+# repositório; o Llama Studio lista essas builds em Servidor > Motor.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit ou branch do ik_llama.cpp
+        default: main
+  schedule:
+    - cron: '17 6 * * 1'
+  push:
+    branches: [main]
+    paths: ['.github/workflows/ik-llama.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.s.outputs.sha }}
+      tag: ${{ steps.s.outputs.tag }}
+      skip: ${{ steps.s.outputs.skip }}
+    steps:
+      - id: s
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ref="${{ github.event.inputs.ref || 'main' }}"
+          sha=$(git ls-remote https://github.com/ikawrakow/ik_llama.cpp "$ref" | head -1 | cut -f1)
+          [ -z "$sha" ] && sha="$ref"
+          tag="ik-$(date -u +%Y%m%d)-${sha:0:7}"
+          echo "sha=$sha" >> $GITHUB_OUTPUT
+          echo "tag=$tag" >> $GITHUB_OUTPUT
+          if gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then echo "skip=true" >> $GITHUB_OUTPUT; else echo "skip=false" >> $GITHUB_OUTPUT; fi
+          echo "ik_llama.cpp $sha -> $tag"
+
+  build:
+    needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: cpu
+            cmake: -DGGML_NATIVE=OFF -DGGML_AVX2=ON
+          - name: vulkan
+            cmake: -DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_VULKAN=ON
+          - name: cuda-12.4
+            cmake: -DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ikawrakow/ik_llama.cpp
+          ref: ${{ needs.prepare.outputs.sha }}
+          path: ik
+
+      - name: Vulkan SDK
+        if: matrix.name == 'vulkan'
+        uses: humbletim/install-vulkan-sdk@v1.2
+        with:
+          version: latest
+          cache: true
+
+      - name: CUDA
+        if: startsWith(matrix.name, 'cuda')
+        uses: Jimver/cuda-toolkit@v0.2.24
+        with:
+          cuda: '12.4.1'
+          method: network
+          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "thrust", "visual_studio_integration"]'
+
+      - name: Compilar
+        shell: pwsh
+        working-directory: ik
+        run: |
+          cmake -B build -G "Visual Studio 17 2022" -A x64 -DLLAMA_CURL=OFF -DBUILD_SHARED_LIBS=ON ${{ matrix.cmake }}
+          cmake --build build --config Release -j 4 --target llama-server llama-bench
+          if ($LASTEXITCODE -ne 0) { throw "falhou" }
+
+      - name: Empacotar
+        shell: pwsh
+        run: |
+          $out = "ik_llama-${{ needs.prepare.outputs.tag }}-bin-win-${{ matrix.name }}-x64"
+          New-Item -ItemType Directory $out | Out-Null
+          Get-ChildItem ik/build/bin/Release -Include *.exe,*.dll -Recurse | Copy-Item -Destination $out
+          if ("${{ matrix.name }}".StartsWith("cuda")) {
+            Get-ChildItem "$env:CUDA_PATH\bin" -Include cudart64_*.dll,cublas64_*.dll,cublasLt64_*.dll -Recurse | Copy-Item -Destination $out
+          }
+          if (-not (Test-Path "$out/llama-server.exe")) { throw "sem llama-server.exe" }
+          Copy-Item ik/LICENSE "$out/LICENSE-ik_llama.txt" -ErrorAction SilentlyContinue
+          7z a -tzip "$out.zip" "./$out/*" | Out-Null
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ik_llama-*.zip
+
+  release:
+    needs: [prepare, build]
+    if: always() && needs.prepare.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Conferir
+        run: ls -la dist; test -n "$(ls dist/*.zip 2>/dev/null)"
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: ik_llama.cpp ${{ needs.prepare.outputs.tag }}
+          prerelease: true
+          target_commitish: ${{ github.sha }}
+          body: |
+            Builds do [ik_llama.cpp](https://github.com/ikawrakow/ik_llama.cpp) para Windows x64, commit `${{ needs.prepare.outputs.sha }}`.
+            Instale pelo Llama Studio em **Servidor → Motor**. Licença MIT (a do ik_llama.cpp vai dentro de cada pacote).
+          files: dist/*.zip
