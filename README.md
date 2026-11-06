@@ -95,6 +95,9 @@ O instalador não pede administrador: instala em `%LOCALAPPDATA%\Programs\Llama 
 ### Configurações
 Um painel só, com menu lateral em quatro grupos: **Geral** (Modelo, Ferramentas, Recursos automáticos, Contexto), **Recursos** (Servidor, Conectores, Habilidades, Personalidades, Utilitários), **Segurança** (Segurança, Auditor) e **Sistema** (Aparência, Janela, Compartilhar, Atualizações, Avançado). Os itens da barra lateral são atalhos para as páginas de Recursos. Tudo salva sozinho, e o studio volta na última subpágina aberta.
 
+Com o **Modo avançado** (em Avançado) aparece a subpágina **Testes**, com funções experimentais:
+- **Escalar para um modelo maior**: depois de 2 a 4 falhas seguidas de ferramenta, ou da mesma chamada falhando de novo, o studio troca o modelo carregado por um maior escolhido por você. O modelo maior recebe uma nota sobre o que deu errado e continua a tarefa de onde parou. Depois, a conversa volta ao modelo dela no próximo pedido (ou fica no maior, se preferir). Não escala se outra conversa estiver usando o servidor.
+
 ### Compartilhar
 - **Exportar e importar configurações** num arquivo `.studio.json`: configurações, personalidades, projetos, etiquetas, habilidades (com os arquivos), conectores, perfis de modelo, assinaturas e regras de pastas. Você escolhe o que vai.
 - **Segredos nunca saem**: tokens, chaves e senhas dos conectores viram campos que quem importa preenche; conector sem segredo entra desligado.

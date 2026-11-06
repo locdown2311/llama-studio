@@ -1436,3 +1436,7 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .node.busy-w .lk { color: var(--accent); }
 .node.busy-r .nm { color: var(--text-2); }
 .node.busy-in::after { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--warn); margin-left: 6px; flex: none; }
+
+/* aviso do studio no meio da conversa (ex.: escalou para um modelo maior) */
+.notice-line { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 6px auto 14px; padding: 6px 12px; max-width: 640px; font-size: 12.5px; color: var(--text-2); border: 1px dashed var(--line-2); border-radius: 999px; width: fit-content; }
+.notice-line svg { width: 14px; height: 14px; color: var(--accent); flex: none; }

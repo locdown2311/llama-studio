@@ -3,6 +3,8 @@
 
 /* ============================================================ ícones */
 const ICONS = {
+  flask: '<path d="M9 3h6M10 3v6.5L4.6 18.4A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.4-2.6L14 9.5V3"/><path d="M7.5 15h9"/>',
+  arrowUp: '<path d="M12 19V5M5 12l7-7 7 7"/>',
   lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
   hammer: '<path d="m15 12-8.5 8.5a2.12 2.12 0 0 1-3-3L12 9"/><path d="M17.64 15 22 10.64"/><path d="m20.91 11.7-1.25-1.25a1.5 1.5 0 0 1-.44-1.06V7.5l-2.6-2.6A5.5 5.5 0 0 0 12.69 3.3H10l.92.83A6.18 6.18 0 0 1 13 8.73V10l2 2h1.17a1.5 1.5 0 0 1 1.06.44l1.25 1.25"/>',
   palette: '<path d="M12 22a10 10 0 1 1 10-10c0 2.2-1.8 3.5-4 3.5h-2a2 2 0 0 0-1.5 3.3c.5.6.4 1.6-.3 2.2-.6.4-1.4 1-2.2 1z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="12" cy="7" r="1"/><circle cx="16.5" cy="10.5" r="1"/>',
@@ -853,7 +855,7 @@ function blocksOf(conv) {
   const out = []; let ai = null;
   conv.messages.forEach((m, i) => {
     if (m.hidden) return;
-    if (m.role === 'user' || m.role === 'error') { out.push({ type: m.role, msgs: [m], start: i }); ai = null; }
+    if (m.role === 'user' || m.role === 'error' || m.role === 'notice') { out.push({ type: m.role, msgs: [m], start: i }); ai = null; }
     else { if (!ai) { ai = { type: 'ai', msgs: [], start: i }; out.push(ai); } ai.msgs.push(m); }
   });
   return out;
@@ -967,6 +969,7 @@ function renderBlock(b, conv, isLast) {
     return h('div.err-box', { dataset: { start: b.start } }, ic('alert'), h('div', null, b.msgs[0].content),
       isLast && !running(conv) ? h('button.btn.sm', { onclick: () => { conv.messages.splice(b.start, 1); runAgent(conv); } }, ic('refresh'), 'Tentar de novo') : null);
   }
+  if (b.type === 'notice') return h('div.notice-line', { dataset: { start: b.start } }, ic(b.msgs[0].icon || 'arrowUp'), h('span', null, b.msgs[0].content));
   return renderAI(b, conv, isLast);
 }
 
@@ -1591,6 +1594,48 @@ async function activateModel(id, quiet) {
   S.models.active = id; S.model = ''; S.nCtx = 0;
   updatePickers();
   if (S.view === 'server') { drawServerStatus(); drawServerForm(); drawModels(); }
+}
+
+/* ---- Testes: escalar para um modelo maior ----
+   Falhas seguidas de ferramenta (ou a mesma chamada falhando de novo) trocam o modelo carregado
+   por um maior no meio da resposta. Só com o modo avançado, e só se nenhuma outra conversa estiver usando o servidor. */
+function escalateCfg() { const e = S.settings.escalate || {}; return S.settings.advanced && e.on && e.model ? { after: Number(e.after) || 3, then: e.then || 'voltar', model: e.model } : null; }
+/** Conta as falhas do passo; devolve o motivo quando é hora de escalar. */
+function escalateWhy(conv, msg, st) {
+  const cfg = escalateCfg();
+  if (!cfg || st.done) return '';
+  for (const tc of msg.tool_calls || []) {
+    const r = conv.messages.find((m) => m.role === 'tool' && m.tool_call_id === tc.id);
+    if (!r || r.status === 'denied') continue;
+    if (r.status === 'error') {
+      st.fails++;
+      const sig = tc.function.name + ' ' + normArgs(tc.function.arguments);
+      if (st.sigs.has(sig)) st.repeat = tc.function.name;
+      st.sigs.add(sig);
+    } else if (r.status === 'ok') { st.fails = 0; }
+  }
+  if (st.repeat) return `repetiu ${st.repeat} com o mesmo erro`;
+  if (st.fails >= cfg.after) return `${st.fails} falhas seguidas`;
+  return '';
+}
+function normArgs(a) { const o = parseArgs(a); return o ? JSON.stringify(o, Object.keys(o).sort()) : String(a || ''); }
+async function escalate(conv, why, st, signal) {
+  const cfg = escalateCfg(); st.done = true;
+  const big = modelById(cfg.model); const small = modelById(S.models.active);
+  if (!big || big.id === S.models.active) return;
+  if ([...S.runs.keys()].some((id) => id !== conv.id)) {
+    conv.messages.push({ role: 'notice', icon: 'flask', content: `Ia escalar para ${big.name} (${why}), mas outra conversa está usando o servidor.` });
+    return;
+  }
+  conv.messages.push({ role: 'notice', content: `Escalado para ${big.name}: ${small?.name || 'o modelo atual'} ${why}.` });
+  conv.messages.push({ role: 'user', hidden: true, note: true, content: `(Nota do studio: o modelo anterior${small ? ` (${small.name})` : ''} ${why} nesta tarefa. Você é um modelo maior assumindo daqui. Releia os erros acima, descubra a causa e, se preciso, siga por outro caminho.)` });
+  saveConvs(); scheduleRender();
+  conv._waitingModel = true; conv._waitText = `Trocando para ${big.name}...`; scheduleRender();
+  try { await activateModel(big.id, true); } finally { conv._waitingModel = false; conv._waitText = ''; }
+  await waitModel(conv, signal); await assignSlot(conv);
+  // voltar: a conversa fica presa ao modelo de antes, e o próximo pedido troca de volta
+  if (cfg.then === 'ficar') conv.modelId = big.id; else if (!conv.modelId && small) conv.modelId = small.id;
+  saveConvs();
 }
 
 /** Antes de responder: carrega o modelo da conversa (esperando outras conversas terminarem). */
@@ -2266,6 +2311,7 @@ function apiMessages(conv, system) {
   for (const m of msgs) {
     if (m.__i >= head && m.__i < cut) continue;
     if (m.__i >= cut) pushSummary();
+    if (m.role === 'user' && m.hidden && m.note) { out.push({ role: 'user', content: m.content }); continue; }
     if (m.role === 'user' && m.hidden) {
       if (m._images?.length && m.__i > lastAssistant) out.push({ role: 'user', content: [{ type: 'text', text: m.content }, ...m._images.map((url) => ({ type: 'image_url', image_url: { url } }))] });
       else out.push({ role: 'user', content: m.content + ' [imagem omitida do histórico]' });
@@ -3175,6 +3221,7 @@ async function runAgent(conv) {
     const maxSteps = Math.max(1, Number(S.settings.maxSteps) || 30);
     const lastAsk = [...conv.messages].reverse().find((m) => m.role === 'user' && !m.hidden);
     const planTurn = !!lastAsk?.plan;
+    const esc = { fails: 0, sigs: new Set(), repeat: '', done: false };
 
     for (let step = 0; step < maxSteps; step++) {
       const msg = { role: 'assistant', content: '', reasoning: '', tool_calls: [], t0: step === 0 ? t0 : Date.now() };
@@ -3269,6 +3316,8 @@ async function runAgent(conv) {
       if (images.length && visionOn()) {
         for (const im of images) conv.messages.push({ role: 'user', hidden: true, content: `[Imagem devolvida pela ferramenta ${im.name}]`, _images: im.images });
       }
+      const why = escalateWhy(conv, msg, esc);
+      if (why) await escalate(conv, why, esc, ac.signal);
       // mensagens marcadas na fila (⚡) entram agora, entre um passo e o próximo
       const urgent = takeUrgent(conv);
       for (const it of urgent) {
@@ -4451,7 +4500,23 @@ function renderSettings() {
 
   section('updates', 'Atualizações', 'refresh', null, updateSection());
 
+  if (st.advanced) {
+    const esc = st.escalate || {};
+    const putEsc = (o) => put({ escalate: { ...(S.settings.escalate || {}), ...o } });
+    const msel = h('select.select', null, h('option', { value: '' }, 'Escolha o modelo maior'), (S.models.models || []).map((m) => h('option', { value: m.id }, `${m.name} · contexto ${fmtK(m.context)}`)));
+    msel.value = esc.model || '';
+    msel.addEventListener('change', () => putEsc({ model: msel.value }));
+    section('tests', 'Testes', 'flask', 'Funções em teste. Podem mudar ou sair nas próximas versões.',
+      group('Escalar para um modelo maior',
+        sw('Escalar quando o modelo travar', 'Depois de falhas seguidas de ferramenta, ou da mesma chamada falhando de novo, o studio troca o modelo carregado por um maior e ele continua a tarefa de onde parou.', esc.on === true, (v) => putEsc({ on: v })),
+        field('Modelo maior', msel, 'Carregar leva de segundos a minutos, conforme o tamanho. Não escala se outra conversa estiver usando o servidor.'),
+        h('div.row', null,
+          field('Escalar depois de', seg([['2', '2 falhas'], ['3', '3 falhas'], ['4', '4 falhas']], String(esc.after || 3), (v) => putEsc({ after: Number(v) }))),
+          field('Depois da tarefa', seg([['voltar', 'Volta ao modelo da conversa'], ['ficar', 'Fica no maior']], esc.then || 'voltar', (v) => putEsc({ then: v })), 'Voltar troca de novo no próximo pedido.'))));
+  }
+
   section('advanced', 'Avançado', 'sliders', null,
+    sw('Modo avançado', 'Mostra a subpágina Testes, com funções experimentais.', st.advanced === true, (v) => { put({ advanced: v }); renderSettings(); }),
     field('Endereço do llama-server', input('input.input.mono', { value: S.info.llamaUrl || '' }, async (x) => {
       const v = x.value.trim(); if (!v || v === S.info.llamaUrl) return;
       await api('/api/config', { llamaUrl: v }); S.info.llamaUrl = v; checkHealth(); saved();
@@ -4467,7 +4532,7 @@ function renderSettings() {
 /* As configurações são um painel só: as subpáginas de ajuste e as páginas de recursos (servidor,
    conectores, habilidades...) ficam no mesmo menu. Os itens da barra lateral são atalhos para elas. */
 const SET_EMBED = [['server', 'Servidor', 'server'], ['mcp', 'Conectores', 'plug'], ['skills', 'Habilidades', 'sparkles'], ['personas', 'Personalidades', 'user'], ['tools', 'Utilitários', 'wrench']];
-const SET_GROUPS = [['Geral', ['set:model', 'set:tools', 'set:auto', 'set:context']], ['Recursos', ['v:server', 'v:mcp', 'v:skills', 'v:personas', 'v:tools']], ['Segurança', ['set:safety', 'set:auditor']], ['Sistema', ['set:look', 'set:window', 'set:share', 'set:updates', 'set:advanced']]];
+const SET_GROUPS = [['Geral', ['set:model', 'set:tools', 'set:auto', 'set:context']], ['Recursos', ['v:server', 'v:mcp', 'v:skills', 'v:personas', 'v:tools']], ['Segurança', ['set:safety', 'set:auditor']], ['Sistema', ['set:look', 'set:window', 'set:share', 'set:updates', 'set:advanced', 'set:tests']]];
 let SET_PAGES = [];
 let setPage = null;
 function openSettings(page) { setPage = page; setView('settings'); }
@@ -5927,6 +5992,7 @@ function drawActivity() {
       list.append(h('button.act-user', { onclick: () => jumpTo(b.start) }, h('span.act-time', null, fmtStamp(m.ts).slice(11)), h('span.act-u', null, plainOf(m).replace(/\s+/g, ' ').slice(0, 140))));
       return;
     }
+    if (b.type === 'notice') { list.append(h('button.act-row', { onclick: () => jumpTo(b.start) }, h('span.act-ico', { html: svg(b.msgs[0].icon || 'arrowUp') }), h('span.act-main', null, h('span.act-name', null, 'Studio'), h('span.act-sub', null, b.msgs[0].content.slice(0, 120))))); return; }
     if (b.type === 'error') { list.append(h('button.act-row.err', { onclick: () => jumpTo(b.start) }, h('span.act-ico', { html: svg('alert') }), h('span.act-main', null, h('span.act-name', null, 'Erro'), h('span.act-sub', null, b.msgs[0].content.slice(0, 120))))); return; }
     const live = bi === blocks.length - 1 && running(c);
     const results = new Map(b.msgs.filter((m) => m.role === 'tool').map((m) => [m.tool_call_id, m]));
