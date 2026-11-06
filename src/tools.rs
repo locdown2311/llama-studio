@@ -584,8 +584,9 @@ fn resolve_read(app: &App, ws: &Path, p: &str, allow: &[PathBuf]) -> Result<Path
 /// que já está rodando no studio. Em vez de executar, aponta as ferramentas do conector.
 fn connector_launch(app: &App, cmd: &str) -> Option<String> {
     let low = cmd.to_lowercase().replace('\\', "/");
-    let first = low.split_whitespace().next().unwrap_or("").rsplit('/').next().unwrap_or("").trim_end_matches(".exe").to_string();
-    let launcher = matches!(first.as_str(), "uvx" | "uv" | "npx" | "bunx" | "pnpx" | "python" | "python3" | "py" | "node" | "docker" | "pipx");
+    // algum lançador em qualquer parte do comando (cd ...; uv run x.py / & "C:/.../python.exe" x.py)
+    let launcher = regex_lite::Regex::new(r#"(^|[\s;&|("'/])(uvx|uv|npx|bunx|pnpx|python3?|py|pythonw|node|docker|pipx)(\.exe)?($|[\s"'])"#).unwrap().is_match(&low)
+        || low.trim_start().starts_with('&');
     if !launcher {
         return None;
     }
@@ -603,7 +604,9 @@ fn connector_launch(app: &App, cmd: &str) -> Option<String> {
             return Some(match sv["status"].as_str().unwrap_or("") {
                 "connected" => format!("Não executei: esse comando inicia o conector \"{name}\", que já está rodando no studio. Chame as ferramentas dele diretamente ({}{}), ou use search_tools.", tools.join(", "), if tools.len() == 6 { ", ..." } else { "" }),
                 "disabled" => format!("Não executei: esse comando inicia o conector \"{name}\", que está desligado. Peça ao usuário para ligá-lo em Conectores e então use as ferramentas dele."),
-                st => format!("Não executei: esse comando inicia o conector \"{name}\" (situação: {st}). Use as ferramentas dele quando ele conectar, ou peça ao usuário para conferir em Conectores."),
+                "connecting" => format!("Não executei: esse comando inicia o conector \"{name}\", que está conectando agora. Espere um pouco e use as ferramentas dele (search_tools mostra quais são)."),
+                st => format!("Não executei: esse comando inicia o conector \"{name}\", que está com problema ({st}{}). Rodar pelo terminal não resolve: avise o usuário para abrir Conectores, ver o registro do \"{name}\" e reconectar.",
+                    sv["error"].as_str().filter(|e| !e.is_empty()).map(|e| format!(": {}", e.chars().take(200).collect::<String>())).unwrap_or_default()),
             });
         }
     }
