@@ -760,7 +760,7 @@ async fn tools_list(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     let only = v.get("only").map(|_| strs(&v, "only"));
     let lazy = v.get("lazy").and_then(Value::as_bool).unwrap_or(false);
-    ok(tools::build_tools(&app, &groups_of(&v), &strs(&v, "mcp"), !strs(&v, "skills").is_empty(), &strs(&v, "extra"), only.as_deref(), lazy, &strs(&v, "eager")))
+    ok(tools::build_tools(&app, &groups_of(&v), &strs(&v, "mcp"), !strs(&v, "skills").is_empty(), &strs(&v, "extra"), only.as_deref(), lazy, &strs(&v, "eager"), &strs(&v, "full")))
 }
 
 async fn tools_search(State(app): S, b: Bytes) -> Res {

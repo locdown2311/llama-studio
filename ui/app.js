@@ -2947,6 +2947,24 @@ function needsApproval(info, conv) {
   if (info.source === 'mcp') return !!info.mutating && !(S.settings.trustedMcp || []).includes(info.server);
   return (info.source === 'builtin' || info.source === 'client') && info.mutating;
 }
+/* carregamento das ferramentas de cada conector:
+   'auto'     sob demanda (catálogo + search_tools); citado no pedido, vai completo só se for pequeno
+   'lazy'     sempre sob demanda: o modelo busca e carrega só as que vai usar
+   'eager'    sempre completo (todas as ferramentas com os parâmetros) */
+const MCP_LOAD = [['auto', 'Automático', 'Sob demanda; citado no pedido, vai completo se tiver até 12 ferramentas visíveis.'], ['lazy', 'Sob demanda', 'Só o catálogo; o modelo busca e carrega as ferramentas que for usar.'], ['eager', 'Completo', 'Todas as ferramentas com os parâmetros, sempre. Gasta mais contexto.']];
+const EAGER_MAX = 12;
+function mcpLoadOf(name) { return S.settings.mcpLoad?.[name] || 'auto'; }
+function setMcpLoad(name, v) { S.settings.mcpLoad = { ...(S.settings.mcpLoad || {}), [name]: v }; if (v === 'auto') delete S.settings.mcpLoad[name]; store.set('settings', S.settings); }
+function visibleToolCount(name) { const s = S.mcp.find((x) => x.name === name); return s ? s.tools.filter((t) => !(s.hidden || []).includes(t.name)).length : 0; }
+/** Quais conectores selecionados vão com as ferramentas completas. */
+function eagerList(selected, cited) {
+  return selected.filter((n) => {
+    const mode = mcpLoadOf(n);
+    if (mode === 'eager') return true;
+    if (mode === 'lazy') return false;
+    return cited.includes(n) && visibleToolCount(n) <= EAGER_MAX;
+  });
+}
 function trustMcp(name, on) {
   const set = new Set(S.settings.trustedMcp || []);
   if (on) set.add(name); else set.delete(name);
@@ -3114,7 +3132,7 @@ async function runAgent(conv) {
     const lazy = S.settings.lazyLoad !== false;
     const lastUserMsg = [...conv.messages].reverse().find((m) => m.role === 'user' && !m.hidden);
     const mentioned = (lastUserMsg?.parts || []).filter((p) => p.kind === 'mcp').map((p) => p.id);
-    const fetchTools = () => api('/api/tools', { ...sel, extra: conv.extraTools || [], lazy, eager: [...new Set([...(conv.auto?.eager || []), ...mentioned])].filter((n) => sel.mcp.includes(n)) });
+    const fetchTools = () => api('/api/tools', { ...sel, extra: conv.extraTools || [], lazy, eager: eagerList(sel.mcp, [...(conv.auto?.eager || []), ...mentioned]), full: sel.mcp.filter((n) => mcpLoadOf(n) === 'eager') });
     let [{ tools, meta, catalog }, ctx] = await Promise.all([
       fetchTools(),
       // o prompt de sistema precisa ficar idêntico entre mensagens para o llama-server reaproveitar o cache:
@@ -3401,10 +3419,13 @@ async function execTool(name, args, info, tctx, tmsg) {
     if (name === 'notebook') return await notebookTool(tctx.conv, args);
     if (name === 'search_tools') {
       const names = Array.isArray(args?.names) ? args.names : typeof args?.names === 'string' ? args.names.split(/[\s,]+/).filter(Boolean) : [];
-      const r = await api('/api/tools/search', { query: args?.query || '', names });
+      if (!names.length && !String(args?.query || '').trim()) return { content: 'Passe query (palavras-chave) para procurar, ou names para carregar.', isError: true };
+      const r = await api('/api/tools/search', { query: names.length ? '' : args?.query || '', names });
       if (!r.tools.length) return { content: 'Nenhuma ferramenta encontrada para essa busca.', isError: false };
+      // a busca só mostra; carregar é com names (um conector grande não entra inteiro no contexto)
+      if (!names.length) return { content: 'Encontradas (ainda não carregadas). Para usar, chame search_tools com names=[...] das que precisar:\n' + r.tools.map((t) => `- ${t.name} (${t.server}): ${t.description}`).join('\n'), isError: false };
       tctx.conv.extraTools = [...new Set([...(tctx.conv.extraTools || []), ...r.tools.map((t) => t.name)])];
-      return { content: 'Ferramentas ativadas para os próximos passos:\n' + r.tools.map((t) => `- ${t.name} (${t.server}): ${t.description}`).join('\n'), isError: false };
+      return { content: 'Carregadas para os próximos passos:\n' + r.tools.map((t) => `- ${t.name} (${t.server}): ${t.description}`).join('\n'), isError: false };
     }
     const body = { name, arguments: typeof args === 'string' ? args : JSON.stringify(args ?? {}), allow: tctx.refs, ws: tctx.ws };
     // ponto de restauração: o servidor guarda o arquivo antes de mexer
@@ -3978,7 +3999,14 @@ function drawMcpList() {
             await api('/api/mcp/delete', { name: s.name }); S.sel.mcp = S.sel.mcp.filter((x) => x !== s.name); saveSel(); loadMcp();
           } })),
         h('label.switch', { title: 'Ligar/desligar' }, sw, h('span'))),
-      s.error ? h('div.srv-err', null, s.error.length > 300 ? s.error.slice(0, 300) + '...' : s.error) : null);
+      s.error ? h('div.srv-err', null, s.error.length > 300 ? s.error.slice(0, 300) + '...' : s.error) : null,
+      (() => {
+        const sel = h('select.select.sm', { title: 'Como as ferramentas deste conector chegam ao modelo' }, MCP_LOAD.map(([v, l]) => h('option', { value: v }, l)));
+        sel.value = mcpLoadOf(s.name);
+        const hint = h('small.muted', null, MCP_LOAD.find((x) => x[0] === sel.value)[2] + (s.tools.length ? ` (${visibleToolCount(s.name)} visíveis)` : ''));
+        sel.addEventListener('change', () => { setMcpLoad(s.name, sel.value); hint.textContent = MCP_LOAD.find((x) => x[0] === sel.value)[2] + (s.tools.length ? ` (${visibleToolCount(s.name)} visíveis)` : ''); toast(`${s.name}: ${MCP_LOAD.find((x) => x[0] === sel.value)[1].toLowerCase()}`); });
+        return h('div.srv-load', null, h('span', null, 'Carregar ferramentas'), sel, hint);
+      })());
     const keep = (d, key) => { d.open = S.mcpOpen?.has(key) || false; d.addEventListener('toggle', () => { (S.mcpOpen ||= new Set())[d.open ? 'add' : 'delete'](key); }); return d; };
     if (s.tools.length) card.append(keep(toolsBox(s), s.name + ':tools'));
     // log sempre recolhido; só abre se a pessoa clicar

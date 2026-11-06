@@ -108,7 +108,7 @@ Modelo local tem contexto curto e processamento caro, então o harness foi pensa
 | **Cache por conversa** | Cada conversa tem um slot no llama-server. Quando outra conversa precisa do slot, o cache vai para o disco e volta quando ela é retomada, então uma conversa longa não é reprocessada do zero. |
 | **Pensar ou responder direto** | Um botão na barra do chat liga ou desliga o raciocínio por conversa. Pedidos simples saem na hora. |
 | **Prompt estável** | O prompt de sistema é idêntico entre mensagens (sem hora, sem listas que mudam). Assim o llama-server reaproveita o cache e não relê a conversa inteira. |
-| **Carregamento sob demanda** | Conectores entram como um catálogo de uma linha por ferramenta; o modelo carrega só as que vai usar. Habilidades longas entram só com o resumo. |
+| **Carregamento sob demanda** | Conectores entram como um catálogo de uma linha por ferramenta (só os nomes, se tiver mais de 25); o modelo procura com `search_tools` (só mostra) e carrega pelo nome só as que vai usar. Cada conector escolhe em **Carregar ferramentas**: Automático (citado no pedido, vai completo só se for pequeno), Sob demanda ou Completo. Habilidades longas entram só com o resumo. |
 | **Esquemas enxutos** | As definições das ferramentas MCP vêm sem títulos, exemplos e campos que não ajudam o modelo, e com descrições encurtadas. |
 | **Saídas compactadas** | As saídas de comandos e conectores perdem cores ANSI e barras de progresso, e linhas repetidas viram uma. Saídas longas mantêm começo e fim, e a saída completa fica salva para consulta. O RTK resume `git`, `cargo`, `pytest` e outros. |
 | **Compactação automática** | Perto do limite, o meio da conversa é resumido. O primeiro pedido e o final ficam intactos. |

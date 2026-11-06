@@ -82,7 +82,7 @@ const DEFS: &[Def] = &[
       r#"{"type":"object","properties":{"action":{"type":"string","enum":["list","get","add","update","remove"]},"query":{"type":"string"},"id":{"type":"integer"},"title":{"type":"string"},"kind":{"type":"string","description":"função, endereço, string, hipótese..."},"addr":{"type":"string","description":"ex.: 0x401000"},"status":{"type":"string","enum":["hipótese","confirmado","descartado"]},"text":{"type":"string"}},"required":["action"]}"#),
     d("update_todos", "todo", false, true, "Mantém a lista de tarefas desta conversa, visível para o usuário. Use em tarefas com 3 ou mais passos: crie a lista no começo e atualize ao começar (in_progress) e terminar (done) cada item. Mande sempre a lista inteira; só um item in_progress por vez.",
       r#"{"type":"object","properties":{"todos":{"type":"array","items":{"type":"object","properties":{"text":{"type":"string","description":"O que fazer, curto e no imperativo"},"status":{"type":"string","enum":["pending","in_progress","done"]}},"required":["text","status"]}}},"required":["todos"]}"#),
-    d("search_tools", "toolsearch", false, true, "Ativa ferramentas de conectores MCP para os próximos passos: passe os nomes exatos do catálogo em names, ou palavras-chave em query.",
+    d("search_tools", "toolsearch", false, true, "Ferramentas dos conectores MCP. query: procura por palavras-chave e mostra nome e descrição (não carrega). names: carrega essas (nomes exatos) para os próximos passos.",
       r#"{"type":"object","properties":{"names":{"type":"array","items":{"type":"string"},"description":"Nomes exatos do catálogo"},"query":{"type":"string","description":"Palavras-chave"}}}"#),
     // ---------------- subagentes
     d("explore", "explore", false, true, "Inicia um subagente explorador: ele investiga sozinho (só leitura: arquivos, busca e, se ativo, navegador) com contexto próprio e devolve um relatório. Use para pesquisas amplas sem encher o seu contexto. Chame várias vezes na mesma resposta para explorar em paralelo.",
@@ -126,7 +126,7 @@ fn mcp_entries(app: &App, servers: Option<&[String]>) -> Vec<(String, String, Va
 }
 
 /// Monta a lista de ferramentas no formato OpenAI e os metadados para a interface.
-pub fn build_tools(app: &App, groups: &[String], servers: &[String], with_skills: bool, extra: &[String], only: Option<&[String]>, lazy: bool, eager: &[String]) -> Value {
+pub fn build_tools(app: &App, groups: &[String], servers: &[String], with_skills: bool, extra: &[String], only: Option<&[String]>, lazy: bool, eager: &[String], full: &[String]) -> Value {
     let mut tools = vec![];
     let mut meta = Map::new();
     let mut add = |name: String, desc: String, params: Value, info: Value| {
@@ -156,17 +156,23 @@ pub fn build_tools(app: &App, groups: &[String], servers: &[String], with_skills
     const EAGER_BUDGET: usize = 24_000; // ~6000 tokens por conector
     let entries = if only.is_none() { mcp_entries(app, None) } else { vec![] };
     let mut eager_fits: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for sname in eager {
+    for sname in eager.iter().chain(full) {
         if !servers.contains(sname) {
             continue;
         }
         let size: usize = entries.iter().filter(|(_, s, _)| s == sname)
             .map(|(name, _, t)| name.len() + t.get("description").and_then(Value::as_str).map(|d| d.len().min(700)).unwrap_or(0) + t.get("inputSchema").map(|x| x.to_string().len()).unwrap_or(0) + 40)
             .sum();
-        if size <= EAGER_BUDGET {
+        if size <= EAGER_BUDGET || full.contains(sname) {
             eager_fits.insert(sname.clone());
         }
     }
+    // conector grande (mais de 25 ferramentas): o catálogo vai só com os nomes; a descrição vem pela busca
+    let mut per_server: HashMap<&str, usize> = HashMap::new();
+    for (_, s, _) in &entries {
+        *per_server.entry(s.as_str()).or_default() += 1;
+    }
+    let big_servers: Vec<String> = per_server.into_iter().filter(|(_, n)| *n > 25).map(|(s, _)| s.to_string()).collect();
     if only.is_none() {
         for (name, sname, t) in entries {
             let selected = servers.contains(&sname);
@@ -179,7 +185,7 @@ pub fn build_tools(app: &App, groups: &[String], servers: &[String], with_skills
             // conector que o usuário citou no pedido: vai com as ferramentas completas, sem catálogo
             if lazy_on && selected && !eager_fits.contains(&sname) {
                 // o catálogo lista tudo (carregadas ou não) para o prompt não mudar entre passos
-                let line = format!("{name}: {}", first_sentence(&desc, 90));
+                let line = if big_servers.contains(&sname) { name.clone() } else { format!("{name}: {}", first_sentence(&desc, 90)) };
                 match catalog.iter_mut().find(|(s, _)| *s == sname) {
                     Some((_, v)) => v.push(line),
                     None => catalog.push((sname.clone(), vec![line])),
@@ -209,13 +215,13 @@ pub fn build_tools(app: &App, groups: &[String], servers: &[String], with_skills
     let catalog_text = if catalog.is_empty() {
         String::new()
     } else {
-        let body: Vec<String> = catalog.iter().map(|(s, v)| format!("## {s}\n{}", v.join("\n"))).collect();
+        let body: Vec<String> = catalog.iter().map(|(s, v)| if big_servers.contains(s) { format!("## {s} (só nomes; search_tools com query mostra o que cada uma faz)\n{}", v.join(", ")) } else { format!("## {s}\n{}", v.join("\n")) }).collect();
         let hint = if big.is_empty() {
             String::new()
         } else {
             format!("\n\nO conector {} tem ferramentas demais para carregar todas; escolha no catálogo as que precisa com search_tools.", big.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "))
         };
-        format!("Catálogo de ferramentas dos conectores ativos (ainda não carregadas). Para usar uma, chame antes search_tools com names=[...] e ela fica disponível no passo seguinte. Carregue só as que for usar.\n\n{}{hint}", body.join("\n\n"))
+        format!("Catálogo de ferramentas dos conectores ativos (ainda não carregadas). Para usar uma, chame antes search_tools com names=[...] e ela fica disponível no passo seguinte. Para descobrir qual usar, search_tools com query (só mostra, não carrega). Carregue só as que for usar.\n\n{}{hint}", body.join("\n\n"))
     };
     json!({"tools": tools, "meta": meta, "catalog": catalog_text})
 }
