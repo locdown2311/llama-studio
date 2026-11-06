@@ -48,7 +48,7 @@ const ICONS = {
   home: '<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   ban: '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
   calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
-  wand: '<path d="m15 4 5 5L9 20H4v-5z"/><path d="M13 6l5 5"/><path d="M5 3v4M3 5h4M19 15v4M17 17h4"/>',
+  signpost: '<path d="M12 3v18"/><path d="M5 5h11l3 3-3 3H5z"/><path d="M19 13H8l-3 3 3 3h11z"/>',
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   tag: '<path d="M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
   shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>',
@@ -1490,7 +1490,7 @@ function updatePickers() {
   const tk = thinkOf(c);
   iconBtn($('#pick-think'), ic(tk === 'off' ? ('zap' in ICONS ? 'zap' : 'send') : 'brain'), `Raciocínio: ${THINK_OPTS.find((o) => o[0] === tk)[1]}`, tk !== 'auto', 0, tk === 'off' ? '#d99a1e' : 'var(--accent)');
   const al = autoLevelOf(c);
-  iconBtn($('#pick-auto'), ic(al === 'desligado' ? 'ban' : 'wand'), `Recursos automáticos: ${AUTO_LEVELS.find((o) => o[0] === al)[1]}`, al !== 'equilibrado', 0, al === 'desligado' ? 'var(--muted)' : al === 'liberal' ? '#d99a1e' : 'var(--accent)');
+  iconBtn($('#pick-auto'), ic(al === 'desligado' ? 'ban' : 'signpost'), `Recursos automáticos: ${AUTO_LEVELS.find((o) => o[0] === al)[1]}`, al !== 'equilibrado', 0, al === 'desligado' ? 'var(--muted)' : al === 'liberal' ? '#d99a1e' : 'var(--accent)');
   const pl = planOf(c);
   iconBtn($('#pick-plan'), ic('list'), pl ? 'Modo plano: ligado (o modelo só investiga e propõe)' : 'Modo plano: desligado', pl, 0, '#0e9f8a');
   const skNames = act.skills.map((id) => S.skills.find((k) => k.id === id)?.name || id);
@@ -1958,7 +1958,7 @@ function fillAutoPop() {
     pop.append(h('button.menu-item' + (v === cur0 ? '.sel' : ''), { onclick: () => {
       const c = cur(); if (c) { c.autoLevel = v; saveConvs(); } else S.draftAuto = v;
       closePops(); updatePickers();
-    } }, ic(v === 'desligado' ? 'ban' : 'wand'), h('span.mi-main', null, l, h('span.mi-sub', null, d)), v === cur0 ? ic('check') : null));
+    } }, ic(v === 'desligado' ? 'ban' : 'signpost'), h('span.mi-main', null, l, h('span.mi-sub', null, d)), v === cur0 ? ic('check') : null));
   }
   pop.append(h('div.pop-foot', null, h('button.link', { onclick: () => { closePops(); setView('settings'); setTimeout(() => $('#set-tools')?.scrollIntoView({ block: 'start' }), 60); } }, 'Padrão para novas conversas')));
 }
@@ -3969,7 +3969,7 @@ function renderSettings() {
       field('Enviar imagens ao modelo', seg([['auto', `Automático (${S.vision ? 'tem visão' : 'sem visão'})`], ['on', 'Sempre'], ['off', 'Nunca']], st.vision, (v) => put({ vision: v })), 'Capturas de tela e imagens coladas na mensagem.')),
     section('tools', 'Ferramentas', 'O que o modelo pode usar. Também dá para ligar e desligar pela barra do chat.',
       field('Recursos automáticos (padrão das conversas novas)', (() => { const x = h('select.select', null, AUTO_LEVELS.map(([v, l, d]) => h('option', { value: v }, `${l}: ${d}`))); x.value = st.autoRoute === false ? 'desligado' : (st.autoLevel || 'equilibrado'); x.addEventListener('change', () => put({ autoLevel: x.value, autoRoute: x.value !== 'desligado' })); return x; })(),
-        'Pelo pedido, o studio liga sozinho ferramentas, conectores, habilidades e o raciocínio da conversa, sem gastar tokens. Cada conversa pode mudar pelo botão de varinha na barra do chat.'),
+        'Pelo pedido, o studio liga sozinho ferramentas, conectores, habilidades e o raciocínio da conversa, sem gastar tokens. Cada conversa pode mudar pelo botão de placa na barra do chat.'),
       toolGrid,
       h('div.row', null,
         field('Passos com ferramentas por resposta', input('input.input', { value: st.maxSteps, inputmode: 'numeric' }, (x) => put({ maxSteps: Number(x.value) || 30 })), 'O modelo para depois disso e pede para continuar.'),
