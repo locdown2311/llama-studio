@@ -78,6 +78,8 @@ const DEFS: &[Def] = &[
     // ---------------- busca
     d("recall_history", "history", false, true, "Procura nas conversas anteriores (ou só na atual) trechos sobre um assunto. Use quando o usuário se referir a algo já conversado.",
       r#"{"type":"object","properties":{"query":{"type":"string"},"scope":{"type":"string","enum":["todas","atual"]},"limit":{"type":"integer"}},"required":["query"]}"#),
+    d("update_todos", "todo", false, true, "Mantém a lista de tarefas desta conversa, visível para o usuário. Use em tarefas com 3 ou mais passos: crie a lista no começo e atualize ao começar (in_progress) e terminar (done) cada item. Mande sempre a lista inteira; só um item in_progress por vez.",
+      r#"{"type":"object","properties":{"todos":{"type":"array","items":{"type":"object","properties":{"text":{"type":"string","description":"O que fazer, curto e no imperativo"},"status":{"type":"string","enum":["pending","in_progress","done"]}},"required":["text","status"]}}},"required":["todos"]}"#),
     d("search_tools", "toolsearch", false, true, "Ativa ferramentas de conectores MCP para os próximos passos: passe os nomes exatos do catálogo em names, ou palavras-chave em query.",
       r#"{"type":"object","properties":{"names":{"type":"array","items":{"type":"string"},"description":"Nomes exatos do catálogo"},"query":{"type":"string","description":"Palavras-chave"}}}"#),
     // ---------------- subagentes
@@ -290,6 +292,9 @@ pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[Strin
     }
     if has("computer") {
         parts.push("Computador: as ferramentas computer_* controlam a área de trabalho do usuário. Prefira computer_elements (lista numerada) a coordenadas. Confirme o resultado depois de cada ação.".into());
+    }
+    if has("todo") {
+        parts.push("Tarefas com vários passos: comece criando a lista com update_todos e mantenha-a atualizada; ela mostra ao usuário o que já foi feito e o que falta. Não termine com itens pendentes sem explicar por quê.".into());
     }
     if has("explore") {
         parts.push("Para investigações longas, delegue a subagentes com a ferramenta explore (vários em paralelo, se fizer sentido) e trabalhe com os relatórios.".into());

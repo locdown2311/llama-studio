@@ -23,9 +23,23 @@ pub struct Bin {
     /// cópias com outro nome (bun -> bunx)
     copies: &'static [(&'static str, &'static str)],
     pub tag: &'static str,
+    /// outros arquivos que fazem parte da instalação (DLLs)
+    files: &'static [&'static str],
 }
 
 pub const CATALOG: &[Bin] = &[
+    Bin {
+        id: "7zip",
+        name: "7-Zip",
+        desc: "Extrai e cria arquivos 7z, zip, rar, tar, gz, iso, cab, msi e instaladores. Útil para abrir instaladores e pacotes antes de analisar.",
+        repo: "ip7z/7zip",
+        site: "https://www.7-zip.org/",
+        asset: r"^7zr\.exe$",
+        exes: &["7z", "7zr", "7za"],
+        copies: &[],
+        tag: "arquivos",
+        files: &["7z.dll"],
+    },
     Bin {
         id: "rtk",
         name: "RTK",
@@ -36,6 +50,7 @@ pub const CATALOG: &[Bin] = &[
         exes: &["rtk"],
         copies: &[],
         tag: "contexto",
+        files: &[],
     },
     Bin {
         id: "ripgrep",
@@ -47,6 +62,7 @@ pub const CATALOG: &[Bin] = &[
         exes: &["rg"],
         copies: &[],
         tag: "busca",
+        files: &[],
     },
     Bin {
         id: "fd",
@@ -58,6 +74,7 @@ pub const CATALOG: &[Bin] = &[
         exes: &["fd"],
         copies: &[],
         tag: "busca",
+        files: &[],
     },
     Bin {
         id: "uv",
@@ -69,6 +86,7 @@ pub const CATALOG: &[Bin] = &[
         exes: &["uv", "uvx", "uvw"],
         copies: &[],
         tag: "runtime",
+        files: &[],
     },
     Bin {
         id: "bun",
@@ -80,6 +98,7 @@ pub const CATALOG: &[Bin] = &[
         exes: &["bun"],
         copies: &[("bun", "bunx")],
         tag: "runtime",
+        files: &[],
     },
 ];
 
@@ -189,7 +208,8 @@ pub async fn list(app: &App, with_latest: bool) -> Value {
     for b in CATALOG {
         let main = b.exes[0];
         let (source, version, size) = if studio_has(main) {
-            let size: u64 = b.exes.iter().chain(b.copies.iter().map(|c| &c.1)).filter_map(|e| std::fs::metadata(dir().join(exe_name(e))).ok()).map(|m| m.len()).sum();
+            let size: u64 = b.exes.iter().chain(b.copies.iter().map(|c| &c.1)).filter_map(|e| std::fs::metadata(dir().join(exe_name(e))).ok()).map(|m| m.len()).sum::<u64>()
+                + b.files.iter().filter_map(|f| std::fs::metadata(dir().join(f)).ok()).map(|m| m.len()).sum::<u64>();
             ("studio", vers.get(b.id).cloned().unwrap_or_default(), size)
         } else if let Ok(p) = which::which(main) {
             let v = system_version(&p).await;
@@ -219,6 +239,9 @@ pub async fn list(app: &App, with_latest: bool) -> Value {
 pub async fn install(app: &App, id: &str) -> Result<String, String> {
     let b = find(id).ok_or("Ferramenta desconhecida.")?;
     let rel = latest_release(app, b).await?;
+    if b.id == "7zip" {
+        return install_7zip(app, b, &rel).await;
+    }
     let re = regex_lite::Regex::new(b.asset).unwrap();
     let url = rel["assets"]
         .as_array()
@@ -261,6 +284,84 @@ pub async fn install(app: &App, id: &str) -> Result<String, String> {
     Ok(ver)
 }
 
+fn asset(rel: &Value, pat: &str) -> Option<String> {
+    let re = regex_lite::Regex::new(pat).unwrap();
+    rel["assets"].as_array()?.iter().find(|x| x["name"].as_str().is_some_and(|n| re.is_match(n)))?["browser_download_url"].as_str().map(str::to_string)
+}
+
+async fn download(app: &App, url: &str) -> Result<Vec<u8>, String> {
+    let (status, bytes) = crate::update::fetch(app, url, false, Duration::from_secs(900)).await?;
+    if status != 200 {
+        return Err(format!("Download falhou ({status})."));
+    }
+    Ok(bytes)
+}
+
+/// 7-Zip: o 7zr.exe (só .7z) abre o instalador oficial, de onde saem o 7z.exe e o 7z.dll
+/// com todos os formatos. Se não der, usa o 7za.exe do pacote "extra".
+async fn install_7zip(app: &App, b: &Bin, rel: &Value) -> Result<String, String> {
+    let d = dir();
+    std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
+    let url = asset(rel, b.asset).ok_or("A versão mais nova do 7-Zip não tem o 7zr.exe.")?;
+    let zr = d.join(exe_name("7zr"));
+    put(&zr, &download(app, &url).await?)?;
+    let tmp = d.join(format!("7zip-tmp-{}", crate::app::now_ms()));
+    let _ = std::fs::create_dir_all(&tmp);
+    let extract = |arc: &Path, out: &Path| -> Result<(), String> {
+        let mut c = std::process::Command::new(&zr);
+        c.arg("x").arg("-y").arg(format!("-o{}", out.display())).arg(arc).stdin(std::process::Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            c.creation_flags(crate::CREATE_NO_WINDOW);
+        }
+        let o = c.output().map_err(|e| e.to_string())?;
+        if o.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&o.stdout).lines().last().unwrap_or("falhou").to_string()) }
+    };
+    let mut ok = false;
+    let mut why = String::new();
+    if let Some(u) = asset(rel, r"^7z\d+-x64\.exe$") {
+        let inst = tmp.join("instalador.exe");
+        match download(app, &u).await.and_then(|bytes| std::fs::write(&inst, bytes).map_err(|e| e.to_string())) {
+            Ok(()) => {
+                let out = tmp.join("inst");
+                match extract(&inst, &out) {
+                    Ok(()) if out.join(exe_name("7z")).is_file() && out.join("7z.dll").is_file() => {
+                        put(&d.join(exe_name("7z")), &std::fs::read(out.join(exe_name("7z"))).map_err(|e| e.to_string())?)?;
+                        put(&d.join("7z.dll"), &std::fs::read(out.join("7z.dll")).map_err(|e| e.to_string())?)?;
+                        ok = true;
+                    }
+                    Ok(()) => why = "o instalador não tinha 7z.exe".into(),
+                    Err(e) => why = e,
+                }
+            }
+            Err(e) => why = e,
+        }
+    }
+    if !ok {
+        if let Some(u) = asset(rel, r"^7z\d+-extra\.7z$") {
+            let arc = tmp.join("extra.7z");
+            std::fs::write(&arc, download(app, &u).await?).map_err(|e| e.to_string())?;
+            let out = tmp.join("extra");
+            extract(&arc, &out)?;
+            let za = [out.join("x64").join(exe_name("7za")), out.join(exe_name("7za"))].into_iter().find(|p| p.is_file()).ok_or("O pacote extra não tem o 7za.exe.")?;
+            let bytes = std::fs::read(&za).map_err(|e| e.to_string())?;
+            put(&d.join(exe_name("7za")), &bytes)?;
+            put(&d.join(exe_name("7z")), &bytes)?;
+            ok = true;
+        }
+    }
+    let _ = std::fs::remove_dir_all(&tmp);
+    if !ok {
+        return Err(format!("Não consegui montar o 7-Zip completo ({why}). O 7zr.exe (só .7z) ficou instalado."));
+    }
+    let ver = tag_version(rel);
+    let mut vers = read_versions();
+    vers.insert(b.id.to_string(), ver.clone());
+    write_versions(&vers);
+    Ok(ver)
+}
+
 /// Grava um executável. Se o antigo estiver em uso (um conector rodando uvx, por exemplo),
 /// ele é renomeado antes: o Windows deixa renomear, mas não sobrescrever.
 fn put(path: &Path, buf: &[u8]) -> Result<(), String> {
@@ -287,8 +388,8 @@ fn set_exec(_p: &Path) -> Result<(), String> {
 pub fn remove(_app: &App, id: &str) -> Result<(), String> {
     let b = find(id).ok_or("Ferramenta desconhecida.")?;
     let d = dir();
-    for e in b.exes.iter().chain(b.copies.iter().map(|c| &c.1)) {
-        let p = d.join(exe_name(e));
+    let paths: Vec<PathBuf> = b.exes.iter().chain(b.copies.iter().map(|c| &c.1)).map(|e| d.join(exe_name(e))).chain(b.files.iter().map(|f| d.join(f))).collect();
+    for p in paths {
         if p.exists() && std::fs::remove_file(&p).is_err() {
             // em uso: tira do caminho e apaga na próxima abertura
             let _ = std::fs::rename(&p, p.with_extension(format!("antigo-{}", crate::app::now_ms())));

@@ -260,7 +260,7 @@ document.addEventListener('click', (e) => {
 });
 
 /* ============================================================ estado */
-const TOOL_GROUPS = ['read', 'write', 'edit', 'shell', 'code', 'browser', 'computer', 'history', 'toolsearch', 'explore'];
+const TOOL_GROUPS = ['read', 'write', 'edit', 'shell', 'code', 'browser', 'computer', 'history', 'toolsearch', 'explore', 'todo'];
 const DEFAULT_SETTINGS = { systemPrompt: '', temperature: '', topP: '', maxTokens: '', maxSteps: 30, approval: 'writes', theme: 'light', showThinking: true, vision: 'auto', explorerSteps: 20, autoCompact: true, compactAt: 75, lazyLoad: true, tools: Object.fromEntries(TOOL_GROUPS.map((g) => [g, true])) };
 const S = {
   view: 'chat',
@@ -1132,6 +1132,7 @@ document.addEventListener('mousedown', (e) => {
 
 function renderComposer() {
   updateSendBtn();
+  drawTodos();
   drawQueue();
   updatePickers();
   drawCtxMeter();
@@ -1526,6 +1527,46 @@ async function submit(conv, item) {
   saveConvs(); renderConvList();
   if (conv.id === S.curId) { renderChatTitle(); renderMessages(false); }
   await runAgent(conv);
+}
+
+/* ============================================================ lista de tarefas do modelo */
+function updateTodos(conv, args) {
+  if (typeof args === 'string') { try { args = JSON.parse(args); } catch { args = {}; } }
+  let list = args?.todos;
+  if (typeof list === 'string') { try { list = JSON.parse(list); } catch { list = null; } }
+  if (!Array.isArray(list)) return { content: 'Erro: envie todos como uma lista de {text, status}.', isError: true };
+  const norm = (st) => (/progress|andamento|doing/i.test(st) ? 'in_progress' : /done|complet|feito|conclu/i.test(st) ? 'done' : 'pending');
+  conv.todos = list.filter((t) => t && String(t.text || t.content || '').trim()).slice(0, 40).map((t) => ({ text: String(t.text || t.content).trim(), status: norm(String(t.status || '')) }));
+  conv.todosAt = Date.now();
+  saveConvs();
+  if (conv.id === S.curId) drawTodos();
+  const done = conv.todos.filter((t) => t.status === 'done').length;
+  const now = conv.todos.find((t) => t.status === 'in_progress');
+  return { content: `Lista atualizada: ${done} de ${conv.todos.length} feitas.${now ? ' Em andamento: ' + now.text : ''}`, isError: false };
+}
+
+function drawTodos() {
+  const box = $('#todos'); if (!box) return;
+  const c = cur(); const list = c?.todos || [];
+  box.innerHTML = '';
+  box.hidden = !list.length;
+  if (!list.length) return;
+  const done = list.filter((t) => t.status === 'done').length;
+  const all = done === list.length;
+  const open = c.todosOpen ?? !all;
+  const nowItem = list.find((t) => t.status === 'in_progress');
+  const head = h('button.td-head', { onclick: () => { c.todosOpen = !open; saveConvs(); drawTodos(); }, 'aria-expanded': String(open) },
+    h('span.td-ring', { html: (() => { const C = 2 * Math.PI * 6; return `<svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="6" fill="none" stroke="var(--line-2)" stroke-width="2.2"/><circle cx="8" cy="8" r="6" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round" stroke-dasharray="${(done / list.length * C).toFixed(2)} ${C.toFixed(2)}" transform="rotate(-90 8 8)"/></svg>`; })() }),
+    h('span.td-title', null, all ? 'Tarefas concluídas' : nowItem ? nowItem.text : 'Tarefas'),
+    h('span.td-count', null, `${done}/${list.length}`),
+    h('span', { html: svg('chev'), style: { display: 'grid', transform: open ? 'rotate(90deg)' : '', transition: 'transform .15s' } }));
+  box.append(head);
+  if (open) {
+    const ul = h('ol.td-list');
+    for (const t of list) ul.append(h('li.td.' + t.status, null, h('span.td-box', { html: t.status === 'done' ? svg('check') : '' }), h('span.td-text', null, t.text)));
+    box.append(ul);
+    if (all || !running(c)) box.append(h('div.td-foot', null, h('button.btn.ghost.sm', { onclick: () => { c.todos = []; saveConvs(); drawTodos(); } }, 'Limpar lista')));
+  }
 }
 
 /* ============================================================ fila de mensagens */
@@ -2069,6 +2110,7 @@ const TOOL_INFO = {
   code: { sec: 'Shell', title: 'Executar código de ferramentas', short: 'código', desc: 'JavaScript que chama várias ferramentas e combina os resultados.' },
   history: { sec: 'Busca', title: 'Lembrar conversas', short: 'histórico', desc: 'Procurar no histórico desta e das outras conversas.' },
   toolsearch: { sec: 'Busca', title: 'Buscar ferramentas', short: 'buscar ferramentas', desc: 'Achar e ativar ferramentas de conectores sob demanda.' },
+  todo: { sec: 'Planejamento', title: 'Lista de tarefas', short: 'tarefas', desc: 'O modelo escreve um plano e vai marcando cada passo; você acompanha acima da caixa de texto.' },
   explore: { sec: 'Subagentes', title: 'Subagentes exploradores', short: 'exploradores', desc: 'Investigação só de leitura com contexto próprio, vários em paralelo.' },
 };
 function enabledGroups() { return TOOL_GROUPS.filter((g) => S.settings.tools[g]); }
@@ -2079,6 +2121,7 @@ async function execTool(name, args, info, tctx, tmsg) {
   try {
     if (name === 'execute_code') return await runCode(args?.code ?? '', tctx, tmsg);
     if (name === 'recall_history') return recallHistory(args || {}, tctx.conv);
+    if (name === 'update_todos') return updateTodos(tctx.conv, args);
     if (name === 'search_tools') {
       const names = Array.isArray(args?.names) ? args.names : typeof args?.names === 'string' ? args.names.split(/[\s,]+/).filter(Boolean) : [];
       const r = await api('/api/tools/search', { query: args?.query || '', names });
@@ -3022,7 +3065,7 @@ function splitArgs(str) {
 }
 const quoteArg = (v) => (/[\s"]/.test(v) || v === '' ? '"' + v.replace(/"/g, '\\"') + '"' : v);
 
-function parseArgs(str) {
+function parseServerArgs(str) {
   const toks = splitArgs(str); const vals = {}; const rest = [];
   for (let i = 0; i < toks.length; i++) {
     const t = toks[i];
@@ -3102,7 +3145,7 @@ function argsEditor(initial) {
   let read = () => raw;
 
   const drawForm = () => {
-    const { vals, rest } = parseArgs(raw);
+    const { vals, rest } = parseServerArgs(raw);
     form.innerHTML = '';
     const getters = [];
     for (const [g, title, icon] of ARG_GROUPS) {
