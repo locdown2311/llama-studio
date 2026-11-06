@@ -1190,10 +1190,17 @@ function renderTool(tc, res, live) {
       h('div.tool-sec-label', null, `Conteúdo escrito em ${args.path || ''}`),
       h('div', { html: codeHTML(String(args.content ?? ''), ftype(args.path || '').lang, { title: basename(args.path || 'arquivo'), collapse: true }) })));
   } else if (name === 'edit_file' && args) {
+    const pairs = Array.isArray(args.edits) && args.edits.length ? args.edits : [{ old_text: args.old_text, new_text: args.new_text }];
+    const byLines = !args.old_text && args.start_line != null && !(Array.isArray(args.edits) && args.edits.length);
     const diff = h('div.diff');
-    String(args.old_text ?? '').split('\n').forEach((l) => diff.append(h('div.del', null, l || ' ')));
-    String(args.new_text ?? '').split('\n').forEach((l) => diff.append(h('div.add', null, l || ' ')));
-    bodyEl.append(h('div.tool-sec', null, h('div.tool-sec-label', null, `Alteração em ${args.path || ''}${args.replace_all ? ' (todas as ocorrências)' : ''}`), diff));
+    pairs.forEach((p, i) => {
+      if (i) diff.append(h('div.diff-gap', null, '···'));
+      if (!byLines) String(p.old_text ?? '').split('\n').forEach((l) => diff.append(h('div.del', null, l || ' ')));
+      String(p.new_text ?? '').split('\n').forEach((l) => diff.append(h('div.add', null, l || ' ')));
+    });
+    const end = args.end_line ?? args.start_line;
+    const where = byLines ? (end < args.start_line ? ` (inserido antes da linha ${args.start_line})` : ` (linhas ${args.start_line}${end !== args.start_line ? '–' + end : ''})`) : pairs.length > 1 ? ` (${pairs.length} trocas)` : args.replace_all ? ' (todas as ocorrências)' : '';
+    bodyEl.append(h('div.tool-sec', null, h('div.tool-sec-label', null, `Alteração em ${args.path || ''}${where}`), diff));
   } else if (args && Object.keys(args).length) {
     const vals = Object.values(args);
     const simple = vals.every((v) => v == null || ['string', 'number', 'boolean'].includes(typeof v)) && vals.every((v) => String(v).length < 600);

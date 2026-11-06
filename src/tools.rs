@@ -31,16 +31,16 @@ const DEFS: &[Def] = &[
     // ---------------- arquivos
     d("list_directory", "read", false, false, "Lista arquivos e pastas. O caminho é relativo à pasta de trabalho (use \".\" para a raiz). Aceita também caminhos absolutos que o usuário referenciou.",
       r#"{"type":"object","properties":{"path":{"type":"string","description":"Caminho da pasta"}},"required":["path"]}"#),
-    d("read_file", "read", false, false, "Lê um arquivo de texto. Use offset/limit (em linhas) para arquivos grandes.",
+    d("read_file", "read", false, false, "Lê um arquivo de texto. Arquivo grande sem offset/limit volta como sumário (seções, títulos, funções) com números de linha: depois leia só os trechos que precisar com offset/limit.",
       r#"{"type":"object","properties":{"path":{"type":"string"},"offset":{"type":"integer","description":"Linha inicial (1 = primeira)"},"limit":{"type":"integer","description":"Quantidade máxima de linhas"}},"required":["path"]}"#),
-    d("search_files", "read", false, false, "Procura arquivos pelo nome (aceita * como curinga) e, opcionalmente, por conteúdo (expressão regular). Devolve caminhos relativos e, na busca por conteúdo, as linhas encontradas.",
-      r#"{"type":"object","properties":{"name":{"type":"string","description":"Parte do nome ou padrão, ex.: *.py"},"content":{"type":"string","description":"Regex para procurar dentro dos arquivos"},"path":{"type":"string","description":"Pasta onde começar (padrão: raiz)"}}}"#),
-    d("write_file", "write", true, false, "Cria ou substitui um arquivo dentro da pasta de trabalho com o conteúdo informado. Cria as pastas que faltarem.",
+    d("search_files", "read", false, false, "Procura arquivos pelo nome (aceita * como curinga) e, opcionalmente, por conteúdo (expressão regular). Devolve caminhos relativos e, na busca por conteúdo, as linhas encontradas com o número. path pode ser um arquivo: procura só nele.",
+      r#"{"type":"object","properties":{"name":{"type":"string","description":"Parte do nome ou padrão, ex.: *.py"},"content":{"type":"string","description":"Regex para procurar dentro dos arquivos"},"path":{"type":"string","description":"Pasta (ou arquivo) onde procurar (padrão: raiz)"}}}"#),
+    d("write_file", "write", true, false, "Cria ou substitui um arquivo dentro da pasta de trabalho com o conteúdo informado. Cria as pastas que faltarem. Para mudar parte de um arquivo que já existe, use edit_file (gasta bem menos).",
       r#"{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}"#),
     d("create_directory", "write", true, false, "Cria uma pasta (e as intermediárias) dentro da pasta de trabalho.",
       r#"{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}"#),
-    d("edit_file", "edit", true, false, "Substitui um trecho exato de texto num arquivo da pasta de trabalho. old_text precisa aparecer exatamente uma vez (ou use replace_all). Leia o arquivo antes.",
-      r#"{"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"},"replace_all":{"type":"boolean"}},"required":["path","old_text","new_text"]}"#),
+    d("edit_file", "edit", true, false, "Altera parte de um arquivo. Três formas: old_text + new_text (old_text exato, aparece uma vez, ou replace_all); start_line + end_line + new_text (troca essas linhas, sem repetir o texto antigo; end_line = start_line - 1 insere antes); ou edits = lista de {old_text, new_text} aplicadas juntas.",
+      r#"{"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"},"replace_all":{"type":"boolean"},"start_line":{"type":"integer"},"end_line":{"type":"integer"},"edits":{"type":"array","items":{"type":"object","properties":{"old_text":{"type":"string"},"new_text":{"type":"string"}},"required":["old_text","new_text"]}}},"required":["path"]}"#),
     // ---------------- shell
     d("run_command", "shell", true, false, "Executa um comando no PowerShell (Windows) dentro da pasta de trabalho e devolve a saída e o código de saída. Use para compilar, rodar scripts, git, instalar pacotes etc. Não use para comandos interativos.",
       r#"{"type":"object","properties":{"command":{"type":"string","description":"Comando ou script do PowerShell"},"cwd":{"type":"string","description":"Subpasta onde rodar (padrão: raiz da pasta de trabalho)"},"timeout":{"type":"integer","description":"Segundos até encerrar (padrão 120, máximo 1800)"}},"required":["command"]}"#),
@@ -590,6 +590,44 @@ fn fit_args(schema: &Value, args: &mut Value) -> Result<(), String> {
 }
 
 /// Busca por conteúdo com o ripgrep (respeita .gitignore e é bem mais rápida). None = usar a busca própria.
+const BIG_LINES: usize = 400;
+const BIG_BYTES: usize = 40 * 1024;
+
+/// Sumário de um arquivo grande: as linhas que marcam a estrutura, com o número.
+fn outline(ext: &str, lines: &[&str]) -> Vec<(usize, String)> {
+    let re = match ext {
+        "tex" | "sty" | "cls" | "ltx" => r"^\s*\\(part|chapter|section|subsection|subsubsection|paragraph|begin\{document\}|end\{document\}|appendix|input|include|bibliography|printbibliography|maketitle|tableofcontents)\b|^\s*\\begin\{(abstract|figure|table|algorithm|thebibliography)\*?\}",
+        "md" | "markdown" | "rst" | "txt" => r"^#{1,4} \S|^[=-]{3,}\s*$",
+        "rs" => r"^\s*(pub(\([^)]*\))? )?(async )?(fn|struct|enum|trait|impl|mod|macro_rules!) ",
+        "py" => r"^\s*(async )?(def|class) \w",
+        "js" | "mjs" | "cjs" | "ts" | "tsx" | "jsx" => r"^\s*(export )?(default )?(async )?(function\*? \w|class \w)|^\s*(export )?(const|let) \w+ = (async )?(\([^)]*\)|\w+) =>",
+        "cs" | "java" | "kt" => r"^\s*(public|private|protected|internal|static|override|async|sealed|abstract| )+[\w<>\[\], ]+ \w+\s*\(|^\s*(public |internal |private )?(sealed |static |abstract )*(class|interface|struct|enum|record) \w",
+        "c" | "h" | "cpp" | "hpp" | "cc" => r"^[A-Za-z_][\w\s\*&:<>,]*\s[\*&]?\w[\w:]*\s*\([^;]*$|^(struct|class|enum|namespace) \w",
+        "go" => r"^(func|type) ",
+        "ps1" | "psm1" => r"^\s*function \w",
+        "lua" => r"^\s*(local )?function ",
+        "html" | "htm" | "xml" => r"^\s*<(h[1-3]|section|head|body|script|style|template)\b",
+        "css" | "scss" => r"^\S[^{]*\{\s*$|^@media",
+        _ => return vec![],
+    };
+    let Ok(re) = regex_lite::Regex::new(re) else { return vec![] };
+    let mut out = vec![];
+    for (i, l) in lines.iter().enumerate() {
+        // em LaTeX, linha comentada não conta
+        if ext == "tex" && l.trim_start().starts_with('%') {
+            continue;
+        }
+        if re.is_match(l) {
+            out.push((i + 1, cut(l.trim_end(), 110)));
+            if out.len() >= 300 {
+                out.push((0, "... (sumário cortado; procure com search_files)".into()));
+                break;
+            }
+        }
+    }
+    out
+}
+
 fn search_rg(ws: &Path, start: &Path, name: &str, pattern: &str) -> Option<String> {
     let rg = crate::bins::which("rg")?;
     let mut c = std::process::Command::new(rg);
@@ -790,6 +828,18 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
             let text = text.trim_start_matches('\u{feff}');
             let lines: Vec<&str> = text.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l)).collect();
             let total = lines.len();
+            let ranged = a.get("offset").and_then(Value::as_u64).is_some() || a.get("limit").and_then(Value::as_u64).is_some();
+            // arquivo grande lido inteiro gasta muito contexto: devolve o sumário e o modelo lê só o que precisar
+            if !ranged && (total > BIG_LINES || text.len() > BIG_BYTES) {
+                let ext = file.extension().map(|x| x.to_string_lossy().to_lowercase()).unwrap_or_default();
+                let marks = outline(&ext, &lines);
+                if marks.len() >= 3 {
+                    let body: Vec<String> = marks.iter().map(|(n, l)| format!("{n}: {l}")).collect();
+                    return Ok(format!("[{} linhas, {}. Sumário com o número da linha; leia os trechos com offset/limit ou procure com search_files (path = este arquivo)]\n{}", total, fmt_size(md.len()), body.join("\n")));
+                }
+                let head: Vec<&str> = lines.iter().take(BIG_LINES).copied().collect();
+                return Ok(format!("[linhas 1-{} de {total}; continue com offset/limit]\n{}", head.len(), head.join("\n")));
+            }
             let off = a.get("offset").and_then(Value::as_u64).unwrap_or(1).max(1) as usize;
             let lim = a.get("limit").and_then(Value::as_u64).unwrap_or(2000).max(1) as usize;
             let slice: Vec<&str> = lines.iter().skip(off - 1).take(lim).copied().collect();
@@ -812,22 +862,57 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
         "edit_file" => {
             let file = resolve_write(ws, s(a, "path"))?;
             let text = std::fs::read_to_string(&file).map_err(e)?;
-            let old = s(a, "old_text");
+            let crlf = text.contains("\r\n");
             let new = s(a, "new_text");
-            if old.is_empty() {
-                return Err("old_text vazio.".into());
+            // por linhas: não precisa repetir o texto antigo
+            if let Some(start) = a.get("start_line").and_then(Value::as_u64).filter(|_| s(a, "old_text").is_empty()) {
+                let start = start.max(1) as usize;
+                let end = a.get("end_line").and_then(Value::as_u64).map(|x| x as usize).unwrap_or(start);
+                let mut lines: Vec<&str> = text.split('\n').collect();
+                let total = lines.len();
+                if start > total + 1 || end + 1 < start || end > total {
+                    return Err(format!("Linhas fora do arquivo ({total} linhas)."));
+                }
+                let before = lines[start - 1..end].iter().map(|l| l.trim_end_matches('\r')).collect::<Vec<_>>();
+                let nl: Vec<String> = if new.is_empty() { vec![] } else { new.split('\n').map(|l| if crlf { format!("{}\r", l.trim_end_matches('\r')) } else { l.to_string() }).collect() };
+                let added = nl.len();
+                let tail_cr = end == total && !text.ends_with('\n');
+                let mut nl = nl;
+                if tail_cr { if let Some(last) = nl.last_mut() { *last = last.trim_end_matches('\r').to_string(); } }
+                let refs: Vec<&str> = nl.iter().map(|x| x.as_str()).collect();
+                lines.splice(start - 1..end, refs);
+                std::fs::write(&file, lines.join("\n")).map_err(e)?;
+                let what = if end < start { format!("{added} linha(s) inserida(s) antes da {start}") } else { format!("linhas {start}-{end} trocadas por {added}") };
+                let first = before.first().map(|l| cut(l.trim(), 70)).unwrap_or_default();
+                return Ok(format!("Editado: {} ({what}{})", rel_to(ws, &file), if first.is_empty() { String::new() } else { format!("; antes começava com: {first}") }));
             }
-            let count = text.matches(old).count();
+            // várias trocas de uma vez (tudo ou nada)
+            let pairs: Vec<(String, String)> = match a.get("edits").and_then(Value::as_array) {
+                Some(list) if !list.is_empty() => list.iter().map(|x| (s(x, "old_text").to_string(), s(x, "new_text").to_string())).collect(),
+                _ => vec![(s(a, "old_text").to_string(), new.to_string())],
+            };
             let all = a.get("replace_all").and_then(Value::as_bool).unwrap_or(false);
-            if count == 0 {
-                return Err("old_text não encontrado no arquivo. Leia o arquivo de novo e copie o trecho exato.".into());
+            let mut out = text.clone();
+            let mut n = 0;
+            for (i, (old, new)) in pairs.iter().enumerate() {
+                let tag = if pairs.len() > 1 { format!("Troca {}: ", i + 1) } else { String::new() };
+                if old.is_empty() {
+                    return Err(format!("{tag}old_text vazio. Para trocar por número de linha, use start_line/end_line."));
+                }
+                // o modelo costuma mandar \n onde o arquivo tem \r\n
+                let old_f = if crlf && !old.contains('\r') && !out.contains(old.as_str()) { old.replace('\n', "\r\n") } else { old.clone() };
+                let new_f = if old_f != *old { new.replace('\n', "\r\n") } else { new.clone() };
+                let count = out.matches(old_f.as_str()).count();
+                if count == 0 {
+                    return Err(format!("{tag}old_text não encontrado no arquivo. Leia o trecho de novo (offset/limit) e copie exato.{}", if pairs.len() > 1 { " Nada foi alterado." } else { "" }));
+                }
+                if count > 1 && !all {
+                    return Err(format!("{tag}old_text aparece {count} vezes. Inclua mais contexto ou use replace_all.{}", if pairs.len() > 1 { " Nada foi alterado." } else { "" }));
+                }
+                out = if all { n += count; out.replace(old_f.as_str(), &new_f) } else { n += 1; out.replacen(old_f.as_str(), &new_f, 1) };
             }
-            if count > 1 && !all {
-                return Err(format!("old_text aparece {count} vezes. Inclua mais contexto ou use replace_all."));
-            }
-            let out = if all { text.replace(old, new) } else { text.replacen(old, new, 1) };
-            std::fs::write(&file, out).map_err(e)?;
-            Ok(format!("Editado: {} ({} substituição(ões))", rel_to(ws, &file), if all { count } else { 1 }))
+            std::fs::write(&file, &out).map_err(e)?;
+            Ok(format!("Editado: {} ({n} substituição(ões))", rel_to(ws, &file)))
         }
         "create_directory" => {
             let dir = resolve_write(ws, s(a, "path"))?;
@@ -843,6 +928,12 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
             } else {
                 Some(regex_lite::Regex::new(&format!("(?i){}", s(a, "content"))).map_err(|x| format!("Regex inválida: {x}"))?)
             };
+            if let (Some(re), true) = (&content_re, start.is_file()) {
+                let text = std::fs::read(&start).map_err(e)?;
+                let text = String::from_utf8_lossy(&text);
+                let hits: Vec<String> = text.split('\n').enumerate().filter(|(_, l)| re.is_match(l)).take(200).map(|(i, l)| format!("{}: {}", i + 1, cut(l.trim_end_matches('\r'), 220))).collect();
+                return Ok(if hits.is_empty() { "Nada encontrado.".into() } else { format!("{}\n{}", rel_to(ws, &start), hits.join("\n")) });
+            }
             if content_re.is_some() {
                 if let Some(r) = search_rg(ws, &start, s(a, "name"), s(a, "content")) {
                     return Ok(r);
