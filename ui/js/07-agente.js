@@ -196,6 +196,61 @@ async function auditCall(tc, info, conv, signal) {
 // respostas enxutas: o texto que o modelo escreve também é token
 const CONCISE_NOTE = L('Seja direto e econômico: responda só o que foi pedido, sem repetir a pergunta, sem introdução e sem resumir no fim o que já está visível na conversa. Use listas e títulos só quando ajudarem de verdade.');
 
+/* ---- passos, laços e limite elástico ----
+   O limite de passos é só a última barreira. Antes dele: um detector de repetição (a mesma chamada
+   devolvendo o mesmo resultado, ou o mesmo erro de novo) avisa o modelo e, se ele insistir, para;
+   e, quando a tarefa está andando (lista de tarefas avança, arquivos são alterados), o limite estica. */
+const LOOP_WARN = 3, LOOP_STOP = 4, ERR_WARN = 3, ERR_STOP = 5;
+function stepGuard(base) {
+  return { base, limit: base, cap: base * 3, seen: new Map(), errs: new Map(), warned: new Set(), lastWarn: -99, writes: 0, mark: { done: 0, writes: 0 }, stop: '' };
+}
+function todosDone(conv) { return (conv.todos || []).filter((t) => t.status === 'done').length; }
+function noteOn(r, text) { r.studioNote = (r.studioNote ? r.studioNote + '\n' : '') + text; }
+/** Confere as chamadas do passo; devolve true se avisou o modelo de uma repetição. */
+function guardStep(conv, msg, meta, g, step) {
+  let warned = false;
+  for (const tc of msg.tool_calls || []) {
+    const r = conv.messages.find((m) => m.role === 'tool' && m.tool_call_id === tc.id);
+    if (!r || r.status === 'denied') continue;
+    const name = tc.function.name;
+    if (r.status === 'ok' && meta[name]?.mutating) g.writes++;
+    // mesma chamada, mesmos argumentos, mesmo resultado: não trouxe nada novo
+    const sig = name + ' ' + normArgs(tc.function.arguments) + ' => ' + strHash(String(r.content || ''));
+    const n = (g.seen.get(sig) || 0) + 1; g.seen.set(sig, n);
+    if (n >= LOOP_STOP && g.warned.has(sig)) { g.stop = L('{0} repetido {1} vezes com o mesmo resultado, mesmo depois do aviso', name, n); continue; }
+    if (n >= LOOP_WARN && !g.warned.has(sig)) {
+      g.warned.add(sig); warned = true;
+      noteOn(r, L('[Nota do studio: você já chamou {0} {1} vezes com os mesmos argumentos e recebeu o mesmo resultado. Repetir não traz nada novo: use o que já tem ou mude de abordagem.]', name, n));
+      conv.messages.push({ role: 'notice', icon: 'refresh', content: L('Repetição: {0} devolveu o mesmo resultado {1} vezes. O modelo foi avisado; se insistir, a resposta para.', name, n) });
+    }
+    if (r.status !== 'error') continue;
+    // o mesmo erro com argumentos diferentes: está tentando no escuro
+    const esig = name + ' ' + String(r.content || '').replace(/\d+/g, '#').slice(0, 200);
+    const e = (g.errs.get(esig) || 0) + 1; g.errs.set(esig, e);
+    if (e >= ERR_STOP && g.warned.has(esig)) { g.stop = L('{0} falhou {1} vezes com o mesmo erro, mesmo depois do aviso', name, e); continue; }
+    if (e >= ERR_WARN && !g.warned.has(esig)) {
+      g.warned.add(esig); warned = true;
+      noteOn(r, L('[Nota do studio: {0} falhou {1} vezes com este mesmo erro. Pare e descubra a causa antes de tentar de novo; se não der, explique ao usuário o que está bloqueando.]', name, e));
+      conv.messages.push({ role: 'notice', icon: 'alert', content: L('Repetição: {0} falhou {1} vezes com o mesmo erro. O modelo foi avisado; se insistir, a resposta para.', name, e) });
+    }
+  }
+  if (warned) g.lastWarn = step;
+  return warned;
+}
+/** Faltando 2 passos: estica o limite se a tarefa está andando; senão pede ao modelo para fechar. */
+function guardBudget(conv, msg, g, step) {
+  if (g.limit - 1 - step !== 2) return;
+  const done = todosDone(conv);
+  const moving = (done > g.mark.done || g.writes > g.mark.writes) && step - g.lastWarn > 4;
+  if (moving && g.limit < g.cap) {
+    g.limit = Math.min(g.cap, g.limit + Math.max(5, Math.round(g.base / 2)));
+    g.mark = { done, writes: g.writes };
+    return;
+  }
+  const last = [...(msg.tool_calls || [])].reverse().map((tc) => conv.messages.find((m) => m.role === 'tool' && m.tool_call_id === tc.id)).find(Boolean);
+  if (last) noteOn(last, L('[Nota do studio: restam 2 passos com ferramentas nesta resposta. Termine o que der e feche dizendo em poucas linhas o que foi feito e o que falta; o usuário pode mandar continuar.]'));
+}
+
 async function runAgent(conv) {
   const ac = new AbortController();
   S.runs.set(conv.id, ac);
@@ -233,12 +288,12 @@ async function runAgent(conv) {
       catalog || '',
     ].filter(Boolean).join('\n\n');
     conv.ctxParts = ctxBreakdown(system, ctx.text, catalog, tools, meta);
-    const maxSteps = Math.max(1, Number(S.settings.maxSteps) || 30);
+    const g = stepGuard(Math.max(1, Number(S.settings.maxSteps) || 40));
     const lastAsk = [...conv.messages].reverse().find((m) => m.role === 'user' && !m.hidden);
     const planTurn = !!lastAsk?.plan;
     const esc = { fails: 0, sigs: new Set(), repeat: '', done: false };
 
-    for (let step = 0; step < maxSteps; step++) {
+    for (let step = 0; step < g.limit; step++) {
       const msg = { role: 'assistant', content: '', reasoning: '', tool_calls: [], t0: step === 0 ? t0 : Date.now() };
       conv._step = step;
       conv.messages.push(msg);
@@ -333,11 +388,12 @@ async function runAgent(conv) {
       const stepResults = msg.tool_calls.map((tc) => conv.messages.find((m) => m.role === 'tool' && m.tool_call_id === tc.id)).filter(Boolean);
       conv._thinkNext = stepResults.some((m) => m.status === 'error' || m.status === 'denied');
       dedupeResults(conv, stepResults);
+      if (guardStep(conv, msg, meta, g, step)) conv._thinkNext = true;
       if (images.length && visionOn()) {
         for (const im of images) conv.messages.push({ role: 'user', hidden: true, content: L('[Imagem devolvida pela ferramenta {0}]', im.name), _images: im.images });
       }
       const why = escalateWhy(conv, msg, esc);
-      if (why) await escalate(conv, why, esc, ac.signal);
+      if (why) { await escalate(conv, why, esc, ac.signal); g.seen.clear(); g.errs.clear(); g.warned.clear(); g.stop = ''; }
       // mensagens marcadas na fila (⚡) entram agora, entre um passo e o próximo
       const urgent = takeUrgent(conv);
       if (urgent.length) conv._thinkNext = true;
@@ -354,9 +410,11 @@ async function runAgent(conv) {
           refetch = true;
         }
       }
-      if (urgent.length) { saveConvs(); scheduleRender(); }
+      if (urgent.length) { saveConvs(); scheduleRender(); g.stop = ''; g.seen.clear(); g.errs.clear(); g.warned.clear(); }
+      if (g.stop) { conv.messages.push({ role: 'error', loop: true, content: L('Parei: {0}. Diga como prefere seguir, ou continue mesmo assim.', g.stop) }); break; }
+      guardBudget(conv, msg, g, step);
       if (refetch) { ({ tools, meta } = await fetchTools()); conv.ctxParts = ctxBreakdown(system, ctx.text, catalog, tools, meta); }
-      if (step === maxSteps - 1) conv.messages.push({ role: 'error', content: L('Parei depois de {0} rodadas de ferramentas. Envie "continue" para seguir ou aumente o limite nas configurações.', maxSteps) });
+      if (step === g.limit - 1) conv.messages.push({ role: 'error', limit: true, content: g.limit > g.base ? L('Parei depois de {0} passos com ferramentas (o limite de {1} foi esticado porque a tarefa estava avançando).', g.limit, g.base) : L('Parei depois de {0} passos com ferramentas.', g.limit) });
     }
   } catch (e) {
     if (!(e.name === 'AbortError' || ac.signal.aborted)) conv.messages.push({ role: 'error', content: e.message || String(e) });
