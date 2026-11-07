@@ -1470,5 +1470,10 @@ const I18N_EN = {
 "Máx. de tokens": "Max tokens",
 "do studio": "studio's",
 "Outros parâmetros (JSON)": "Other parameters (JSON)",
-"Vão em todo pedido para esta API, por cima dos do studio. Ex.: reasoning_effort, chat_template_kwargs, top_k. Vazio = o studio decide (o auditor usa temperatura 0, por exemplo).": "Go in every request to this API, over the studio's. E.g.: reasoning_effort, chat_template_kwargs, top_k. Empty = the studio decides (the auditor uses temperature 0, for example)."
+"Vão em todo pedido para esta API, por cima dos do studio. Ex.: reasoning_effort, chat_template_kwargs, top_k. Vazio = o studio decide (o auditor usa temperatura 0, por exemplo).": "Go in every request to this API, over the studio's. E.g.: reasoning_effort, chat_template_kwargs, top_k. Empty = the studio decides (the auditor uses temperature 0, for example).",
+"Avisos recentes": "Recent notices",
+"Só erros": "Errors only",
+"Limpar": "Clear",
+"Nenhum aviso guardado.": "No notices saved.",
+"Os últimos 60 avisos que apareceram no canto da tela, com a parte do studio que mostrou cada um.": "The last 60 notices that appeared in the corner of the screen, with the part of the studio that showed each one."
 };

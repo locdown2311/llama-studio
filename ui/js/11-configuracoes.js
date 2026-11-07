@@ -113,7 +113,8 @@ function renderSettings() {
     field(L('Endereço do llama-server'), input('input.input.mono', { value: S.info.llamaUrl || '' }, async (x) => {
       const v = x.value.trim(); if (!v || v === S.info.llamaUrl) return;
       await api('/api/config', { llamaUrl: v }); S.info.llamaUrl = v; checkHealth(); saved();
-    }), L('Muda sozinho quando você salva a página Servidor. Ajuste só se o llama-server roda em outro lugar.')));
+    }), L('Muda sozinho quando você salva a página Servidor. Ajuste só se o llama-server roda em outro lugar.')),
+    toastHistory());
 
   SET_PAGES = pages;
   let cur0 = setPage && pages.some((p) => p.id === setPage) ? setPage : (store.get('setPage') || 'model');
@@ -263,6 +264,27 @@ function apiSection(put, field, saved) {
       field(apis.length ? L('Outra API') : L('Provedor'), add, apis.length ? L('Dá para ter várias e mandar cada função para uma, espalhando os limites dos planos grátis.') : null),
       h('div.field', null, h('label', null, L('Quem faz cada função')), ...roleRows,
         h('small', null, L('Planos grátis costumam poder usar o que você manda para treinar modelos (o Gemini grátis avisa isso). Deixe no modelo local o que tiver dado sensível.'))));
+  };
+  draw();
+  return box;
+}
+
+/* ------------------------------------------------------------ avisos recentes */
+function toastHistory() {
+  const box = h('div.field');
+  const draw = () => {
+    const errsOnly = box.querySelector('input')?.checked ?? true;
+    const log = toastLog().filter((x) => !errsOnly || x.kind === 'err').reverse();
+    box.innerHTML = '';
+    const only = h('input', { type: 'checkbox', checked: errsOnly, onchange: draw });
+    const copy = h('button.btn.sm', { type: 'button', onclick: () => { navigator.clipboard?.writeText(log.map((x) => `${new Date(x.t).toLocaleString(LOCALE)} [${x.kind || 'ok'}] ${x.msg}${x.from ? '  (' + x.from + ')' : ''}`).join('\n')); toast(L('Copiado')); } }, ic('copy'), L('Copiar'));
+    const clear = h('button.btn.sm', { type: 'button', onclick: () => { try { localStorage.removeItem(TOAST_LOG_KEY); } catch {} draw(); } }, ic('trash'), L('Limpar'));
+    box.append(h('label', null, L('Avisos recentes')),
+      h('div.row', null, h('label.chk', null, only, L('Só erros')), h('span.spacer'), copy, clear),
+      log.length ? h('div.toast-log', null, log.slice(0, 40).map((x) => h('div.toast-log-item' + (x.kind === 'err' ? '.err' : ''), null,
+        h('span.tl-time', null, new Date(x.t).toLocaleTimeString(LOCALE)), h('span.tl-msg', null, x.msg), x.from ? h('span.tl-from', null, x.from) : null)))
+        : h('small.muted', null, L('Nenhum aviso guardado.')),
+      h('small', null, L('Os últimos 60 avisos que apareceram no canto da tela, com a parte do studio que mostrou cada um.')));
   };
   draw();
   return box;

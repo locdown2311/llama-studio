@@ -152,7 +152,17 @@ async function api(path, body, { raw } = {}) {
   return j;
 }
 
+// histórico dos avisos (Configurações › Avançado): o que apareceu e de onde veio, para ver depois
+const TOAST_LOG_KEY = 'studio.toasts';
+function toastLog() { try { return JSON.parse(localStorage.getItem(TOAST_LOG_KEY) || '[]'); } catch { return []; } }
 function toast(msg, kind = '') {
+  try {
+    // quem chamou: a primeira linha da pilha fora deste arquivo (arquivo:linha função)
+    const from = (new Error().stack || '').split('\n').slice(2).map((l) => /at (?:(\S+) \()?.*\/js\/([\w-]+\.js):(\d+)/.exec(l)).find(Boolean);
+    const log = toastLog();
+    log.push({ t: Date.now(), msg: String(msg).slice(0, 500), kind, from: from ? `${from[2]}:${from[3]}${from[1] ? ' ' + from[1] : ''}` : '' });
+    localStorage.setItem(TOAST_LOG_KEY, JSON.stringify(log.slice(-60)));
+  } catch { /* sem armazenamento: só não guarda */ }
   const t = h('div.toast' + (kind ? '.' + kind : ''), null, ic(kind === 'err' ? 'alert' : 'check'), msg);
   $('#toasts').append(t);
   setTimeout(() => { t.style.transition = 'opacity .3s'; t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, kind === 'err' ? 5000 : 2600);

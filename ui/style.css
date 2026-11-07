@@ -1501,3 +1501,11 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .api-params[open] > summary { margin-bottom: 6px; }
 .api-params-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 @media (max-width: 640px) { .api-params-row { grid-template-columns: 1fr; } }
+.toast-log { max-height: 260px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; margin: 6px 0; }
+.toast-log-item { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; padding: 6px 10px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.toast-log-item:last-child { border-bottom: 0; }
+.toast-log-item.err .tl-msg { color: var(--danger, #d14343); }
+.tl-time { color: var(--muted); font-variant-numeric: tabular-nums; }
+.tl-from { grid-column: 2; color: var(--muted); font-family: var(--mono, monospace); font-size: 11px; }
+.toast-log-item .tl-msg { word-break: break-word; }
+.chk { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
