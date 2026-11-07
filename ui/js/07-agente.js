@@ -113,7 +113,7 @@ async function auditCall(tc, info, conv, signal) {
   const msgs = [{ role: 'system', content: AUDIT_SYS + '\n\n# Política\n' + (S.settings.auditPolicy?.trim() || AUDIT_POLICY) }, { role: 'user', content: user }];
   const schema = { type: 'object', properties: { motivo: { type: 'string' }, risco: { enum: ['baixo', 'medio', 'alto'] }, decisao: { enum: ['aprovar', 'usuario'] } }, required: ['motivo', 'risco', 'decisao'] };
   const extra = { chat_template_kwargs: { enable_thinking: false }, reasoning_budget: 0, temperature: 0, max_tokens: 400, _fixed: true };
-  const slot = sideSlot(conv); if (slot != null) extra.id_slot = slot;
+  const slot = sideSlot(conv); if (slot != null) extra.id_slot = slot; else S.sideShared = (S.sideShared || 0) + 1;
   let m = { content: '', reasoning: '', tool_calls: [] };
   try {
     try { await streamRaw(msgs, [], m, signal, null, { ...extra, response_format: { type: 'json_schema', json_schema: { name: 'veredito', schema } } }); }
@@ -155,7 +155,10 @@ async function runAgent(conv) {
     const lazy = S.settings.lazyLoad !== false;
     const lastUserMsg = [...conv.messages].reverse().find((m) => m.role === 'user' && !m.hidden);
     const mentioned = (lastUserMsg?.parts || []).filter((p) => p.kind === 'mcp').map((p) => p.id);
-    const fetchTools = () => api('/api/tools', { ...sel, extra: conv.extraTools || [], lazy, eager: eagerList(sel.mcp, [...(conv.auto?.eager || []), ...mentioned]), full: sel.mcp.filter((n) => mcpLoadOf(n) === 'eager') });
+    // conector citado continua completo até o fim da conversa: se voltasse ao catálogo na mensagem
+    // seguinte, a lista de ferramentas mudaria e o llama-server releria a conversa inteira
+    if (mentioned.some((n) => !(conv.auto?.eager || []).includes(n))) conv.auto = { groups: [], mcp: [], skills: [], ...conv.auto, eager: [...new Set([...(conv.auto?.eager || []), ...mentioned])] };
+    const fetchTools = () => api('/api/tools', { ...sel, extra: conv.extraTools || [], lazy, eager: eagerList(sel.mcp, conv.auto?.eager || []), full: sel.mcp.filter((n) => mcpLoadOf(n) === 'eager') });
     let [{ tools, meta, catalog }, ctx] = await Promise.all([
       fetchTools(),
       // o prompt de sistema precisa ficar idêntico entre mensagens para o llama-server reaproveitar o cache:

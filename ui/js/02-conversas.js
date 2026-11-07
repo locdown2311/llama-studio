@@ -577,9 +577,12 @@ function waitProgress(msg) {
   }
   const pct = Math.round(pp.frac * 100);
   const txt = pp.frac >= 1 ? 'Contexto lido; começando a responder'
-    : `Lendo o contexto: ${pp.done.toLocaleString('pt-BR')} de ${pp.all.toLocaleString('pt-BR')} tokens · ${pct}%${pp.left ? ' · faltam ' + fmtLeft(pp.left) : ''}`;
-  return h('div.wprog' + (pp.frac >= 1 ? '.full' : ''), { title: pp.cached ? `${pp.cached.toLocaleString('pt-BR')} tokens já estavam no cache e não precisam ser lidos de novo.` : '' },
-    h('div.wprog-bar', null, h('i', { style: { width: pct + '%' } })), h('div.wprog-txt', null, txt));
+    : `Lendo o contexto: ${pp.done.toLocaleString('pt-BR')} de ${pp.all.toLocaleString('pt-BR')} tokens · ${pct}%${pp.left ? ' · faltam ' + fmtLeft(pp.left) : secs >= 2 ? ` · ${secs}s` : ''}`;
+  // releitura grande: diz por quê (o cache só vale até onde o pedido é igual ao anterior)
+  const big = pp.all > Math.max(2000, (pp.all + pp.cached) * 0.3);
+  const why = big && pp.frac < 1 && msg._why ? `Relendo porque ${msg._why}.` : '';
+  return h('div.wprog' + (pp.frac >= 1 ? '.full' : ''), { title: pp.cached ? `${pp.cached.toLocaleString('pt-BR')} tokens já estavam no cache e não precisam ser lidos de novo.` : 'Nada veio do cache: o pedido inteiro é lido.' },
+    h('div.wprog-bar', null, h('i', { style: { width: pct + '%' } })), h('div.wprog-txt', null, txt), why ? h('div.wprog-why', null, why) : null);
 }
 /* sem atualização do servidor por um tempo (modelo pensando no prompt), o relógio continua andando */
 let waitTimer = 0;

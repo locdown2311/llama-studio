@@ -169,6 +169,9 @@ function fillCtxPop() {
     c?.ctxParts?.length ? h('div.ctx-parts', null, c.ctxParts.slice(0, 7).map(([k, n]) => h('div.ctx-row.sub', null, h('span', null, k), h('b', null, '~' + n.toLocaleString('pt-BR'))))) : null,
     row('Compacta sozinho em', S.settings.autoCompact ? `${at}% (${Math.round(nCtx * at / 100).toLocaleString('pt-BR')})` : 'desligado'),
     c?.compactions ? row('Compactações feitas', String(c.compactions)) : null,
+    c?.cacheLast ? row('Último pedido: do cache', c.cacheLast.cache.toLocaleString('pt-BR')) : null,
+    c?.cacheLast ? row('Último pedido: lido de novo', c.cacheLast.read.toLocaleString('pt-BR')) : null,
+    c?.cacheLast?.why ? h('div.ctx-why', null, `Releu ${c.cacheLast.read.toLocaleString('pt-BR')} tokens${c.cacheLast.ms ? ` em ${Math.round(c.cacheLast.ms / 1000)}s` : ''} porque ${c.cacheLast.why}.`) : null,
     h('div.ctx-note', null, exact ? 'Medido pelo llama-server na última resposta.' : 'Estimativa: a medida exata chega com a próxima resposta.'),
     h('button.btn.sm', { disabled: !c || !c.messages.length, onclick: () => { closePops(); compactNow(c); } }, ic('archive'), 'Compactar agora'));
 }

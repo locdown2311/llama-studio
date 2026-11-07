@@ -446,11 +446,52 @@ function apiMessages(conv, system) {
   return out;
 }
 
+/* ---- por que o llama-server releu ----
+   O cache só serve até o primeiro ponto em que o pedido difere do anterior. Guarda uma impressão
+   de cada pedido e, quando muda, diz onde: instruções, ferramentas ou uma mensagem do histórico. */
+function strHash(s) { let x = 5381; for (let i = 0; i < s.length; i++) x = ((x << 5) + x + s.charCodeAt(i)) | 0; return x; }
+function reqPrint(conv, system, tools, msgs) {
+  return { sys: system || '', tools: (tools || []).map((t) => t.function?.name || ''), toolsHash: strHash(JSON.stringify(tools || [])), msgs: msgs.map((m) => strHash(JSON.stringify(m))), roles: msgs.map((m) => m.role), imgs: msgs.map((m) => Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url')), cut: conv.compactCut || 0, compactions: conv.compactions || 0, slot: conv._slot, started: S.llama?.startedAt || 0, side: S.sideShared || 0 };
+}
+function cacheWhy(prev, now) {
+  if (!prev) return { why: 'é o primeiro pedido desta conversa desde que o studio abriu', start: 0 };
+  if (prev.started !== now.started) return { why: 'o llama-server reiniciou ou trocou de modelo', start: 0 };
+  if (prev.compactions !== now.compactions || prev.cut !== now.cut) return { why: 'a conversa foi compactada', start: 1 };
+  if (prev.sys !== now.sys) {
+    const a = prev.sys.split('\n'); const b = now.sys.split('\n'); let i = 0;
+    while (i < a.length && i < b.length && a[i] === b[i]) i++;
+    const line = (b[i] || a[i] || '').trim();
+    return { why: 'as instruções mudaram' + (line ? ` (a partir de "${line.slice(0, 50)}${line.length > 50 ? '…' : ''}")` : ''), start: 0 };
+  }
+  if (prev.toolsHash !== now.toolsHash) {
+    const add = now.tools.filter((t) => !prev.tools.includes(t)); const del = prev.tools.filter((t) => !now.tools.includes(t));
+    const list = (xs, sign) => xs.length ? `${sign}${xs.length}: ${xs.slice(0, 2).join(', ')}${xs.length > 2 ? '…' : ''}` : '';
+    return { why: 'as ferramentas mudaram' + ((add.length || del.length) ? ` (${[list(add, '+'), list(del, '−')].filter(Boolean).join('; ')})` : ' (parâmetros diferentes)'), start: 0 };
+  }
+  for (let i = 0; i < prev.msgs.length && i < now.msgs.length; i++) {
+    if (prev.msgs[i] === now.msgs[i]) continue;
+    if (prev.imgs[i] && !now.imgs[i]) return { why: 'uma imagem saiu do histórico (só vai no turno em que foi enviada)', start: i };
+    return { why: `a mensagem ${i} do histórico mudou (${prev.roles[i] === 'assistant' ? 'resposta do modelo' : prev.roles[i] === 'tool' ? 'resultado de ferramenta' : 'mensagem'})`, start: i };
+  }
+  if (prev.slot !== now.slot) return { why: 'a conversa mudou de slot no servidor', start: 0 };
+  if (prev.side !== now.side) return { why: 'o auditor ou outro pedido lateral usou o mesmo slot (o servidor tem um slot só; com --parallel 2 ou mais eles ficam separados)', start: 0 };
+  return { why: '', start: -1 };
+}
+
 async function streamCompletion(conv, system, tools, msg, signal) {
   const msgs = apiMessages(conv, system);
+  const print = reqPrint(conv, system, tools, msgs);
+  msg._why = cacheWhy(conv._req, print).why;
+  conv._req = print;
   conv.ctxSys = Math.ceil(((system || '').length + JSON.stringify(tools || []).length) / 3.2);
   const r = await streamRaw(msgs, tools, msg, signal, scheduleRender, requestExtras(conv));
   // medida real do servidor: prompt (com o que veio do cache) + resposta
   if (msg.ctxTokens) { conv.ctx = { tokens: msg.ctxTokens, n: conv.messages.length, cut: conv.compactCut || 0 }; drawCtxMeter(); }
+  // quanto veio do cache no último pedido, e por que o resto foi relido
+  if (msg._pp?.total) {
+    const read = Math.max(0, msg._pp.total - msg._pp.cache);
+    conv.cacheLast = { total: msg._pp.total, cache: msg._pp.cache, read, ms: msg._pp.time_ms || 0, why: read > Math.max(2000, msg._pp.total * 0.3) ? (msg._why || 'o servidor não tinha esse trecho guardado (modelos com camadas recorrentes, como Qwen3.5/3.6, só voltam até o último ponto salvo)') : '' };
+    drawCtxMeter();
+  }
   return r;
 }
