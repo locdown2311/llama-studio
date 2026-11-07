@@ -157,6 +157,94 @@ function busyBlock(conv, tcId, target) {
   return '';
 }
 
+/* ---- criados e alterados nesta conversa ----
+   Tirado do histórico da conversa (write_file, edit_file, create_directory que deram certo), então
+   as marcas voltam ao reabrir a conversa e mudam sozinhas ao trocar de conversa. */
+let madeMemo = { key: '', marks: new Map(), dirs: new Set() };
+function convFileMarks() {
+  const conv = cur();
+  const key = conv && wsOf(conv) === S.ws.path ? `${conv.id}:${conv.messages.length}:${S.ws.path}` : '';
+  if (key === madeMemo.key) return madeMemo;
+  const marks = new Map(); const dirs = new Set();
+  if (key) {
+    const calls = new Map();
+    for (const m of conv.messages) if (m.role === 'assistant') for (const tc of m.tool_calls || []) calls.set(tc.id, tc);
+    for (const m of conv.messages) {
+      if (m.role !== 'tool' || m.status !== 'ok') continue;
+      const tc = calls.get(m.tool_call_id); const name = tc?.function?.name;
+      if (!['write_file', 'edit_file', 'create_directory'].includes(name)) continue;
+      const a = parseArgs(tc.function.arguments) || {};
+      if (!a.path) continue;
+      const rel = relOf(joinPath(S.ws.path, a.path)).replace(/^\.\//, '');
+      if (isAbs(rel)) continue; // fora da pasta de trabalho
+      const prev = marks.get(rel);
+      const created = name === 'create_directory' || (name === 'write_file' && /^Criado/.test(String(m.content)));
+      marks.set(rel, { kind: prev?.kind === 'new' || created ? 'new' : 'edit', n: (prev?.n || 0) + 1, dir: name === 'create_directory' });
+    }
+    for (const rel of marks.keys()) { const parts = rel.split('/'); parts.pop(); let acc = ''; for (const p of parts) { acc = acc ? acc + '/' + p : p; dirs.add(acc); } }
+  }
+  madeMemo = { key, marks, dirs };
+  return madeMemo;
+}
+let madeDrawn = null;
+/** Chamado a cada atualização: só mexe na tela quando o conjunto muda. */
+function syncMade() {
+  const m = convFileMarks();
+  if (m === madeDrawn) return;
+  madeDrawn = m;
+  drawMade();
+  if (S.ws.onlyMade) renderTree(); else applyMadeMarks();
+}
+function drawMade() {
+  const box = $('#ws-made'); const { marks } = convFileMarks();
+  box.innerHTML = '';
+  if (!marks.size) { box.hidden = true; if (S.ws.onlyMade) { S.ws.onlyMade = false; renderTree(); } return; }
+  box.hidden = false;
+  const vals = [...marks.values()];
+  const nNew = vals.filter((v) => v.kind === 'new').length; const nEdit = vals.length - nNew;
+  box.append(
+    h('span.made-sum', { title: 'Criados (N) e alterados (A) nesta conversa' }, ic('history'),
+      nNew ? h('b.mk-new', null, `${nNew} ${nNew === 1 ? 'novo' : 'novos'}`) : null,
+      nNew && nEdit ? ' · ' : '',
+      nEdit ? h('b.mk-edit', null, `${nEdit} ${nEdit === 1 ? 'alterado' : 'alterados'}`) : null),
+    h('button.made-btn' + (S.ws.onlyMade ? '.on' : ''), { type: 'button', title: S.ws.onlyMade ? 'Voltar para a árvore inteira' : 'Mostrar só o que esta conversa criou ou alterou', onclick: () => { S.ws.onlyMade = !S.ws.onlyMade; drawMade(); renderTree(); } }, S.ws.onlyMade ? 'Mostrar tudo' : 'Só estes'));
+}
+function madeBadge(mk) {
+  const t = mk.kind === 'new' ? (mk.dir ? 'Pasta criada nesta conversa' : 'Criado nesta conversa') + (mk.n > 1 ? ` e alterado ${mk.n - 1}x` : '') : `Alterado nesta conversa${mk.n > 1 ? ` (${mk.n}x)` : ''}`;
+  return h('span.mk.' + (mk.kind === 'new' ? 'mk-new' : 'mk-edit'), { title: t }, mk.kind === 'new' ? 'N' : 'A');
+}
+function applyMadeMarks() {
+  const { marks, dirs } = convFileMarks();
+  for (const n of $$('#ws-tree .node')) {
+    const r = n.dataset.rel; if (r == null) continue;
+    n.classList.remove('made', 'made-in');
+    n.querySelector('.mk')?.remove();
+    const mk = marks.get(r);
+    if (mk) { n.classList.add('made'); n.querySelector('.nm').after(madeBadge(mk)); } else if (dirs.has(r)) n.classList.add('made-in');
+  }
+}
+/** Lista plana do que a conversa criou ou alterou (botão "Só estes"). */
+function buildMadeList(parent) {
+  const { marks } = convFileMarks();
+  for (const [rel, mk] of [...marks.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const name = rel.split('/').pop(); const dir = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '';
+    const abs = joinPath(S.ws.path, rel);
+    const ft = ftype(name, mk.dir);
+    const node = h('div.node.flat' + (S.ws.selected === rel ? '.sel' : ''), { style: { paddingLeft: '8px' }, title: abs, dataset: { rel, abs } },
+      h('span', { html: svg(mk.dir ? 'folder' : ft.icon, 'fi'), style: { display: 'contents' } }),
+      h('span.nm', null, name), dir ? h('span.made-dir', null, dir) : null);
+    node.style.setProperty('--c', ft.color);
+    const it = { name, path: abs, rel, dir: !!mk.dir };
+    node.addEventListener('click', () => {
+      if (it.dir) { S.ws.onlyMade = false; drawMade(); revealInTree(abs); return; }
+      S.ws.selected = rel; $$('.node.sel').forEach((x) => x.classList.remove('sel')); node.classList.add('sel'); previewFile(it);
+    });
+    node.addEventListener('pointerdown', (e) => startTreeDrag(e, it));
+    node.addEventListener('dblclick', () => { if (!it.dir) addRef({ name, path: abs, dir: false }); });
+    parent.append(node);
+  }
+}
+
 const refreshTree = debounce(async () => {
   S.ws.cache.clear();
   await renderTree();
@@ -166,10 +254,10 @@ async function renderTree() {
   const box = $('#ws-tree');
   try {
     const frag = document.createDocumentFragment();
-    await buildLevel(frag, '', 0);
+    if (S.ws.onlyMade && convFileMarks().marks.size) buildMadeList(frag); else await buildLevel(frag, '', 0);
     box.innerHTML = '';
     box.append(frag);
-    applyBusyMarks();
+    applyBusyMarks(); applyMadeMarks();
     if (!box.childElementCount) box.append(h('div.tree-empty', null, 'Pasta vazia. Peça ao modelo para criar algo aqui.'));
   } catch (e) {
     box.innerHTML = '';
@@ -183,7 +271,7 @@ async function buildLevel(parent, rel, depth) {
     const r = it.rel;
     const open = it.dir && S.ws.expanded.has(r);
     const ft = ftype(it.name, it.dir);
-    const node = h('div.node' + (it.dir ? '.dir' : '') + (open ? '.open' : '') + (S.ws.fresh.has(r) ? '.fresh' : '') + (S.ws.selected === r ? '.sel' : ''),
+    const node = h('div.node' + (it.dir ? '.dir' : '') + (open ? '.open' : '') + (S.ws.selected === r ? '.sel' : ''),
       { style: { paddingLeft: 6 + depth * 14 + 'px' }, title: it.path, dataset: { rel: r, abs: it.path } },
       h('span', { html: svg('chev', 'tw' + (it.dir ? '' : ' blank')), style: { display: 'contents' } }),
       h('span', { html: svg(it.dir ? (open ? 'folderOpen' : 'folder') : ft.icon, 'fi'), style: { display: 'contents', '--c': ft.color } }),

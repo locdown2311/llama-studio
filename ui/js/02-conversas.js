@@ -23,12 +23,12 @@ function wsOf(c) { return projectOf(c)?.dir || S.info.workspace || ''; }
 /** Painel de arquivos acompanha a pasta da conversa aberta. */
 function syncWsRoot(force) {
   const w = wsOf(cur());
-  if (!w || (w === S.ws.path && !force)) return;
+  if (!w || (w === S.ws.path && !force)) { syncMade(); return; }
   S.ws.path = w;
   S.ws.cache.clear(); S.ws.fresh.clear();
   S.ws.expanded = new Set(store.get('wsExp:' + w, []));
   $('#ws-preview')?.classList.remove('open');
-  renderWsPath(); renderTree(); updatePickers();
+  renderWsPath(); renderTree(); updatePickers(); drawMade();
 }
 
 /* ============================================================ conversas */
@@ -488,7 +488,7 @@ function scheduleRender() {
   if (S.runs.size) renderConvListSoon();
   if (rafPending) return;
   rafPending = true;
-  requestAnimationFrame(() => { rafPending = false; renderMessages(true); updateBusy(); });
+  requestAnimationFrame(() => { rafPending = false; renderMessages(true); updateBusy(); syncMade(); });
 }
 
 const renderConvListSoon = debounce(() => renderConvList(), 300);
