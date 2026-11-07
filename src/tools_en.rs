@@ -59,6 +59,8 @@ pub fn def_en(name: &str) -> Option<(&'static str, &'static str)> {
             r#"{"type":"object","properties":{"task":{"type":"string","description":"What to investigate and what the report must contain"},"where":{"type":"string","description":"Folder, files or site to start with (optional)"}},"required":["task"]}"#),
         "read_skill_file" => ("Reads a helper file of an active skill (scripts, templates, references cited in SKILL.md). A large file comes back as an outline; read parts with offset/limit.",
             r#"{"type":"object","properties":{"skill":{"type":"string","description":"skill id"},"path":{"type":"string"},"offset":{"type":"integer"},"limit":{"type":"integer"}},"required":["skill","path"]}"#),
+        "customize_ui" => ("Personalize the interface: themes (colors, fonts), layouts, and custom widgets. Creates and applies visualization settings.",
+            r#"{"type":"object","properties":{"theme":{"type":"string","description":"Theme name (light, dark, custom)"}, "colors":{"type":"object","description":"Custom colors: background, foreground, accent, primary, secondary, warning, error, success"}, "fonts":{"type":"object","description":"Fonts: body, monospace, header"}, "layout":{"type":"string","description":"Layout: compact, spacious, grid, list"}, "widgets":{"type":"array","items":{"type":"string","description":"Widgets: statusbar, toolbar, sidebar, panels, tabs"}},"required":[]}}"#),
         _ => return None,
     })
 }
@@ -67,7 +69,7 @@ pub fn def_en(name: &str) -> Option<(&'static str, &'static str)> {
 mod t {
     #[test]
     fn esquemas_validos() {
-        for n in ["list_directory", "read_file", "search_files", "write_file", "create_directory", "edit_file", "run_command", "execute_code", "browser_navigate", "browser_read", "browser_click", "browser_type", "browser_press", "browser_back", "browser_screenshot", "browser_eval", "computer_windows", "computer_focus", "computer_elements", "computer_screenshot", "computer_click", "computer_type", "computer_key", "computer_scroll", "recall_history", "notebook", "update_todos", "search_tools", "explore", "read_skill_file"] {
+        for n in ["list_directory", "read_file", "search_files", "write_file", "create_directory", "edit_file", "run_command", "execute_code", "browser_navigate", "browser_read", "browser_click", "browser_type", "browser_press", "browser_back", "browser_screenshot", "browser_eval", "computer_windows", "computer_focus", "computer_elements", "computer_screenshot", "computer_click", "computer_type", "computer_key", "computer_scroll", "recall_history", "notebook", "update_todos", "search_tools", "explore", "read_skill_file", "customize_ui"] {
             let (_, p) = super::def_en(n).unwrap_or_else(|| panic!("sem inglês: {n}"));
             serde_json::from_str::<serde_json::Value>(p).unwrap_or_else(|e| panic!("{n}: {e}"));
         }

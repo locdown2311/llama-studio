@@ -16,6 +16,7 @@ pub fn set(lang: &str) {
     EN.store(lang.to_ascii_lowercase().starts_with("en"), Ordering::Relaxed);
 }
 
+#[allow(dead_code)]
 pub fn code() -> &'static str {
     if en() {
         "en"

@@ -1143,6 +1143,17 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
             let size = std::fs::metadata(&file).map_err(e)?.len();
             read_text(&file, size, a)
         }
+        "customize_ui" => {
+            let a = json!({
+                "theme": a.get("theme").and_then(|v| v.as_str()).unwrap_or_default(),
+                "colors": a.get("colors").cloned().unwrap_or(json!({})),
+                "fonts": a.get("fonts").cloned().unwrap_or(json!({})),
+                "layout": a.get("layout").and_then(|v| v.as_str()).unwrap_or_default(),
+                "widgets": a.get("widgets").cloned().unwrap_or(json!([])),
+            });
+            let r = customize_ui(app, Some(a["theme"].as_str().unwrap().to_string()), Some(a["colors"].clone()), Some(a["fonts"].clone()), Some(a["layout"].as_str().unwrap().to_string()), Some(a["widgets"].clone()));
+            Ok(format!("{}\n{}", r["message"], serde_json::to_string_pretty(&r["settings"]).unwrap()))
+        }
         _ => Err(format!("Ferramenta desconhecida: {name}")),
     }
 }
@@ -1162,6 +1173,7 @@ mod mcp_le {
 }
 
 /// Personalização da interface: temas, cores, fontes, layouts
+#[allow(dead_code)]
 pub fn customize_ui(app: &App, theme: Option<String>, colors: Option<Value>, fonts: Option<Value>, layout: Option<String>, widgets: Option<Value>) -> Value {
     let mut result = json!({
         "status": "success",
