@@ -204,6 +204,31 @@ function apiSection(put, field, saved) {
       const roles = { ...(S.settings.apiRoles || {}) }; for (const k in roles) if (roles[k] === a.id) roles[k] = '';
       put({ apiRoles: roles }); save({ apiProviderDelete: a.id });
     } });
+    // parâmetros deste provedor: vão em todo pedido e ganham dos do studio (temperatura 0 do auditor etc.)
+    const prm = { ...(a.params || {}) };
+    const num = (k, ph, step) => {
+      const i = h('input.input.mono', { type: 'number', step, value: prm[k] ?? '', placeholder: ph });
+      i.addEventListener('change', () => { const v = i.value.trim(); if (v === '') delete prm[k]; else prm[k] = Number(v); saveParams(); });
+      return i;
+    };
+    const known = ['temperature', 'top_p', 'max_tokens'];
+    const others = Object.fromEntries(Object.entries(prm).filter(([k]) => !known.includes(k)));
+    const extra = h('textarea.input.mono', { rows: 3, spellcheck: false, placeholder: '{"reasoning_effort": "low"}' }, Object.keys(others).length ? JSON.stringify(others, null, 2) : '');
+    extra.addEventListener('change', () => {
+      let o = {};
+      if (extra.value.trim()) { try { o = JSON.parse(extra.value); if (!o || typeof o !== 'object' || Array.isArray(o)) throw new Error(); } catch { toast(L('Os outros parâmetros precisam ser um objeto JSON.'), 'err'); return; } }
+      for (const k of Object.keys(prm)) if (!known.includes(k)) delete prm[k];
+      Object.assign(prm, o); saveParams();
+    });
+    const saveParams = () => save({ apiProvider: { id: a.id, params: prm } });
+    const nParams = Object.keys(prm).length;
+    const params = h('details.api-params', nParams ? { open: true } : null,
+      h('summary', null, L('Parâmetros') + (nParams ? ` (${nParams})` : '')),
+      h('div.api-params-row', null,
+        field(L('Temperatura'), num('temperature', L('do studio'), '0.05')),
+        field(L('Top P'), num('top_p', L('do studio'), '0.01')),
+        field(L('Máx. de tokens'), num('max_tokens', L('do studio'), '1'))),
+      field(L('Outros parâmetros (JSON)'), extra, L('Vão em todo pedido para esta API, por cima dos do studio. Ex.: reasoning_effort, chat_template_kwargs, top_k. Vazio = o studio decide (o auditor usa temperatura 0, por exemplo).')));
     const u = apiUse(null, a.id);
     return h('div.api-card', null,
       h('div.api-head', null, h('b', null, apiLabel(a)), a.ready ? h('span.tag.ok', null, L('pronta')) : h('span.tag.off', null, L('incompleta')),
@@ -211,6 +236,7 @@ function apiSection(put, field, saved) {
       pre ? null : field(L('Endereço'), base, L('O que vem antes de /chat/completions.')),
       field(L('Chave'), key),
       field(L('Modelo'), h('div.row', null, model, dl, listBtn, test)),
+      params,
       h('small.muted', null, L('Hoje: {0} pedidos, {1} tokens, {2} falhas (voltaram para o modelo local).', u.calls, u.tokens.toLocaleString(LOCALE), u.fails)));
   };
   const draw = () => {

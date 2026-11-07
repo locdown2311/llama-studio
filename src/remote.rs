@@ -31,7 +31,7 @@ fn provider(app: &App, id: &str) -> Option<ApiProvider> {
 
 /// Lista para a interface, sem as chaves.
 pub fn public(app: &App) -> Value {
-    json!(app.cfg().api_providers.iter().map(|p| json!({ "id": p.id, "name": p.name, "base": p.base, "model": p.model, "hasKey": !p.key.trim().is_empty(), "ready": ready(p) })).collect::<Vec<_>>())
+    json!(app.cfg().api_providers.iter().map(|p| json!({ "id": p.id, "name": p.name, "base": p.base, "model": p.model, "params": p.params, "hasKey": !p.key.trim().is_empty(), "ready": ready(p) })).collect::<Vec<_>>())
 }
 
 fn endpoint(base: &str, path: &str) -> String {
@@ -48,6 +48,12 @@ pub async fn chat(app: &App, id: &str, body: Bytes) -> Response {
     if let Some(o) = v.as_object_mut() {
         for k in LLAMA_ONLY {
             o.remove(*k);
+        }
+        // parâmetros escolhidos para este provedor: valem por cima dos do studio (menos os que definem o pedido)
+        for (k, val) in &c.params {
+            if !matches!(k.as_str(), "model" | "messages" | "tools" | "stream" | "stream_options") {
+                o.insert(k.clone(), val.clone());
+            }
         }
         o.insert("model".into(), json!(c.model.trim()));
         if o.get("stream").and_then(Value::as_bool).unwrap_or(false) {

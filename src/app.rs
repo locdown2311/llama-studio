@@ -61,6 +61,8 @@ pub struct ApiProvider {
     pub base: String,
     pub key: String,
     pub model: String,
+    /// parâmetros que vão em todo pedido (temperature, top_p, max_tokens, reasoning_effort...); ganham dos do studio
+    pub params: serde_json::Map<String, serde_json::Value>,
 }
 
 impl Default for Config {
@@ -161,7 +163,7 @@ impl App {
             }
         }
         if !config.api_base.trim().is_empty() && config.api_providers.is_empty() {
-            config.api_providers.push(ApiProvider { id: "p1".into(), name: String::new(), base: config.api_base.clone(), key: config.api_key.clone(), model: config.api_model.clone() });
+            config.api_providers.push(ApiProvider { id: "p1".into(), name: String::new(), base: config.api_base.clone(), key: config.api_key.clone(), model: config.api_model.clone(), ..Default::default() });
         }
         config.api_base.clear();
         config.api_key.clear();

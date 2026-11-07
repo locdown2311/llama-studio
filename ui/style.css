@@ -1497,3 +1497,7 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .tool-head .run-on { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; flex: none; }
 .tool-head .run-on svg { width: 12px; height: 12px; }
 .tool-head .run-on.api { color: var(--accent); }
+.api-params > summary { cursor: pointer; font-size: 13px; color: var(--muted); padding: 2px 0; }
+.api-params[open] > summary { margin-bottom: 6px; }
+.api-params-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 640px) { .api-params-row { grid-template-columns: 1fr; } }

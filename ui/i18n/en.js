@@ -1462,5 +1462,13 @@ const I18N_EN = {
 "local": "local",
 "Rodou pela API {0} ({1}){2}": "Ran through the {0} API ({1}){2}",
 ", {0} tokens": ", {0} tokens",
-" (via API: {0})": " (via API: {0})"
+" (via API: {0})": " (via API: {0})",
+"Os outros parâmetros precisam ser um objeto JSON.": "The other parameters must be a JSON object.",
+"Parâmetros": "Parameters",
+"Temperatura": "Temperature",
+"Top P": "Top P",
+"Máx. de tokens": "Max tokens",
+"do studio": "studio's",
+"Outros parâmetros (JSON)": "Other parameters (JSON)",
+"Vão em todo pedido para esta API, por cima dos do studio. Ex.: reasoning_effort, chat_template_kwargs, top_k. Vazio = o studio decide (o auditor usa temperatura 0, por exemplo).": "Go in every request to this API, over the studio's. E.g.: reasoning_effort, chat_template_kwargs, top_k. Empty = the studio decides (the auditor uses temperature 0, for example)."
 };
