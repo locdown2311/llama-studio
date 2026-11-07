@@ -1475,5 +1475,7 @@ const I18N_EN = {
 "Só erros": "Errors only",
 "Limpar": "Clear",
 "Nenhum aviso guardado.": "No notices saved.",
-"Os últimos 60 avisos que apareceram no canto da tela, com a parte do studio que mostrou cada um.": "The last 60 notices that appeared in the corner of the screen, with the part of the studio that showed each one."
+"Os últimos 60 avisos que apareceram no canto da tela, com a parte do studio que mostrou cada um.": "The last 60 notices that appeared in the corner of the screen, with the part of the studio that showed each one.",
+"a API {0} não respondeu em {1} s": "the {0} API did not answer within {1} s",
+"; a API falhou ({0}) e usou o modelo local": "; the API failed ({0}) and the local model was used"
 };

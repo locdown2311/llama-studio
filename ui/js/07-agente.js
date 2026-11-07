@@ -196,7 +196,7 @@ async function auditCall(tc, info, conv, signal) {
   if (auditApi) {
     // fora do llama-server: não ocupa slot nem mexe no cache de ninguém
     // folga para modelos que raciocinam antes (gpt-oss, qwen3 na Groq): o raciocínio também conta no limite
-    const ex = { temperature: 0, max_tokens: 1500 };
+    const ex = { temperature: 0, max_tokens: 1500, _timeout: 15000 };
     try {
       try { await streamApi(msgs, [], m, signal, null, { ...ex, _p: auditApi, response_format: { type: 'json_schema', json_schema: { name: 'veredito', schema } } }); }
       catch (e) {

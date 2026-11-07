@@ -222,14 +222,25 @@ function apiUse(add, pid) {
 }
 /** Pede pela API externa; se ela falhar (sem internet, limite do plano grátis...), o chamador volta ao modelo local. */
 async function streamApi(messages, tools, msg, signal, onDelta, extra = {}) {
+  // prazo: uma API lenta não pode segurar o agente; estourou, o chamador volta para o modelo local
+  const { _timeout = 60000, ...ex } = extra;
+  const ac = new AbortController();
+  const onAbort = () => ac.abort();
+  signal?.addEventListener('abort', onAbort, { once: true });
+  let late = false;
+  const timer = setTimeout(() => { late = true; ac.abort(); }, _timeout);
   try {
-    await streamRaw(messages, tools, msg, signal, onDelta, { ...extra, _remote: true });
+    await streamRaw(messages, tools, msg, ac.signal, onDelta, { ...ex, _remote: true });
     apiUse({ calls: 1, tokens: msg.usage?.total_tokens || 0 }, extra._p);
     msg.via = apiById(extra._p)?.model || '';
   } catch (e) {
     if (signal?.aborted) throw e;
     apiUse({ fails: 1 }, extra._p);
+    if (late) throw new Error(L('a API {0} não respondeu em {1} s', apiLabel(apiById(extra._p) || {}), Math.round(_timeout / 1000)));
     throw e;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
   }
 }
 
