@@ -62,7 +62,7 @@
   --mcp: #8eaef0; --mcp-soft: #23304a; --mcp-line: #34466b;
   --file: #e3a75a; --file-soft: #3a2e1e; --file-line: #574329;
   --ok: #5cc483; --ok-soft: #1f3328; --warn: #e0b04d; --warn-soft: #3a3120;
-  --err: #ef7676; --err-soft: #3a2224;
+  --err: #ef7676; --err-soft: #3a2224; --stop: #e5484d; --stop-2: #f2555a;
   --code-bg: #1a1b20;
   --sh-1: 0 1px 2px rgba(0, 0, 0, .3);
   --sh-2: 0 4px 16px rgba(0, 0, 0, .35);
@@ -467,7 +467,8 @@ svg { display: block; flex: none; width: 16px; height: 16px; }
 .send:hover { background: var(--accent-2); }
 .send:active { transform: scale(.95); }
 .send svg { width: 17px; height: 17px; }
-.send.stop { background: var(--text); box-shadow: none; }
+.send.stop { background: var(--stop, #d14343); color: #fff; box-shadow: 0 2px 6px color-mix(in srgb, var(--stop, #d14343) 35%, transparent); }
+.send.stop:hover { background: var(--stop-2, #b93636); }
 
 .popover {
   display: none; position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 30;
