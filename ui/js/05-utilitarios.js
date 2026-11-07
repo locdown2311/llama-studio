@@ -2,7 +2,9 @@
 'use strict';
 
 /* ============================================================ utilitários (uv, rg, fd, rtk...) */
-const BIN_ICONS = { rtk: 'archive', ripgrep: 'search', fd: 'file', uv: 'terminal', bun: 'braces' };
+const BIN_ICONS = { rtk: 'archive', ripgrep: 'search', fd: 'file', uv: 'terminal', bun: 'braces', ponytail: 'sparkles' };
+// Ponytail: nível das regras no prompt de sistema (off, lite, full, ultra)
+const PONYTAIL_LEVELS = [['off', L('Desligado'), L('Instalado, mas fora do prompt.')], ['lite', L('Leve'), L('Faz o que foi pedido e só cita, numa linha, a opção mais simples.')], ['full', L('Completo'), L('A menor mudança completa, com verificação quando a lógica pede e o que ficou de fora no fim. Padrão.')], ['ultra', L('Ultra'), L('Também questiona o pedido e contesta o que não for necessário antes de construir.')]];
 S.bins = null; S.binsBusy = new Set();
 
 function fmtBytes(n) { return n >= 1048576 ? (n / 1048576).toFixed(1).replace('.', ',') + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'; }
@@ -391,22 +393,24 @@ function drawBins() {
   for (const b of S.bins.items) {
     const busy = S.binsBusy.has(b.id);
     const tags = [];
-    if (b.version) tags.push(h('span.tag', null, 'v' + b.version));
+    const vv = (x) => (b.kind === 'pack' ? x : 'v' + x);
+    if (b.version) tags.push(h('span.tag', { title: b.kind === 'pack' ? L('Commit do repositório') : '' }, vv(b.version)));
     if (b.source === 'system') tags.push(h('span.tag', { title: L('Encontrado no PATH do Windows') }, L('do sistema')));
     if (b.source === 'studio') tags.push(h('span.tag.ok', null, L('instalado')));
     if (b.size) tags.push(h('span.tag', null, fmtBytes(b.size)));
-    if (b.update) tags.push(h('span.tag.new', null, 'v' + b.latest + L(' disponível')));
+    if (b.update) tags.push(h('span.tag.new', null, vv(b.latest) + L(' disponível')));
     const act = busy ? h('button.btn.sm', { disabled: true }, ic('loader'), b.source === 'studio' ? 'Atualizando...' : 'Baixando...')
       : b.source === 'studio' ? h('div.bin-acts', null,
           b.update ? h('button.btn.sm.primary', { onclick: () => binInstall(b) }, ic('download'), L('Atualizar')) : null,
           h('button.icon-btn.sm', { title: L('Reinstalar'), 'aria-label': L('Reinstalar'), html: svg('refresh'), onclick: () => binInstall(b) }),
           h('button.icon-btn.sm', { title: L('Remover'), 'aria-label': L('Remover'), html: svg('trash'), onclick: () => binRemove(b) }))
-      : h('button.btn.sm' + (b.source ? '' : '.primary'), { onclick: () => binInstall(b), title: b.source === 'system' ? L('Baixa uma cópia própria do studio, que passa a ter preferência') : '' }, ic('download'), b.source === 'system' ? L('Instalar cópia') : L('Instalar') + (b.latest ? ' v' + b.latest : ''));
+      : h('button.btn.sm' + (b.source ? '' : '.primary'), { onclick: () => binInstall(b), title: b.source === 'system' ? L('Baixa uma cópia própria do studio, que passa a ter preferência') : '' }, ic('download'), b.source === 'system' ? L('Instalar cópia') : L('Instalar') + (b.latest && b.kind !== 'pack' ? ' v' + b.latest : ''));
     grid.append(h('div.skill.bin' + (b.source ? '.on' : ''), null,
       h('div.skill-top', null, h('div.skill-ico.bin-ico', { html: svg(BIN_ICONS[b.id] || 'terminal') }),
         h('div.skill-name', null, b.name, h('span.bin-cmd', null, b.cmd)), b.tag === 'contexto' ? h('span.tag.ctx', null, L('economiza contexto')) : null),
       h('div.bin-tags', null, tags.length ? tags : h('span.tag.off', null, L('não instalado'))),
       h('div.skill-desc', null, b.desc),
+      b.kind === 'pack' && b.source === 'studio' ? ponytailLevel() : null,
       h('div.skill-foot', null,
         h('a.bin-link', { href: 'https://github.com/' + b.repo, target: '_blank', rel: 'noopener', title: b.repo }, ic('external'), L('GitHub')),
         b.site ? h('a.bin-link', { href: b.site, target: '_blank', rel: 'noopener' }, ic('globe'), 'site') : null,
@@ -415,15 +419,32 @@ function drawBins() {
   grid.append(h('div.bin-dir', null, ic('folder'), L('Pasta: '), h('code', null, S.bins.dir)));
 }
 
+function ponytailLevel() {
+  const cur0 = S.settings.ponytail || 'off';
+  const desc = h('div.pt-desc');
+  const show = (v) => { desc.textContent = (PONYTAIL_LEVELS.find((x) => x[0] === v) || PONYTAIL_LEVELS[0])[2]; };
+  const el = h('div.seg.sm', null, PONYTAIL_LEVELS.map(([v, l]) => h('button', { type: 'button', class: cur0 === v ? 'on' : '', onclick: () => {
+    S.settings.ponytail = v; store.set('settings', S.settings); show(v);
+    $$('button', el).forEach((x, i) => x.classList.toggle('on', PONYTAIL_LEVELS[i][0] === v));
+    toast(v === 'off' ? L('Ponytail fora do prompt') : L('Ponytail no nível {0}: vale a partir da próxima mensagem', PONYTAIL_LEVELS.find((x) => x[0] === v)[1]));
+  } }, l)));
+  show(cur0);
+  return h('div.pt-level', null, h('span.pt-label', null, L('Nível no prompt')), el, desc);
+}
+
 async function binInstall(b) {
   S.binsBusy.add(b.id); drawBins();
-  try { const r = await api('/api/bins/install', { id: b.id }); toast(L('{0} {1}instalado', b.name, r.version ? 'v' + r.version + ' ' : '')); }
+  try {
+    const r = await api('/api/bins/install', { id: b.id });
+    toast(L('{0} {1}instalado', b.name, r.version ? (b.kind === 'pack' ? r.version : 'v' + r.version) + ' ' : ''));
+    if (b.kind === 'pack') { if (!S.settings.ponytail) { S.settings.ponytail = 'full'; store.set('settings', S.settings); } loadSkills().catch(() => {}); }
+  }
   catch (e) { toast(`${b.name}: ${e.message}`, 'err'); }
   S.binsBusy.delete(b.id); await loadBins(true);
 }
 
 async function binRemove(b) {
   if (!(await confirmBox(L('Remover {0} da pasta do studio?', b.name), L('Remover'), true))) return;
-  try { await api('/api/bins/remove', { id: b.id }); toast(L('{0} removido', b.name)); } catch (e) { toast(e.message, 'err'); }
+  try { await api('/api/bins/remove', { id: b.id }); toast(L('{0} removido', b.name)); if (b.kind === 'pack') loadSkills().catch(() => {}); } catch (e) { toast(e.message, 'err'); }
   await loadBins(true);
 }

@@ -237,10 +237,14 @@ pub async fn list(app: &App, with_latest: bool) -> Value {
         }
         out.push(v);
     }
+    out.push(crate::ponytail::item(app, with_latest).await);
     json!({"dir": dir(), "items": out})
 }
 
 pub async fn install(app: &App, id: &str) -> Result<String, String> {
+    if id == "ponytail" {
+        return crate::ponytail::install(app).await;
+    }
     let b = find(id).ok_or("Ferramenta desconhecida.")?;
     let rel = latest_release(app, b).await?;
     if b.id == "7zip" {
@@ -389,7 +393,10 @@ fn set_exec(_p: &Path) -> Result<(), String> {
     Ok(())
 }
 
-pub fn remove(_app: &App, id: &str) -> Result<(), String> {
+pub fn remove(app: &App, id: &str) -> Result<(), String> {
+    if id == "ponytail" {
+        return crate::ponytail::remove(app);
+    }
     let b = find(id).ok_or("Ferramenta desconhecida.")?;
     let d = dir();
     let paths: Vec<PathBuf> = b.exes.iter().chain(b.copies.iter().map(|c| &c.1)).map(|e| d.join(exe_name(e))).chain(b.files.iter().map(|f| d.join(f))).collect();

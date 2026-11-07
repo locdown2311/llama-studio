@@ -420,7 +420,7 @@ function apiMessages(conv, system) {
       continue;
     }
     if (m.role === 'user') {
-      const text = userContent(m) + (m.use?.length && !m.auto?.undone ? L('\n\n(Use {0} para isso.)', m.use.join(' e ')) : '') + (m.plan ? PLAN_NOTE : '');
+      const text = userContent(m) + (m.use?.length && !m.auto?.undone ? L('\n\n(Use {0} para isso.)', m.use.join(' e ')) : '') + (m.plan ? PLAN_NOTE : '') + (m.skillNote ? '\n\n' + m.skillNote : '');
       const imgs = m.__i === lastUserIdx && visionOn() ? (m.refs || []).filter(isImgRef).map((r) => S.imgData.get(r.path)).filter(Boolean) : [];
       out.push({ role: 'user', content: imgs.length ? [{ type: 'text', text }, ...imgs.map((url) => ({ type: 'image_url', image_url: { url } }))] : text });
     }

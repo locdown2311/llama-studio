@@ -24,6 +24,7 @@ mod hf;
 mod mcp;
 mod models;
 mod pe;
+mod ponytail;
 mod projmap;
 mod share;
 mod server;

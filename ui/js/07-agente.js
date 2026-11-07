@@ -280,12 +280,24 @@ async function runAgent(conv) {
     // conector citado continua completo até o fim da conversa: se voltasse ao catálogo na mensagem
     // seguinte, a lista de ferramentas mudaria e o llama-server releria a conversa inteira
     if (mentioned.some((n) => !(conv.auto?.eager || []).includes(n))) conv.auto = { groups: [], mcp: [], skills: [], ...conv.auto, eager: [...new Set([...(conv.auto?.eager || []), ...mentioned])] };
+    // skills que entram no meio da conversa vão como nota na mensagem do usuário, não no prompt de sistema:
+    // mudar o prompt faria o llama-server reler a conversa inteira
+    const started = conv.messages.some((m) => m.role === 'assistant');
+    const base = started && Array.isArray(conv.skillBase) ? conv.skillBase.filter((id) => sel.skills.includes(id)) : sel.skills.slice();
+    conv.skillBase = base;
+    const noted = new Set(conv.messages.flatMap((m) => m.skillIds || []));
+    const late = sel.skills.filter((id) => !base.includes(id) && !noted.has(id));
+    const askMsg = [...conv.messages].reverse().find((m) => m.role === 'user' && !m.hidden);
+    if (late.length && askMsg) {
+      const { text } = await api('/api/context', { skillsOnly: true, skills: late, lazy });
+      if (text) { askMsg.skillNote = text; askMsg.skillIds = late; }
+    }
     const fetchTools = () => api('/api/tools', { ...sel, extra: conv.extraTools || [], lazy, eager: eagerList(sel.mcp, conv.auto?.eager || []), full: sel.mcp.filter((n) => mcpLoadOf(n) === 'eager') });
     let [{ tools, meta, catalog }, ctx] = await Promise.all([
       fetchTools(),
       // o prompt de sistema precisa ficar idêntico entre mensagens para o llama-server reaproveitar o cache:
       // só a data (sem hora) e sem a lista de arquivos referenciados (eles já vão na própria mensagem)
-      (S.settings.projMap === true ? ensureMap(conv) : Promise.resolve()).then(() => api('/api/context', { ws: wsOf(conv), skills: sel.skills, groups, refs: [], lazy, map: S.settings.projMap === true, now: new Date().toLocaleDateString(LOCALE, { dateStyle: 'full' }) })),
+      (S.settings.projMap === true ? ensureMap(conv) : Promise.resolve()).then(() => api('/api/context', { ws: wsOf(conv), skills: base, groups, refs: [], lazy, map: S.settings.projMap === true, ponytail: S.settings.ponytail || 'off', now: new Date().toLocaleDateString(LOCALE, { dateStyle: 'full' }) })),
     ]);
     const tctx = { signal: ac.signal, conv, refs, groups, ctxText: ctx.text, ws: wsOf(conv) };
     const persona = personaOf(conv); const proj = projectOf(conv);

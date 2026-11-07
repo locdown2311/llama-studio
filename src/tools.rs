@@ -402,6 +402,16 @@ pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[Strin
             parts.push(LF!("Conectores MCP disponíveis: {}. Se precisar de uma ferramenta que não está na sua lista, use search_tools.", "Available MCP connectors: {}. If you need a tool that is not in your list, use search_tools.", hidden.join(", ")));
         }
     }
+    let blocks = skill_blocks(app, skill_ids, lazy);
+    if !blocks.is_empty() {
+        parts.push(blocks);
+    }
+    parts.join("\n\n")
+}
+
+/// Bloco das skills ativas (vai no prompt de sistema, ou numa mensagem quando a skill entra no meio
+/// da conversa: mudar o prompt de sistema faria o llama-server reler a conversa inteira).
+pub fn skill_blocks(app: &App, skill_ids: &[String], lazy: bool) -> String {
     let mut active = vec![];
     for id in skill_ids {
         if let Some(s) = skills::get(app, id) {
@@ -419,12 +429,12 @@ pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[Strin
             }
         }
     }
-    if !active.is_empty() {
-        parts.push(LF!("O usuário ativou as skills abaixo. Siga as instruções de cada uma sempre que a tarefa se encaixar nela.\n\n{}", "The user turned on the skills below. Follow each one's instructions whenever the task fits it.
-
-{}", active.join("\n\n")));
+    if active.is_empty() {
+        return String::new();
     }
-    parts.join("\n\n")
+    LF!("O usuário ativou as skills abaixo. Siga as instruções de cada uma sempre que a tarefa se encaixar nela.\n\n{}", "The user turned on the skills below. Follow each one's instructions whenever the task fits it.
+
+{}", active.join("\n\n"))
 }
 
 pub struct ToolOut {

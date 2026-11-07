@@ -1370,5 +1370,17 @@ const I18N_EN = {
 "Limite base. Se a tarefa está avançando (lista de tarefas, arquivos alterados), o studio dá mais passos sozinho, até 3 vezes isso. Repetições sem resultado novo são interrompidas antes.": "Base limit. If the task is moving forward (task list, changed files), the studio gives more steps on its own, up to 3 times this. Repetitions with no new result are stopped earlier.",
 "Interface": "Interface",
 "Personalizar a interface": "Customize the interface",
-"Temas, cores, fontes e layout do studio, pedidos ao modelo.": "The studio's themes, colors, fonts and layout, requested from the model."
+"Temas, cores, fontes e layout do studio, pedidos ao modelo.": "The studio's themes, colors, fonts and layout, requested from the model.",
+"Desligado": "Off",
+"Instalado, mas fora do prompt.": "Installed, but left out of the prompt.",
+"Leve": "Lite",
+"Faz o que foi pedido e só cita, numa linha, a opção mais simples.": "Does what was asked and only names the simpler option in one line.",
+"Completo": "Full",
+"A menor mudança completa, com verificação quando a lógica pede e o que ficou de fora no fim. Padrão.": "The smallest complete change, with a check when the logic needs one and what was left out at the end. Default.",
+"Ultra": "Ultra",
+"Também questiona o pedido e contesta o que não for necessário antes de construir.": "Also questions the request and pushes back on what is not needed before building.",
+"Commit do repositório": "Repository commit",
+"Ponytail fora do prompt": "Ponytail left out of the prompt",
+"Ponytail no nível {0}: vale a partir da próxima mensagem": "Ponytail at level {0}: applies from the next message on",
+"Nível no prompt": "Level in the prompt"
 };

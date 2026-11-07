@@ -775,7 +775,15 @@ async fn tools_search(State(app): S, b: Bytes) -> Res {
 
 async fn context(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
-    ok(json!({"text": tools::build_context(&app, &ws_of(&app, st(&v, "ws")), &strs(&v, "skills"), &groups_of(&v), &strs(&v, "refs"), st(&v, "now"), v.get("lazy").and_then(Value::as_bool).unwrap_or(false), v.get("map").and_then(Value::as_bool).unwrap_or(false))}))
+    if v.get("skillsOnly").and_then(Value::as_bool).unwrap_or(false) {
+        return ok(json!({ "text": tools::skill_blocks(&app, &strs(&v, "skills"), v.get("lazy").and_then(Value::as_bool).unwrap_or(false)) }));
+    }
+    let mut text = tools::build_context(&app, &ws_of(&app, st(&v, "ws")), &strs(&v, "skills"), &groups_of(&v), &strs(&v, "refs"), st(&v, "now"), v.get("lazy").and_then(Value::as_bool).unwrap_or(false), v.get("map").and_then(Value::as_bool).unwrap_or(false));
+    let pt = crate::ponytail::section(&app, st(&v, "ponytail"));
+    if !pt.is_empty() {
+        text = format!("{text}\n\n{pt}");
+    }
+    ok(json!({ "text": text }))
 }
 
 async fn tools_call(State(app): S, b: Bytes) -> Res {
