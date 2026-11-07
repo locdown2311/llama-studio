@@ -501,7 +501,11 @@ async function streamCompletion(conv, system, tools, msg, signal) {
   msg._why = cacheWhy(conv._req, print).why;
   conv._req = print;
   conv.ctxSys = Math.ceil(((system || '').length + JSON.stringify(tools || []).length) / 3.2);
-  const r = await streamRaw(msgs, tools, msg, signal, scheduleRender, requestExtras(conv));
+  // várias ferramentas no mesmo passo (dois explore em paralelo, ler e editar...): o llama-server só aceita
+  // mais de uma chamada por resposta quando o pedido diz; sem isso vale o que ele acha do template
+  const extra = requestExtras(conv);
+  if (tools?.length) extra.parallel_tool_calls = true;
+  const r = await streamRaw(msgs, tools, msg, signal, scheduleRender, extra);
   // medida real do servidor: prompt (com o que veio do cache) + resposta
   if (msg.ctxTokens) { conv.ctx = { tokens: msg.ctxTokens, n: conv.messages.length, cut: conv.compactCut || 0 }; drawCtxMeter(); }
   // quanto veio do cache no último pedido, e por que o resto foi relido
