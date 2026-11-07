@@ -1477,5 +1477,8 @@ const I18N_EN = {
 "Nenhum aviso guardado.": "No notices saved.",
 "Os últimos 60 avisos que apareceram no canto da tela, com a parte do studio que mostrou cada um.": "The last 60 notices that appeared in the corner of the screen, with the part of the studio that showed each one.",
 "a API {0} não respondeu em {1} s": "the {0} API did not answer within {1} s",
-"; a API falhou ({0}) e usou o modelo local": "; the API failed ({0}) and the local model was used"
+"; a API falhou ({0}) e usou o modelo local": "; the API failed ({0}) and the local model was used",
+"Esperando o primeiro sinal... {0} s": "Waiting for the first signal... {0} s",
+"Respondeu: \"{0}\" · primeiro sinal em {1} s · total {2} s": "Answered: \"{0}\" · first signal in {1} s · total {2} s",
+"Pensando ({0} caracteres de raciocínio) · primeiro sinal em {1} s · {2} s": "Thinking ({0} reasoning characters) · first signal in {1} s · {2} s"
 };

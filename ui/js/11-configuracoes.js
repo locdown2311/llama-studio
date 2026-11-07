@@ -193,11 +193,33 @@ function apiSection(put, field, saved) {
       catch (e) { toast(e.message, 'err'); }
       listBtn.disabled = false;
     } }, ic('list'), L('Listar modelos'));
+    // teste em stream: mostra o tempo correndo, quando chega o primeiro sinal (o modelo pode pensar antes)
+    // e para assim que vem a resposta, sem esperar o provedor terminar
+    const testOut = h('div.api-test', { hidden: true });
     const test = h('button.btn.sm', { type: 'button', disabled: !a.ready, onclick: async () => {
-      test.disabled = true; const t0 = performance.now();
+      test.disabled = true; testOut.hidden = false; testOut.className = 'api-test';
+      const t0 = performance.now(); let first = 0, mine = false;
       const m = { content: '', reasoning: '', tool_calls: [] };
-      try { await streamApi([{ role: 'user', content: L('Responda só: ok') }], [], m, new AbortController().signal, null, { _p: a.id, max_tokens: 200, temperature: 0 }); toast(L('Respondeu em {0}: {1}', fmtMs(performance.now() - t0), (m.content || '').trim().slice(0, 40) || L('(vazio)'))); }
-      catch (e) { toast(e.message, 'err'); }
+      const ac = new AbortController();
+      const show = () => {
+        const s = ((performance.now() - t0) / 1000).toFixed(1);
+        testOut.textContent = !first ? L('Esperando o primeiro sinal... {0} s', s)
+          : m.content ? L('Respondeu: "{0}" · primeiro sinal em {1} s · total {2} s', m.content.trim().slice(0, 40), (first / 1000).toFixed(1), s)
+          : L('Pensando ({0} caracteres de raciocínio) · primeiro sinal em {1} s · {2} s', m.reasoning.length, (first / 1000).toFixed(1), s);
+      };
+      const tick = setInterval(show, 250); show();
+      const onDelta = () => {
+        if (!first && (m.content || m.reasoning)) first = performance.now() - t0;
+        if (m.content.trim().length >= 2) { mine = true; ac.abort(); }
+      };
+      try {
+        await streamApi([{ role: 'user', content: L('Responda só: ok') }], [], m, ac.signal, onDelta, { _p: a.id, max_tokens: 300, temperature: 0, _timeout: 45000 });
+        show();
+      } catch (e) {
+        if (mine) show();
+        else { testOut.textContent = e.message; testOut.classList.add('err'); }
+      }
+      clearInterval(tick);
       test.disabled = false;
     } }, ic('zap'), L('Testar'));
     const del = h('button.icon-btn.sm', { type: 'button', title: L('Remover'), 'aria-label': L('Remover'), html: svg('trash'), onclick: async () => {
@@ -237,6 +259,7 @@ function apiSection(put, field, saved) {
       pre ? null : field(L('Endereço'), base, L('O que vem antes de /chat/completions.')),
       field(L('Chave'), key),
       field(L('Modelo'), h('div.row', null, model, dl, listBtn, test)),
+      testOut,
       params,
       h('small.muted', null, L('Hoje: {0} pedidos, {1} tokens, {2} falhas (voltaram para o modelo local).', u.calls, u.tokens.toLocaleString(LOCALE), u.fails)));
   };

@@ -1509,3 +1509,6 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .tl-from { grid-column: 2; color: var(--muted); font-family: var(--mono, monospace); font-size: 11px; }
 .toast-log-item .tl-msg { word-break: break-word; }
 .chk { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.api-test { font-size: 12.5px; padding: 6px 10px; border-radius: 8px; background: var(--hover, rgba(127,127,127,.08)); font-variant-numeric: tabular-nums; word-break: break-word; }
+.api-test.err { color: var(--danger, #d14343); }
+.api-test[hidden] { display: none; }
