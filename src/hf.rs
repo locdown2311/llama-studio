@@ -39,11 +39,11 @@ async fn get_json(app: &App, url: &str) -> Result<Value, String> {
         }
         Err(e) => {
             let first = crate::update::chain(&e);
-            curl_get(url, &tk).await.map_err(|e2| format!("Sem conexão com o Hugging Face: {first} ({e2})"))?
+            curl_get(url, &tk).await.map_err(|e2| LF!("Sem conexão com o Hugging Face: {first} ({e2})", "No connection to Hugging Face: {first} ({e2})"))?
         }
     };
     if status == 401 || status == 403 {
-        return Err("O Hugging Face recusou o acesso. Modelos restritos precisam de um token (Servidor > Modelos > Token).".into());
+        return Err(L!("O Hugging Face recusou o acesso. Modelos restritos precisam de um token (Servidor > Modelos > Token).", "Hugging Face refused access. Gated models need a token (Server > Models > Token).").into());
     }
     if status != 200 {
         return Err(format!("O Hugging Face respondeu {status}."));
@@ -52,7 +52,7 @@ async fn get_json(app: &App, url: &str) -> Result<Value, String> {
 }
 
 async fn curl_get(url: &str, tk: &str) -> Result<(u16, Vec<u8>), String> {
-    let curl = which::which("curl").map_err(|_| "curl não encontrado".to_string())?;
+    let curl = which::which("curl").map_err(|_| L!("curl não encontrado", "curl not found").to_string())?;
     let mut c = tokio::process::Command::new(curl);
     c.args(["-sSL", "-A", "llama-studio", "-w", "\n%{http_code}", "--max-time", "25"]);
     if !tk.is_empty() {
@@ -206,10 +206,10 @@ pub fn cancel(id: &str) {
 
 pub fn start(app: &Arc<App>, repo: &str, name: &str, parts: Vec<String>, mmproj: Option<String>, sizes: u64) -> Result<Value, String> {
     if parts.is_empty() {
-        return Err("Nenhum arquivo escolhido.".into());
+        return Err(L!("Nenhum arquivo escolhido.", "No file chosen.").into());
     }
     if JOBS.lock().unwrap().iter().any(|j| j.repo == repo && j.parts == parts && *j.status.lock().unwrap() == "downloading") {
-        return Err("Esse arquivo já está sendo baixado.".into());
+        return Err(L!("Esse arquivo já está sendo baixado.", "That file is already downloading.").into());
     }
     let job = Arc::new(Job {
         id: format!("d{}", crate::app::now_ms()),
@@ -249,7 +249,7 @@ pub fn start(app: &Arc<App>, repo: &str, name: &str, parts: Vec<String>, mmproj:
 
 async fn run(app: &Arc<App>, j: &Arc<Job>) -> Result<(), String> {
     let dir = models_dir(app).join(j.repo.replace('/', "__"));
-    std::fs::create_dir_all(&dir).map_err(|e| format!("Não consegui criar {}: {e}", dir.display()))?;
+    std::fs::create_dir_all(&dir).map_err(|e| LF!("Não consegui criar {}: {e}", "Could not create {}: {e}", dir.display()))?;
     let mut files: Vec<String> = j.parts.clone();
     if let Some(m) = &j.mmproj {
         files.push(m.clone());
@@ -317,7 +317,7 @@ async fn get_file(app: &App, j: &Job, path: &str, dest: &Path) -> Result<(), Str
     };
     let status = resp.status().as_u16();
     if status == 401 || status == 403 {
-        return Err("Acesso negado. Este modelo é restrito: aceite os termos na página dele e informe um token.".into());
+        return Err(L!("Acesso negado. Este modelo é restrito: aceite os termos na página dele e informe um token.", "Access denied. This model is gated: accept the terms on its page and enter a token.").into());
     }
     if status != 200 && status != 206 {
         return Err(format!("Download falhou ({status})."));
@@ -341,10 +341,10 @@ async fn get_file(app: &App, j: &Job, path: &str, dest: &Path) -> Result<(), Str
         }
         let chunk = tokio::time::timeout(Duration::from_secs(90), resp.chunk())
             .await
-            .map_err(|_| "A conexão parou de responder. Clique em baixar de novo para continuar de onde parou.".to_string())?
-            .map_err(|e| format!("{} (clique em baixar de novo para continuar de onde parou)", crate::update::chain(&e)))?;
+            .map_err(|_| L!("A conexão parou de responder. Clique em baixar de novo para continuar de onde parou.", "The connection stopped responding. Click download again to continue where it stopped.").to_string())?
+            .map_err(|e| LF!("{} (clique em baixar de novo para continuar de onde parou)", "{} (click download again to continue where it stopped)", crate::update::chain(&e)))?;
         let Some(c) = chunk else { break };
-        f.write_all(&c).await.map_err(|e| format!("Erro ao gravar (disco cheio?): {e}"))?;
+        f.write_all(&c).await.map_err(|e| LF!("Erro ao gravar (disco cheio?): {e}", "Error writing (disk full?): {e}"))?;
         j.add(c.len() as u64);
         if last.elapsed() > Duration::from_secs(5) {
             let _ = f.flush().await;
@@ -359,7 +359,7 @@ async fn get_file(app: &App, j: &Job, path: &str, dest: &Path) -> Result<(), Str
 
 /// Plano B no Windows: curl.exe (usa o certificado/proxy do sistema), acompanhando pelo tamanho do .part.
 async fn curl_file(j: &Job, url: &str, tk: &str, part: &Path, dest: &Path, have: u64) -> Result<(), String> {
-    let curl = which::which("curl").map_err(|_| "curl não encontrado".to_string())?;
+    let curl = which::which("curl").map_err(|_| L!("curl não encontrado", "curl not found").to_string())?;
     let mut c = tokio::process::Command::new(curl);
     c.args(["-sSfL", "-A", "llama-studio", "-C", "-", "-o"]).arg(part);
     if !tk.is_empty() {
@@ -382,7 +382,7 @@ async fn curl_file(j: &Job, url: &str, tk: &str, part: &Path, dest: &Path, have:
                 j.add(now - counted);
             }
             if !st.success() {
-                return Err(format!("curl terminou com erro {}", st.code().unwrap_or(-1)));
+                return Err(LF!("curl terminou com erro {}", "curl finished with error {}", st.code().unwrap_or(-1)));
             }
             break;
         }

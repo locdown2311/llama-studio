@@ -39,6 +39,8 @@ pub struct Config {
     pub use_rtk: bool,
     /// token do Hugging Face para modelos restritos
     pub hf_token: String,
+    /// idioma da interface e do que o modelo recebe: "pt" ou "en" (vazio = ainda não escolhido)
+    pub lang: String,
 }
 
 impl Default for Config {
@@ -58,6 +60,7 @@ impl Default for Config {
             compact_output: true,
             use_rtk: true,
             hf_token: String::new(),
+            lang: String::new(),
         }
     }
 }
@@ -107,6 +110,13 @@ impl App {
         if !Path::new(&config.workspace).is_dir() {
             config.workspace = home_dir().to_string_lossy().into_owned();
         }
+        // primeira vez: o idioma escolhido no instalador
+        if config.lang.is_empty() {
+            if let Some(l) = crate::i18n::from_installer(&app_dir) {
+                config.lang = l;
+            }
+        }
+        crate::i18n::set(&config.lang);
         if let Ok(u) = std::env::var("STUDIO_LLAMA_URL") {
             config.llama_url = u.trim_end_matches('/').to_string();
         }

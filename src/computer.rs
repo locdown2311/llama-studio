@@ -14,7 +14,7 @@ pub async fn tool(ws_dir: &Path, name: &str, a: &Value) -> Out {
 #[cfg(not(windows))]
 mod imp {
     pub fn run(_: &std::path::Path, _: &str, _: &serde_json::Value) -> super::Out {
-        Err("O controle do computador só funciona no Windows.".into())
+        Err(L!("O controle do computador só funciona no Windows.", "Computer control only works on Windows.").into())
     }
 }
 
@@ -63,7 +63,7 @@ mod imp {
                     unsafe { let _ = SetCursorPos(px, py); }
                 }
                 mouse(MOUSEEVENTF_WHEEL, amount * 120);
-                Ok((format!("Rolagem de {amount}."), vec![]))
+                Ok((LF!("Rolagem de {amount}.", "Scrolled by {amount}."), vec![]))
             }
             _ => Err(format!("Ferramenta desconhecida: {name}")),
         }
@@ -105,7 +105,7 @@ mod imp {
     fn list_windows() -> String {
         let fg = unsafe { GetForegroundWindow().0 as isize };
         let lines: Vec<String> = windows_list().iter().map(|(h, t)| format!("{}{h}  {t}", if *h == fg { "* " } else { "  " })).collect();
-        format!("Janelas abertas (id e título; * = em primeiro plano):\n{}", lines.join("\n"))
+        LF!("Janelas abertas (id e título; * = em primeiro plano):\n{}", "Open windows (id and title; * = foreground):\n{}", lines.join("\n"))
     }
 
     fn find_window(a: &Value) -> Option<HWND> {
@@ -120,7 +120,7 @@ mod imp {
     }
 
     fn focus(a: &Value) -> Out {
-        let h = find_window(a).ok_or("Janela não encontrada. Use computer_windows para ver os títulos.")?;
+        let h = find_window(a).ok_or(L!("Janela não encontrada. Use computer_windows para ver os títulos.", "Window not found. Use computer_windows to see the titles."))?;
         unsafe {
             if IsIconic(h).as_bool() {
                 let _ = ShowWindow(h, SW_RESTORE);
@@ -131,7 +131,7 @@ mod imp {
             let _ = SetForegroundWindow(h);
         }
         std::thread::sleep(std::time::Duration::from_millis(250));
-        Ok((format!("Janela em primeiro plano: {}", window_title(h)), vec![]))
+        Ok((LF!("Janela em primeiro plano: {}", "Window in the foreground: {}", window_title(h)), vec![]))
     }
 
     fn elements(a: &Value) -> Out {
@@ -139,7 +139,7 @@ mod imp {
         let filter = s(a, "filter").to_lowercase();
         unsafe {
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-            let uia: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).map_err(|e| format!("UI Automation indisponível: {e}"))?;
+            let uia: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).map_err(|e| LF!("UI Automation indisponível: {e}", "UI Automation unavailable: {e}"))?;
             let root = uia.ElementFromHandle(h).map_err(|e| e.to_string())?;
             let cond = uia.CreateTrueCondition().map_err(|e| e.to_string())?;
             let arr = root.FindAll(TreeScope_Descendants, &cond).map_err(|e| e.to_string())?;
@@ -175,7 +175,7 @@ mod imp {
                 out.push(format!("[{}] {}{}", centers.len(), line, if enabled { "" } else { " (desativado)" }));
             }
             *ELEMENTS.lock().unwrap() = centers;
-            Ok((format!("Elementos de \"{}\" (use o número em computer_click):\n{}", window_title(h), if out.is_empty() { "(nenhum)".into() } else { out.join("\n") }), vec![]))
+            Ok((LF!("Elementos de \"{}\" (use o número em computer_click):\n{}", "Elements of \"{}\" (use the number in computer_click):\n{}", window_title(h), if out.is_empty() { L!("(nenhum)", "(none)").into() } else { out.join("\n") }), vec![]))
         }
     }
 
@@ -187,13 +187,13 @@ mod imp {
     fn click(a: &Value) -> Out {
         let (x, y, how) = if let Some(id) = n(a, "id") {
             let list = ELEMENTS.lock().unwrap();
-            let p = list.get((id - 1).max(0) as usize).copied().ok_or("Elemento não encontrado. Chame computer_elements de novo.")?;
-            (p.0, p.1, format!("elemento [{id}]"))
+            let p = list.get((id - 1).max(0) as usize).copied().ok_or(L!("Elemento não encontrado. Chame computer_elements de novo.", "Element not found. Call computer_elements again."))?;
+            (p.0, p.1, LF!("elemento [{id}]", "element [{id}]"))
         } else if let (Some(x), Some(y)) = (n(a, "x"), n(a, "y")) {
             let (px, py) = from_shot(x as i32, y as i32);
-            (px, py, format!("ponto ({x}, {y}) da captura"))
+            (px, py, LF!("ponto ({x}, {y}) da captura", "point ({x}, {y}) of the screenshot"))
         } else {
-            return Err("Informe id (de computer_elements) ou x e y (da última captura).".into());
+            return Err(L!("Informe id (de computer_elements) ou x e y (da última captura).", "Pass id (from computer_elements) or x and y (from the last screenshot).").into());
         };
         let right = s(a, "button") == "right";
         let times = if a.get("double").and_then(Value::as_bool).unwrap_or(false) { 2 } else { 1 };
@@ -211,7 +211,7 @@ mod imp {
             }
         }
         std::thread::sleep(std::time::Duration::from_millis(300));
-        Ok((format!("Clique {}no {how}.", if right { "direito " } else { "" }), vec![]))
+        Ok((LF!("Clique {}no {how}.", "{}lick on {how}.", if right { L!("direito ", "Right-c") } else { L!("", "C") }), vec![]))
     }
 
     fn mouse(flags: MOUSE_EVENT_FLAGS, data: i32) {
@@ -304,7 +304,7 @@ mod imp {
             let w = GetSystemMetrics(SM_CXVIRTUALSCREEN);
             let h = GetSystemMetrics(SM_CYVIRTUALSCREEN);
             if w <= 0 || h <= 0 {
-                return Err("Não consegui medir a tela.".into());
+                return Err(L!("Não consegui medir a tela.", "Could not measure the screen.").into());
             }
             let screen = GetDC(None);
             let mem = CreateCompatibleDC(Some(screen));
@@ -343,7 +343,7 @@ mod imp {
             let path = crate::browser::save_capture(ws, "tela", &jpg)?;
             use base64::Engine;
             let b64 = base64::engine::general_purpose::STANDARD.encode(&jpg);
-            Ok((format!("Captura da tela ({ow}x{oh}) salva em {}. Para clicar num ponto da imagem use computer_click com x e y da imagem.", path.display()), vec![format!("data:image/jpeg;base64,{b64}")]))
+            Ok((LF!("Captura da tela ({ow}x{oh}) salva em {}. Para clicar num ponto da imagem use computer_click com x e y da imagem.", "Screenshot ({ow}x{oh}) saved to {}. To click a point in the image use computer_click with the image's x and y.", path.display()), vec![format!("data:image/jpeg;base64,{b64}")]))
         }
     }
 }

@@ -100,7 +100,7 @@ fn skip_name(n: &str) -> bool {
 pub fn plan(rule: &Value) -> Result<Vec<(PathBuf, PathBuf)>, String> {
     let src = PathBuf::from(rule["src"].as_str().unwrap_or("").trim());
     if !src.is_dir() {
-        return Err(format!("A pasta de origem não existe: {}", src.display()));
+        return Err(LF!("A pasta de origem não existe: {}", "The source folder does not exist: {}", src.display()));
     }
     if rule["dest"].as_str().unwrap_or("").trim().is_empty() {
         return Err("Defina o destino.".into());
@@ -195,7 +195,7 @@ pub fn apply(app: &App, rule: &Value, auto: bool) -> Result<Value, String> {
 pub fn undo(app: &App, run_id: &str) -> Result<Value, String> {
     let mut v = load(app);
     let runs = v["runs"].as_array_mut().unwrap();
-    let i = runs.iter().position(|r| r["id"] == run_id).ok_or("Execução não encontrada.")?;
+    let i = runs.iter().position(|r| r["id"] == run_id).ok_or(L!("Execução não encontrada.", "Run not found."))?;
     let run = runs.remove(i);
     let mut back = 0;
     let mut errors = vec![];
@@ -204,7 +204,7 @@ pub fn undo(app: &App, run_id: &str) -> Result<Value, String> {
         let (Some(from), Some(to)) = (m[0].as_str(), m[1].as_str()) else { continue };
         let (from, to) = (PathBuf::from(from), PathBuf::from(to));
         if !to.exists() {
-            errors.push(json!({"file": to, "error": "não está mais no destino"}));
+            errors.push(json!({"file": to, "error": L!("não está mais no destino", "is no longer at the destination")}));
             continue;
         }
         match mv(&to, &free_name(&from)) {

@@ -134,7 +134,7 @@ fn skill_files(dir: &Path) -> Result<Map<String, Value>, String> {
         let len = e.metadata().map(|m| m.len()).unwrap_or(0);
         total += len;
         if total > MAX_SKILL_BYTES {
-            return Err("passa de 2 MB".into());
+            return Err(L!("passa de 2 MB", "over 2 MB").into());
         }
         let bytes = std::fs::read(e.path()).map_err(|e| e.to_string())?;
         let v = match String::from_utf8(bytes) {
@@ -156,7 +156,7 @@ pub fn collect(app: &App, parts: &[String], skill_ids: &[String]) -> Value {
         for s in crate::skills::list(app).into_iter().filter(|s| skill_ids.is_empty() || skill_ids.contains(&s.id)) {
             match skill_files(&s.dir) {
                 Ok(files) => list.push(json!({"id": s.id, "name": s.name, "description": s.description, "files": files})),
-                Err(e) => notes.push(format!("Habilidade {} ficou de fora: {e}.", s.name)),
+                Err(e) => notes.push(LF!("Habilidade {} ficou de fora: {e}.", "Skill {} was left out: {e}.", s.name)),
             }
         }
         out.insert("skills".into(), json!(list));
@@ -197,7 +197,7 @@ fn write_skill(dir: &Path, files: &Map<String, Value>) -> Result<(), String> {
     for (rel, v) in files {
         let rel = rel.replace('\\', "/");
         if rel.split('/').any(|p| p == ".." || p.is_empty()) || rel.contains(':') {
-            return Err(format!("caminho inválido: {rel}"));
+            return Err(LF!("caminho inválido: {rel}", "invalid path: {rel}"));
         }
         let p = dir.join(&rel);
         if let Some(d) = p.parent() {
@@ -211,7 +211,7 @@ fn write_skill(dir: &Path, files: &Map<String, Value>) -> Result<(), String> {
         std::fs::write(&p, bytes).map_err(|e| e.to_string())?;
     }
     if !dir.join("SKILL.md").is_file() {
-        return Err("sem SKILL.md".into());
+        return Err(L!("sem SKILL.md", "no SKILL.md").into());
     }
     Ok(())
 }
@@ -231,7 +231,7 @@ pub fn apply(app: &App, data: &Value, parts: &[String], overwrite: bool, secrets
                 skipped += 1;
                 continue;
             }
-            match s["files"].as_object().ok_or("sem arquivos".to_string()).and_then(|f| write_skill(&dir, f)) {
+            match s["files"].as_object().ok_or(L!("sem arquivos", "no files").to_string()).and_then(|f| write_skill(&dir, f)) {
                 Ok(()) => added += 1,
                 Err(e) => notes.push(format!("Habilidade {id}: {e}.")),
             }

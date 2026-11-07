@@ -23,7 +23,7 @@ function markFresh(p) {
 function renderWsPath() {
   const b = $('#ws-path');
   b.innerHTML = '';
-  b.append(ic('folderOpen'), h('div.ws-path-main', null, h('div.ws-path-name', null, basename(S.ws.path) || S.ws.path), h('div.ws-path-full', null, S.ws.path)), h('span.swap', null, 'Trocar'));
+  b.append(ic('folderOpen'), h('div.ws-path-main', null, h('div.ws-path-name', null, basename(S.ws.path) || S.ws.path), h('div.ws-path-full', null, S.ws.path)), h('span.swap', null, L('Trocar')));
 }
 
 async function loadDir(rel) {
@@ -79,8 +79,8 @@ function busyFromCommand(cmd, base) {
     piped = null;
     const clean = src.map((x) => x.trim()).filter(Boolean); src.length = 0; src.push(...clean);
     const move = MOVE_VERBS.test(verb);
-    for (const x of src.map((x) => x.trim()).filter(Boolean)) out.push({ path: joinPath(base, stripGlob(x)), mode: move ? 'w' : 'r', what: move ? 'sendo movido' : 'sendo copiado', other: dst ? joinPath(base, dst) : '' });
-    if (dst) out.push({ path: joinPath(base, stripGlob(dst)), mode: 'w', what: move ? 'recebendo o que é movido' : 'recebendo a cópia', other: src[0] ? joinPath(base, src[0]) : '', more: src.length - 1 });
+    for (const x of src.map((x) => x.trim()).filter(Boolean)) out.push({ path: joinPath(base, stripGlob(x)), mode: move ? 'w' : 'r', what: move ? L('sendo movido') : L('sendo copiado'), other: dst ? joinPath(base, dst) : '' });
+    if (dst) out.push({ path: joinPath(base, stripGlob(dst)), mode: 'w', what: move ? L('recebendo o que é movido') : L('recebendo a cópia'), other: src[0] ? joinPath(base, src[0]) : '', more: src.length - 1 });
   }
   return out;
 }
@@ -125,12 +125,12 @@ function drawBusy() {
   const box = $('#ws-busy'); box.innerHTML = '';
   box.hidden = !busyNow.length;
   if (!busyNow.length) return;
-  box.append(h('div.ws-busy-head', null, ic('lock'), 'Em uso agora'));
+  box.append(h('div.ws-busy-head', null, ic('lock'), L('Em uso agora')));
   for (const b of busyNow) {
     box.append(h('button.busy-row.' + b.mode, { title: b.path, onclick: () => revealInTree(b.path) },
       ic(b.mode === 'r' ? 'lock' : 'download'),
       h('span.busy-main', null, h('b', null, basename(b.path) || b.path),
-        h('small', null, (b.mode === 'r' ? 'Somente leitura: ' : '') + b.what + (b.other ? (b.mode === 'r' ? ' para ' : ' de ') + basename(b.other) + (b.more > 0 ? ` e mais ${b.more}` : '') : '') + (S.convs.length > 1 && b.conv.id !== S.curId ? ` · ${b.conv.title}` : '')))));
+        h('small', null, (b.mode === 'r' ? L('Somente leitura: ') : '') + b.what + (b.other ? (b.mode === 'r' ? L(' para ') : L(' de ')) + basename(b.other) + (b.more > 0 ? L(' e mais {0}', b.more) : '') : '') + (S.convs.length > 1 && b.conv.id !== S.curId ? ` · ${b.conv.title}` : '')))));
   }
 }
 function applyBusyMarks() {
@@ -140,7 +140,7 @@ function applyBusyMarks() {
     n.querySelector('.lk')?.remove();
     if (!m) continue;
     n.classList.add(m.cls);
-    if (m.cls !== 'busy-in') n.querySelector('.nm').after(h('span.lk', { title: m.cls === 'busy-r' ? `Somente leitura: ${m.b.what}` : m.b.what, html: svg(m.cls === 'busy-r' ? 'lock' : 'download') }));
+    if (m.cls !== 'busy-in') n.querySelector('.nm').after(h('span.lk', { title: m.cls === 'busy-r' ? L('Somente leitura: {0}', m.b.what) : m.b.what, html: svg(m.cls === 'busy-r' ? 'lock' : 'download') }));
   }
 }
 function revealInTree(abs) {
@@ -153,7 +153,7 @@ function revealInTree(abs) {
 }
 /** Escrita do studio dentro de algo que outra tarefa está copiando: espera o fim. */
 function busyBlock(conv, tcId, target) {
-  for (const b of busyPaths()) if (b.id !== tcId && b.mode === 'r' && underP(target, b.path)) return `${b.path} está ${b.what}${b.other ? ' para ' + b.other : ''} (somente leitura até o comando terminar). Espere ele acabar e tente de novo.`;
+  for (const b of busyPaths()) if (b.id !== tcId && b.mode === 'r' && underP(target, b.path)) return L('{0} está {1}{2} (somente leitura até o comando terminar). Espere ele acabar e tente de novo.', b.path, b.what, b.other ? L(' para ') + b.other : '');
   return '';
 }
 
@@ -178,7 +178,7 @@ function convFileMarks() {
       const rel = relOf(joinPath(S.ws.path, a.path)).replace(/^\.\//, '');
       if (isAbs(rel)) continue; // fora da pasta de trabalho
       const prev = marks.get(rel);
-      const created = name === 'create_directory' || (name === 'write_file' && /^Criado/.test(String(m.content)));
+      const created = name === 'create_directory' || (name === 'write_file' && /^(Criado|Created)/.test(String(m.content)));
       marks.set(rel, { kind: prev?.kind === 'new' || created ? 'new' : 'edit', n: (prev?.n || 0) + 1, dir: name === 'create_directory' });
     }
     for (const rel of marks.keys()) { const parts = rel.split('/'); parts.pop(); let acc = ''; for (const p of parts) { acc = acc ? acc + '/' + p : p; dirs.add(acc); } }
@@ -203,14 +203,14 @@ function drawMade() {
   const vals = [...marks.values()];
   const nNew = vals.filter((v) => v.kind === 'new').length; const nEdit = vals.length - nNew;
   box.append(
-    h('span.made-sum', { title: 'Criados (N) e alterados (A) nesta conversa' }, ic('history'),
-      nNew ? h('b.mk-new', null, `${nNew} ${nNew === 1 ? 'novo' : 'novos'}`) : null,
+    h('span.made-sum', { title: L('Criados (N) e alterados (A) nesta conversa') }, ic('history'),
+      nNew ? h('b.mk-new', null, `${nNew} ${nNew === 1 ? L('novo') : L('novos')}`) : null,
       nNew && nEdit ? ' · ' : '',
-      nEdit ? h('b.mk-edit', null, `${nEdit} ${nEdit === 1 ? 'alterado' : 'alterados'}`) : null),
-    h('button.made-btn' + (S.ws.onlyMade ? '.on' : ''), { type: 'button', title: S.ws.onlyMade ? 'Voltar para a árvore inteira' : 'Mostrar só o que esta conversa criou ou alterou', onclick: () => { S.ws.onlyMade = !S.ws.onlyMade; drawMade(); renderTree(); } }, S.ws.onlyMade ? 'Mostrar tudo' : 'Só estes'));
+      nEdit ? h('b.mk-edit', null, `${nEdit} ${nEdit === 1 ? L('alterado') : L('alterados')}`) : null),
+    h('button.made-btn' + (S.ws.onlyMade ? '.on' : ''), { type: 'button', title: S.ws.onlyMade ? L('Voltar para a árvore inteira') : L('Mostrar só o que esta conversa criou ou alterou'), onclick: () => { S.ws.onlyMade = !S.ws.onlyMade; drawMade(); renderTree(); } }, S.ws.onlyMade ? L('Mostrar tudo') : L('Só estes')));
 }
 function madeBadge(mk) {
-  const t = mk.kind === 'new' ? (mk.dir ? 'Pasta criada nesta conversa' : 'Criado nesta conversa') + (mk.n > 1 ? ` e alterado ${mk.n - 1}x` : '') : `Alterado nesta conversa${mk.n > 1 ? ` (${mk.n}x)` : ''}`;
+  const t = mk.kind === 'new' ? (mk.dir ? L('Pasta criada nesta conversa') : L('Criado nesta conversa')) + (mk.n > 1 ? L(' e alterado {0}x', mk.n - 1) : '') : L('Alterado nesta conversa{0}', mk.n > 1 ? L(' ({0}x)', mk.n) : '');
   return h('span.mk.' + (mk.kind === 'new' ? 'mk-new' : 'mk-edit'), { title: t }, mk.kind === 'new' ? 'N' : 'A');
 }
 function applyMadeMarks() {
@@ -258,10 +258,10 @@ async function renderTree() {
     box.innerHTML = '';
     box.append(frag);
     applyBusyMarks(); applyMadeMarks();
-    if (!box.childElementCount) box.append(h('div.tree-empty', null, 'Pasta vazia. Peça ao modelo para criar algo aqui.'));
+    if (!box.childElementCount) box.append(h('div.tree-empty', null, L('Pasta vazia. Peça ao modelo para criar algo aqui.')));
   } catch (e) {
     box.innerHTML = '';
-    box.append(h('div.tree-empty', null, 'Não consegui ler a pasta: ' + e.message));
+    box.append(h('div.tree-empty', null, L('Não consegui ler a pasta: ') + e.message));
   }
 }
 
@@ -352,15 +352,15 @@ async function previewFile(it) {
   box.append(h('div.wp-head', null,
     h('span', { html: svg(ftype(it.name).icon), style: { width: '15px', color: ftype(it.name).color, display: 'grid' } }),
     h('span.wp-name', { title: it.path }, it.name),
-    h('button.icon-btn.sm', { title: 'Referenciar no chat', 'aria-label': 'Referenciar no chat', html: svg('pin'), onclick: () => { addRef({ name: it.name, path: it.path, dir: false }); toast('Arquivo referenciado no chat'); } }),
-    h('button.icon-btn.sm', { title: 'Mostrar no Explorer', 'aria-label': 'Mostrar no Explorer', html: svg('external'), onclick: () => api('/api/reveal', { path: it.path, ws: S.ws.path }) }),
-    h('button.icon-btn.sm', { title: 'Fechar', 'aria-label': 'Fechar', html: svg('x'), onclick: () => { box.classList.remove('open'); S.ws.selected = null; $$('.node.sel').forEach((n) => n.classList.remove('sel')); } })),
+    h('button.icon-btn.sm', { title: L('Referenciar no chat'), 'aria-label': L('Referenciar no chat'), html: svg('pin'), onclick: () => { addRef({ name: it.name, path: it.path, dir: false }); toast(L('Arquivo referenciado no chat')); } }),
+    h('button.icon-btn.sm', { title: L('Mostrar no Explorer'), 'aria-label': L('Mostrar no Explorer'), html: svg('external'), onclick: () => api('/api/reveal', { path: it.path, ws: S.ws.path }) }),
+    h('button.icon-btn.sm', { title: L('Fechar'), 'aria-label': L('Fechar'), html: svg('x'), onclick: () => { box.classList.remove('open'); S.ws.selected = null; $$('.node.sel').forEach((n) => n.classList.remove('sel')); } })),
   body);
   try {
     const r = await api('/api/ws/read?path=' + encodeURIComponent(it.rel) + '&ws=' + encodeURIComponent(S.ws.path));
     body.innerHTML = '';
-    if (r.tooBig) body.append(h('div.wp-note', null, `Arquivo grande (${fmtSize(r.size)}). Abra no Explorer para ver.`));
-    else if (r.binary) body.append(h('div.wp-note', null, `Arquivo binário (${fmtSize(r.size)}). O modelo recebe só o caminho.`));
+    if (r.tooBig) body.append(h('div.wp-note', null, L('Arquivo grande ({0}). Abra no Explorer para ver.', fmtSize(r.size))));
+    else if (r.binary) body.append(h('div.wp-note', null, L('Arquivo binário ({0}). O modelo recebe só o caminho.', fmtSize(r.size))));
     else {
       const hl = highlight(r.text.slice(0, 200000), ftype(it.name).lang);
       body.append(h('pre', null, h('code.hljs', { html: hl.html })));
@@ -370,13 +370,13 @@ async function previewFile(it) {
 
 async function chooseWorkspace() {
   const proj = projectOf(cur());
-  const p = await pickPath({ title: proj ? `Pasta do projeto ${proj.name}` : 'Escolher o espaço de trabalho', mode: 'dir', start: S.ws.path });
+  const p = await pickPath({ title: proj ? L('Pasta do projeto {0}', proj.name) : L('Escolher o espaço de trabalho'), mode: 'dir', start: S.ws.path });
   if (!p) return;
   if (proj) {
     const st = await api('/api/stat', { path: p }).catch(() => ({}));
-    if (!st.exists || !st.dir) { toast('Essa pasta não existe.', 'err'); return; }
+    if (!st.exists || !st.dir) { toast(L('Essa pasta não existe.'), 'err'); return; }
     proj.dir = st.path; saveProjects(); syncWsRoot(true); renderChatTitle();
-    toast(`Pasta do projeto: ${basename(st.path)}`);
+    toast(L('Pasta do projeto: {0}', basename(st.path)));
     return;
   }
   setWorkspace(p);
@@ -393,7 +393,7 @@ async function setWorkspace(p) {
     $('#ws-preview').classList.remove('open');
     if (!cur()?.messages.length) renderMessages(false);
     updatePickers(); renderChatTitle();
-    toast('Espaço de trabalho: ' + basename(r.workspace));
+    toast(L('Espaço de trabalho: ') + basename(r.workspace));
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -405,17 +405,17 @@ function pickPath({ title, mode = 'dir', start }) {
     const home = S.info.home || '';
     const list = h('div.picker-list');
     const crumbs = h('div.crumbs');
-    const input = h('input.input.mono', { value: curPath, placeholder: 'Cole um caminho e tecle Enter' });
+    const input = h('input.input.mono', { value: curPath, placeholder: L('Cole um caminho e tecle Enter') });
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(input.value.trim().replace(/^"|"$/g, '')); });
     const places = h('div.picker-places', null,
-      h('button', { onclick: () => go(home) }, 'Início'),
-      h('button', { onclick: () => go(home + sep + 'Desktop') }, 'Área de trabalho'),
-      h('button', { onclick: () => go(home + sep + 'Downloads') }, 'Downloads'),
-      h('button', { onclick: () => go(home + sep + 'Documents') }, 'Documentos'),
-      h('button', { onclick: () => go('') }, 'Unidades'),
+      h('button', { onclick: () => go(home) }, L('Início')),
+      h('button', { onclick: () => go(home + sep + L('Desktop')) }, L('Área de trabalho')),
+      h('button', { onclick: () => go(home + sep + L('Downloads')) }, L('Downloads')),
+      h('button', { onclick: () => go(home + sep + L('Documents')) }, L('Documentos')),
+      h('button', { onclick: () => go('') }, L('Unidades')),
       (S.info.recentWorkspaces || []).slice(0, 4).map((p) => h('button', { onclick: () => go(p), title: p }, basename(p))));
 
-    const okBtn = h('button.btn.primary', { onclick: () => finish(mode === 'dir' ? (selected || curPath) : selected) }, mode === 'dir' ? 'Usar esta pasta' : 'Selecionar');
+    const okBtn = h('button.btn.primary', { onclick: () => finish(mode === 'dir' ? (selected || curPath) : selected) }, mode === 'dir' ? L('Usar esta pasta') : L('Selecionar'));
 
     async function go(p) {
       try {
@@ -425,7 +425,7 @@ function pickPath({ title, mode = 'dir', start }) {
         if (r.path) {
           const parts = r.path.split(/[\\/]/).filter(Boolean);
           let acc = r.path.startsWith('/') ? '' : '';
-          crumbs.append(h('button', { onclick: () => go('') }, 'Unidades'));
+          crumbs.append(h('button', { onclick: () => go('') }, L('Unidades')));
           parts.forEach((part, i) => {
             acc = i === 0 ? (r.path.startsWith('/') ? '/' + part : part + sep) : acc + (acc.endsWith(sep) ? '' : sep) + part;
             const target = acc;
@@ -439,19 +439,19 @@ function pickPath({ title, mode = 'dir', start }) {
           row.addEventListener('click', () => {
             $$('.pk.sel', list).forEach((x) => x.classList.remove('sel'));
             row.classList.add('sel'); selected = it.path;
-            if (!it.dir && mode === 'file') okBtn.textContent = 'Selecionar';
+            if (!it.dir && mode === 'file') okBtn.textContent = L('Selecionar');
           });
           row.addEventListener('dblclick', () => { if (it.dir) go(it.path); else finish(it.path); });
           list.append(row);
         }
-        if (!r.items.length) list.append(h('div.tree-empty', null, mode === 'dir' ? 'Sem subpastas aqui.' : 'Pasta vazia.'));
+        if (!r.items.length) list.append(h('div.tree-empty', null, mode === 'dir' ? L('Sem subpastas aqui.') : L('Pasta vazia.')));
       } catch (e) { toast(e.message, 'err'); }
     }
-    function finish(p) { if (!p) { toast('Selecione um item.'); return; } done = true; m.close(); resolve(p); }
+    function finish(p) { if (!p) { toast(L('Selecione um item.')); return; } done = true; m.close(); resolve(p); }
     const m = modal({
       title, wide: true,
       body: [places, input, crumbs, list],
-      foot: [h('span.muted', { style: { marginRight: 'auto', fontSize: '13px' } }, mode === 'dir' ? 'Clique duas vezes para entrar numa pasta.' : 'Clique duas vezes para escolher.'), h('button.btn', { onclick: () => m.close() }, 'Cancelar'), okBtn],
+      foot: [h('span.muted', { style: { marginRight: 'auto', fontSize: '13px' } }, mode === 'dir' ? L('Clique duas vezes para entrar numa pasta.') : L('Clique duas vezes para escolher.')), h('button.btn', { onclick: () => m.close() }, L('Cancelar')), okBtn],
       onClose: () => { if (!done) resolve(null); },
     });
     go(curPath);

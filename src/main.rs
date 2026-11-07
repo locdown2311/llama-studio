@@ -4,6 +4,8 @@
 
 #![cfg_attr(all(windows, feature = "desktop", not(debug_assertions)), windows_subsystem = "windows")]
 
+#[macro_use]
+mod i18n;
 mod app;
 mod arrumar;
 mod bench;
@@ -27,6 +29,7 @@ mod share;
 mod server;
 mod skills;
 mod tools;
+mod tools_en;
 mod update;
 
 use std::io::{Read, Write};

@@ -126,13 +126,13 @@ pub fn list_json(app: &App) -> Value {
 /// Carrega o perfil: grava os parâmetros e (re)inicia o llama-server.
 pub async fn activate(app: &Arc<App>, id: &str) -> Result<Value, String> {
     let list = load(app);
-    let p = list.iter().find(|p| p.id == id).ok_or("Modelo não encontrado.")?.clone();
+    let p = list.iter().find(|p| p.id == id).ok_or(L!("Modelo não encontrado.", "Model not found."))?.clone();
     if !Path::new(&p.model).is_file() {
-        return Err(format!("O arquivo do modelo não existe: {}", p.model));
+        return Err(LF!("O arquivo do modelo não existe: {}", "The model file does not exist: {}", p.model));
     }
     let state = app.llama.state();
     if state.starts_with("external") {
-        return Err("O llama-server foi aberto por fora do studio (start.bat antigo ou outro programa). Feche-o para o studio poder trocar de modelo.".into());
+        return Err(L!("O llama-server foi aberto por fora do studio (start.bat antigo ou outro programa). Feche-o para o studio poder trocar de modelo.", "The llama-server was opened outside the studio (old start.bat or another program). Close it so the studio can switch models.").into());
     }
     let mut c = app.llama.cfg();
     let changed = !same_path(&c.model, &p.model) || c.context != p.context || c.cpu_moe != p.cpu_moe || c.threads != p.threads || c.extra_args != p.extra_args;

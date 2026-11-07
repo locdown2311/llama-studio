@@ -48,6 +48,9 @@ VersionInfoProductName={#AppName}
 VersionInfoDescription=Instalador do {#AppName}
 ChangesEnvironment=no
 SetupLogging=yes
+; pergunta o idioma no início (pré-seleciona o do Windows); a escolha vai para idioma.ini e o studio abre nele
+ShowLanguageDialog=yes
+LanguageDetectionMethod=uilanguage
 
 [Languages]
 Name: "ptbr"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
@@ -70,6 +73,9 @@ Source: "{#SourceDir}\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "llama-path\index.html"; DestDir: "{app}\llama-path"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 
+[INI]
+Filename: "{app}\idioma.ini"; Section: "studio"; Key: "lang"; String: "{language}"
+
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
@@ -90,6 +96,7 @@ Type: filesandordirs; Name: "{app}\engines"
 Type: filesandordirs; Name: "{app}\llama-path"
 Type: files; Name: "{app}\llama-studio.antigo.exe"
 Type: files; Name: "{app}\llama-studio.novo.exe"
+Type: files; Name: "{app}\idioma.ini"
 
 [Code]
 const

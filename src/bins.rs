@@ -13,7 +13,7 @@ use crate::app::App;
 pub struct Bin {
     pub id: &'static str,
     pub name: &'static str,
-    pub desc: &'static str,
+    desc_t: (&'static str, &'static str),
     pub repo: &'static str,
     pub site: &'static str,
     /// nome do arquivo da release para Windows x64
@@ -27,11 +27,15 @@ pub struct Bin {
     files: &'static [&'static str],
 }
 
+impl Bin {
+    pub fn desc(&self) -> &'static str { if crate::i18n::en() { self.desc_t.1 } else { self.desc_t.0 } }
+}
+
 pub const CATALOG: &[Bin] = &[
     Bin {
         id: "7zip",
         name: "7-Zip",
-        desc: "Extrai e cria arquivos 7z, zip, rar, tar, gz, iso, cab, msi e instaladores. Útil para abrir instaladores e pacotes antes de analisar.",
+        desc_t: ("Extrai e cria arquivos 7z, zip, rar, tar, gz, iso, cab, msi e instaladores. Útil para abrir instaladores e pacotes antes de analisar.", "Extracts and creates 7z, zip, rar, tar, gz, iso, cab, msi files and installers. Useful to open installers and packages before analyzing them."),
         repo: "ip7z/7zip",
         site: "https://www.7-zip.org/",
         asset: r"^7zr\.exe$",
@@ -43,7 +47,7 @@ pub const CATALOG: &[Bin] = &[
     Bin {
         id: "rtk",
         name: "RTK",
-        desc: "Enxuga a saída de comandos (git, cargo, pytest, docker...) antes de ela chegar ao modelo. Economiza boa parte do contexto.",
+        desc_t: ("Enxuga a saída de comandos (git, cargo, pytest, docker...) antes de ela chegar ao modelo. Economiza boa parte do contexto.", "Trims the output of commands (git, cargo, pytest, docker...) before it reaches the model. Saves a good part of the context."),
         repo: "rtk-ai/rtk",
         site: "https://www.rtk-ai.app/",
         asset: r"^rtk-x86_64-pc-windows-msvc\.zip$",
@@ -55,7 +59,7 @@ pub const CATALOG: &[Bin] = &[
     Bin {
         id: "ripgrep",
         name: "ripgrep",
-        desc: "Busca de texto muito rápida que respeita o .gitignore. A busca por conteúdo do studio passa a usá-lo.",
+        desc_t: ("Busca de texto muito rápida que respeita o .gitignore. A busca por conteúdo do studio passa a usá-lo.", "Very fast text search that respects .gitignore. The studio's content search starts using it."),
         repo: "BurntSushi/ripgrep",
         site: "",
         asset: r"^ripgrep-[\d.]+-x86_64-pc-windows-msvc\.zip$",
@@ -67,7 +71,7 @@ pub const CATALOG: &[Bin] = &[
     Bin {
         id: "fd",
         name: "fd",
-        desc: "Localiza arquivos pelo nome, mais rápido que o find e ignorando pastas de build.",
+        desc_t: ("Localiza arquivos pelo nome, mais rápido que o find e ignorando pastas de build.", "Finds files by name, faster than find and skipping build folders."),
         repo: "sharkdp/fd",
         site: "",
         asset: r"^fd-v[\d.]+-x86_64-pc-windows-msvc\.zip$",
@@ -79,7 +83,7 @@ pub const CATALOG: &[Bin] = &[
     Bin {
         id: "uv",
         name: "uv",
-        desc: "Gerenciador de Python. Traz o uvx, usado por muitos conectores MCP em Python.",
+        desc_t: ("Gerenciador de Python. Traz o uvx, usado por muitos conectores MCP em Python.", "Python manager. Brings uvx, used by many Python MCP connectors."),
         repo: "astral-sh/uv",
         site: "https://docs.astral.sh/uv/",
         asset: r"^uv-x86_64-pc-windows-msvc\.zip$",
@@ -91,7 +95,7 @@ pub const CATALOG: &[Bin] = &[
     Bin {
         id: "bun",
         name: "Bun",
-        desc: "Runtime JavaScript. Traz o bunx, alternativa rápida ao npx para conectores MCP em Node.",
+        desc_t: ("Runtime JavaScript. Traz o bunx, alternativa rápida ao npx para conectores MCP em Node.", "JavaScript runtime. Brings bunx, a fast alternative to npx for Node MCP connectors."),
         repo: "oven-sh/bun",
         site: "https://bun.sh",
         asset: r"^bun-windows-x64\.zip$",
@@ -186,7 +190,7 @@ async fn latest_release(app: &App, b: &Bin) -> Result<Value, String> {
     }
     let (status, body) = crate::update::fetch(app, &format!("{}/repos/{}/releases/latest", api_base(), b.repo), true, Duration::from_secs(20)).await?;
     if status != 200 {
-        return Err(format!("GitHub respondeu {status} para {}", b.repo));
+        return Err(LF!("GitHub respondeu {status} para {}", "GitHub answered {status} for {}", b.repo));
     }
     let v: Value = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
     let mut g = LATEST.lock().unwrap();
@@ -218,7 +222,7 @@ pub async fn list(app: &App, with_latest: bool) -> Value {
             ("", String::new(), 0)
         };
         let mut v = json!({
-            "id": b.id, "name": b.name, "cmd": main, "desc": b.desc, "repo": b.repo, "site": b.site, "tag": b.tag,
+            "id": b.id, "name": b.name, "cmd": main, "desc": b.desc(), "repo": b.repo, "site": b.site, "tag": b.tag,
             "source": source, "version": version, "size": size,
         });
         if with_latest {
@@ -247,7 +251,7 @@ pub async fn install(app: &App, id: &str) -> Result<String, String> {
         .as_array()
         .and_then(|a| a.iter().find(|x| x["name"].as_str().is_some_and(|n| re.is_match(n))))
         .and_then(|x| x["browser_download_url"].as_str())
-        .ok_or_else(|| format!("A versão mais nova de {} não tem um pacote para Windows x64.", b.name))?
+        .ok_or_else(|| LF!("A versão mais nova de {} não tem um pacote para Windows x64.", "The newest version of {} has no Windows x64 package.", b.name))?
         .to_string();
     let (status, bytes) = crate::update::fetch(app, &url, false, Duration::from_secs(900)).await?;
     if status != 200 {
@@ -255,7 +259,7 @@ pub async fn install(app: &App, id: &str) -> Result<String, String> {
     }
     let d = dir();
     std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
-    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| format!("Pacote inválido: {e}"))?;
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| LF!("Pacote inválido: {e}", "Invalid package: {e}"))?;
     let mut got = vec![];
     for i in 0..zip.len() {
         let mut f = zip.by_index(i).map_err(|e| e.to_string())?;
@@ -271,7 +275,7 @@ pub async fn install(app: &App, id: &str) -> Result<String, String> {
         got.push(*exe);
     }
     if !got.contains(&b.exes[0]) {
-        return Err(format!("Não achei {} dentro do pacote.", exe_name(b.exes[0])));
+        return Err(LF!("Não achei {} dentro do pacote.", "Could not find {} inside the package.", exe_name(b.exes[0])));
     }
     for (from, to) in b.copies {
         let buf = std::fs::read(d.join(exe_name(from))).map_err(|e| e.to_string())?;
@@ -302,7 +306,7 @@ async fn download(app: &App, url: &str) -> Result<Vec<u8>, String> {
 async fn install_7zip(app: &App, b: &Bin, rel: &Value) -> Result<String, String> {
     let d = dir();
     std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
-    let url = asset(rel, b.asset).ok_or("A versão mais nova do 7-Zip não tem o 7zr.exe.")?;
+    let url = asset(rel, b.asset).ok_or(L!("A versão mais nova do 7-Zip não tem o 7zr.exe.", "The newest 7-Zip version does not have 7zr.exe."))?;
     let zr = d.join(exe_name("7zr"));
     put(&zr, &download(app, &url).await?)?;
     let tmp = d.join(format!("7zip-tmp-{}", crate::app::now_ms()));
@@ -331,7 +335,7 @@ async fn install_7zip(app: &App, b: &Bin, rel: &Value) -> Result<String, String>
                         put(&d.join("7z.dll"), &std::fs::read(out.join("7z.dll")).map_err(|e| e.to_string())?)?;
                         ok = true;
                     }
-                    Ok(()) => why = "o instalador não tinha 7z.exe".into(),
+                    Ok(()) => why = L!("o instalador não tinha 7z.exe", "the installer did not have 7z.exe").into(),
                     Err(e) => why = e,
                 }
             }
@@ -344,7 +348,7 @@ async fn install_7zip(app: &App, b: &Bin, rel: &Value) -> Result<String, String>
             std::fs::write(&arc, download(app, &u).await?).map_err(|e| e.to_string())?;
             let out = tmp.join("extra");
             extract(&arc, &out)?;
-            let za = [out.join("x64").join(exe_name("7za")), out.join(exe_name("7za"))].into_iter().find(|p| p.is_file()).ok_or("O pacote extra não tem o 7za.exe.")?;
+            let za = [out.join("x64").join(exe_name("7za")), out.join(exe_name("7za"))].into_iter().find(|p| p.is_file()).ok_or(L!("O pacote extra não tem o 7za.exe.", "The extra package does not have 7za.exe."))?;
             let bytes = std::fs::read(&za).map_err(|e| e.to_string())?;
             put(&d.join(exe_name("7za")), &bytes)?;
             put(&d.join(exe_name("7z")), &bytes)?;
@@ -353,7 +357,7 @@ async fn install_7zip(app: &App, b: &Bin, rel: &Value) -> Result<String, String>
     }
     let _ = std::fs::remove_dir_all(&tmp);
     if !ok {
-        return Err(format!("Não consegui montar o 7-Zip completo ({why}). O 7zr.exe (só .7z) ficou instalado."));
+        return Err(LF!("Não consegui montar o 7-Zip completo ({why}). O 7zr.exe (só .7z) ficou instalado.", "Could not set up the full 7-Zip ({why}). 7zr.exe (.7z only) stayed installed."));
     }
     let ver = tag_version(rel);
     let mut vers = read_versions();
@@ -370,7 +374,7 @@ fn put(path: &Path, buf: &[u8]) -> Result<(), String> {
     }
     if path.exists() {
         let old = path.with_extension(format!("antigo-{}", crate::app::now_ms()));
-        std::fs::rename(path, &old).map_err(|e| format!("{} está em uso: {e}", path.display()))?;
+        std::fs::rename(path, &old).map_err(|e| LF!("{} está em uso: {e}", "{} is in use: {e}", path.display()))?;
     }
     std::fs::write(path, buf).map_err(|e| e.to_string())?;
     set_exec(path)

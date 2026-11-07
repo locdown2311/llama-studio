@@ -230,24 +230,24 @@ impl Llama {
         }
         let c = self.cfg();
         if !Path::new(&c.server_exe).is_file() {
-            return Err(format!("llama-server não encontrado: {}", c.server_exe));
+            return Err(LF!("llama-server não encontrado: {}", "llama-server not found: {}", c.server_exe));
         }
         if !Path::new(&c.model).is_file() {
-            return Err(format!("Modelo não encontrado: {}", c.model));
+            return Err(LF!("Modelo não encontrado: {}", "Model not found: {}", c.model));
         }
         // não sobe um segundo servidor na mesma porta
         let host = if c.bind_host.trim().is_empty() || c.bind_host == "0.0.0.0" { "127.0.0.1" } else { c.bind_host.trim() };
         if let Ok(addr) = format!("{host}:{}", c.port).parse::<std::net::SocketAddr>() {
             if std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok() {
-                return Err(format!("Já existe um llama-server (ou outro programa) usando a porta {}. O studio usa esse; para iniciar pelo studio, feche o outro antes.", c.port));
+                return Err(LF!("Já existe um llama-server (ou outro programa) usando a porta {}. O studio usa esse; para iniciar pelo studio, feche o outro antes.", "A llama-server (or another program) is already using port {}. The studio uses that one; to start it from the studio, close the other one first.", c.port));
             }
         }
         let help = engine_help(&c.server_exe);
         let (args, dropped) = self.args_for(help.as_ref());
         if !dropped.is_empty() {
-            self.push_log(format!("Ignorado (este motor não aceita): {}", dropped.join(" ")));
+            self.push_log(LF!("Ignorado (este motor não aceita): {}", "Ignored (this engine does not accept it): {}", dropped.join(" ")));
         }
-        self.push_log(format!("Iniciando: \"{}\" {}", c.server_exe, args));
+        self.push_log(LF!("Iniciando: \"{}\" {}", "Starting: \"{}\" {}", c.server_exe, args));
         let mut cmd = tokio::process::Command::new(&c.server_exe);
         #[cfg(windows)]
         {
@@ -264,7 +264,7 @@ impl Llama {
             cmd.env("HIP_VISIBLE_DEVICES", c.hip_devices.trim());
         }
         cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).kill_on_drop(true);
-        let mut child = cmd.spawn().map_err(|e| format!("Erro ao iniciar: {e}"))?;
+        let mut child = cmd.spawn().map_err(|e| LF!("Erro ao iniciar: {e}", "Error starting: {e}"))?;
         self.pid.store(child.id().unwrap_or(0), Ordering::SeqCst);
         self.started_at.store(crate::app::now_ms() as u64, Ordering::SeqCst);
         self.running.store(true, Ordering::SeqCst);
@@ -300,8 +300,8 @@ impl Llama {
             l.running.store(false, Ordering::SeqCst);
             l.pid.store(0, Ordering::SeqCst);
             l.push_log(match code {
-                Some(c) => format!("Servidor encerrado (código {c})."),
-                None => "Servidor parado.".into(),
+                Some(c) => LF!("Servidor encerrado (código {c}).", "Server exited (code {c})."),
+                None => L!("Servidor parado.", "Server stopped.").into(),
             });
             l.set_state(&app2, "stopped");
         });

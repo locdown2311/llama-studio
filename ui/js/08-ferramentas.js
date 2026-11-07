@@ -3,18 +3,18 @@
 
 /* ============================================================ ferramentas internas */
 const TOOL_INFO = {
-  browser: { sec: 'Navegador', title: 'Controlar o navegador', short: 'navegador', desc: 'Abrir sites, ler páginas, clicar e preencher numa janela própria do Edge.' },
-  computer: { sec: 'Computador', title: 'Controlar o computador', short: 'computador', desc: 'Ver janelas e elementos da tela, clicar, digitar e atalhos. Sempre pede permissão.' },
-  read: { sec: 'Arquivos', title: 'Ler arquivos', short: 'ler', desc: 'Listar pastas, ler e procurar arquivos.' },
-  edit: { sec: 'Arquivos', title: 'Editar arquivos', short: 'editar', desc: 'Trocar trechos de arquivos existentes.' },
-  write: { sec: 'Arquivos', title: 'Escrever arquivos', short: 'escrever', desc: 'Criar arquivos e pastas.' },
-  shell: { sec: 'Shell', title: 'Executar comandos', short: 'comandos', desc: 'Rodar comandos no PowerShell dentro da pasta de trabalho.' },
-  code: { sec: 'Shell', title: 'Executar código de ferramentas', short: 'código', desc: 'JavaScript que chama várias ferramentas e combina os resultados.' },
-  history: { sec: 'Busca', title: 'Lembrar conversas', short: 'histórico', desc: 'Procurar no histórico desta e das outras conversas.' },
-  toolsearch: { sec: 'Busca', title: 'Buscar ferramentas', short: 'buscar ferramentas', desc: 'Achar e ativar ferramentas de conectores sob demanda.' },
-  todo: { sec: 'Planejamento', title: 'Lista de tarefas', short: 'tarefas', desc: 'O modelo escreve um plano e vai marcando cada passo; você acompanha acima da caixa de texto.' },
-  notebook: { sec: 'Planejamento', title: 'Caderno de investigação', short: 'caderno', desc: 'O modelo registra achados (endereços, funções, hipóteses) num caderno do projeto e consulta antes de repetir trabalho.' },
-  explore: { sec: 'Subagentes', title: 'Subagentes exploradores', short: 'exploradores', desc: 'Investigação só de leitura com contexto próprio, vários em paralelo.' },
+  browser: { sec: L('Navegador'), title: L('Controlar o navegador'), short: 'navegador', desc: L('Abrir sites, ler páginas, clicar e preencher numa janela própria do Edge.') },
+  computer: { sec: L('Computador'), title: L('Controlar o computador'), short: 'computador', desc: L('Ver janelas e elementos da tela, clicar, digitar e atalhos. Sempre pede permissão.') },
+  read: { sec: L('Arquivos'), title: L('Ler arquivos'), short: 'ler', desc: L('Listar pastas, ler e procurar arquivos.') },
+  edit: { sec: L('Arquivos'), title: L('Editar arquivos'), short: 'editar', desc: L('Trocar trechos de arquivos existentes.') },
+  write: { sec: L('Arquivos'), title: L('Escrever arquivos'), short: 'escrever', desc: L('Criar arquivos e pastas.') },
+  shell: { sec: L('Shell'), title: L('Executar comandos'), short: 'comandos', desc: L('Rodar comandos no PowerShell dentro da pasta de trabalho.') },
+  code: { sec: L('Shell'), title: L('Executar código de ferramentas'), short: L('código'), desc: L('JavaScript que chama várias ferramentas e combina os resultados.') },
+  history: { sec: L('Busca'), title: L('Lembrar conversas'), short: L('histórico'), desc: L('Procurar no histórico desta e das outras conversas.') },
+  toolsearch: { sec: L('Busca'), title: L('Buscar ferramentas'), short: L('buscar ferramentas'), desc: L('Achar e ativar ferramentas de conectores sob demanda.') },
+  todo: { sec: L('Planejamento'), title: L('Lista de tarefas'), short: 'tarefas', desc: L('O modelo escreve um plano e vai marcando cada passo; você acompanha acima da caixa de texto.') },
+  notebook: { sec: L('Planejamento'), title: L('Caderno de investigação'), short: 'caderno', desc: L('O modelo registra achados (endereços, funções, hipóteses) num caderno do projeto e consulta antes de repetir trabalho.') },
+  explore: { sec: L('Subagentes'), title: L('Subagentes exploradores'), short: 'exploradores', desc: L('Investigação só de leitura com contexto próprio, vários em paralelo.') },
 };
 function enabledGroups() { return TOOL_GROUPS.filter((g) => S.settings.tools[g]); }
 function visionOn() { return S.settings.vision === 'on' || (S.settings.vision === 'auto' && S.vision); }
@@ -50,9 +50,9 @@ function readCoverage(conv, path, self) {
     if (i < cut || m === self || m.role !== 'tool' || m.status !== 'ok') return;
     const tc = calls.get(m.tool_call_id); if (tc?.function?.name !== 'read_file') return;
     const a = parseArgs(tc.function.arguments) || {}; if (normP(a.path || '') !== want) return;
-    const hm = /\[linhas (\d+)-(\d+) de (\d+)/.exec(String(m.content).slice(0, 400));
+    const hm = /\[(?:linhas|lines) (\d+)-(\d+) (?:de|of) (\d+)/.exec(String(m.content).slice(0, 400));
     if (hm) { spans.push([+hm[1], +hm[2]]); total = +hm[3]; }
-    const om = /^\[(\d+) linhas, /.exec(String(m.content)); if (om) total = total || +om[1];
+    const om = /^\[(\d+) (?:linhas|lines), /.exec(String(m.content)); if (om) total = total || +om[1];
   });
   let next = 1;
   for (const [a, b] of spans.sort((x, y) => x[0] - y[0])) if (a <= next && b >= next) next = b + 1;
@@ -65,7 +65,7 @@ function outlineGiven(conv, path, self) {
   const calls = new Map();
   for (const m of conv.messages) if (m.role === 'assistant') for (const tc of m.tool_calls || []) calls.set(tc.id, tc);
   return conv.messages.some((m, i) => {
-    if (i < cut || m === self || m.role !== 'tool' || m.status !== 'ok' || !/^\[\d+ linhas, .*Sumário/.test(String(m.content))) return false;
+    if (i < cut || m === self || m.role !== 'tool' || m.status !== 'ok' || !/^\[\d+ (?:linhas|lines), .*(?:Sumário|Outline)/.test(String(m.content))) return false;
     const a = parseArgs(calls.get(m.tool_call_id)?.function?.arguments) || {};
     return a.offset == null && a.limit == null && normP(a.path || '') === want;
   });
@@ -81,9 +81,9 @@ async function execTool(name, args, info, tctx, tmsg) {
     // entrega o próximo trecho que ele ainda não leu (ou avisa que já leu tudo)
     if (name === 'read_file' && args?.path && args.offset == null && args.limit == null && tctx.conv && outlineGiven(tctx.conv, args.path, tmsg)) {
       const { next, total } = readCoverage(tctx.conv, args.path, tmsg);
-      if (total && next > total) return { content: `[Você já leu este arquivo inteiro nesta conversa (linhas 1-${total}); o conteúdo está mais acima. Use o que já tem, ou leia de novo só um trecho com offset/limit se ele mudou.]`, isError: false };
+      if (total && next > total) return { content: L('[Você já leu este arquivo inteiro nesta conversa (linhas 1-{0}); o conteúdo está mais acima. Use o que já tem, ou leia de novo só um trecho com offset/limit se ele mudou.]', total), isError: false };
       const r = await api('/api/tools/call', { name, arguments: { ...args, offset: next, limit: 600 }, allow: tctx.refs, ws: tctx.ws });
-      return { ...r, content: `[O sumário deste arquivo já está mais acima. Seguem as linhas a partir da ${next}, que você ainda não leu; continue com offset para o resto.]\n` + r.content };
+      return { ...r, content: L('[O sumário deste arquivo já está mais acima. Seguem as linhas a partir da {0}, que você ainda não leu; continue com offset para o resto.]\n', next) + r.content };
     }
     if (name === 'execute_code') return await runCode(args?.code ?? '', tctx, tmsg);
     if (name === 'recall_history') return recallHistory(args || {}, tctx.conv);
@@ -91,13 +91,13 @@ async function execTool(name, args, info, tctx, tmsg) {
     if (name === 'notebook') return await notebookTool(tctx.conv, args);
     if (name === 'search_tools') {
       const names = Array.isArray(args?.names) ? args.names : typeof args?.names === 'string' ? args.names.split(/[\s,]+/).filter(Boolean) : [];
-      if (!names.length && !String(args?.query || '').trim()) return { content: 'Passe query (palavras-chave) para procurar, ou names para carregar.', isError: true };
+      if (!names.length && !String(args?.query || '').trim()) return { content: L('Passe query (palavras-chave) para procurar, ou names para carregar.'), isError: true };
       const r = await api('/api/tools/search', { query: names.length ? '' : args?.query || '', names });
-      if (!r.tools.length) return { content: 'Nenhuma ferramenta encontrada para essa busca.', isError: false };
+      if (!r.tools.length) return { content: L('Nenhuma ferramenta encontrada para essa busca.'), isError: false };
       // a busca só mostra; carregar é com names (um conector grande não entra inteiro no contexto)
-      if (!names.length) return { content: 'Encontradas (ainda não carregadas). Para usar, chame search_tools com names=[...] das que precisar:\n' + r.tools.map((t) => `- ${t.name} (${t.server}): ${t.description}`).join('\n'), isError: false };
+      if (!names.length) return { content: L('Encontradas (ainda não carregadas). Para usar, chame search_tools com names=[...] das que precisar:\n') + r.tools.map((t) => `- ${t.name} (${t.server}): ${t.description}`).join('\n'), isError: false };
       tctx.conv.extraTools = [...new Set([...(tctx.conv.extraTools || []), ...r.tools.map((t) => t.name)])];
-      return { content: 'Carregadas para os próximos passos:\n' + r.tools.map((t) => `- ${t.name} (${t.server}): ${t.description}`).join('\n'), isError: false };
+      return { content: L('Carregadas para os próximos passos:\n') + r.tools.map((t) => `- ${t.name} (${t.server}): ${t.description}`).join('\n'), isError: false };
     }
     const body = { name, arguments: typeof args === 'string' ? args : JSON.stringify(args ?? {}), allow: tctx.refs, ws: tctx.ws };
     // ponto de restauração: o servidor guarda o arquivo antes de mexer
@@ -110,13 +110,13 @@ async function execTool(name, args, info, tctx, tmsg) {
     }
     const r = await api('/api/tools/call', body);
     return r;
-  } catch (e) { return { content: 'Erro: ' + e.message, isError: true }; }
+  } catch (e) { return { content: L('Erro: ') + e.message, isError: true }; }
 }
 
 function recallHistory(args, conv) {
   const words = String(args.query || '').toLowerCase().split(/\s+/).filter((w) => w.length > 1);
-  if (!words.length) return { content: 'Informe o que procurar.', isError: true };
-  const convs = args.scope === 'atual' ? [conv] : S.convs;
+  if (!words.length) return { content: L('Informe o que procurar.'), isError: true };
+  const convs = (args.scope === 'atual' || args.scope === 'current') ? [conv] : S.convs;
   const hits = [];
   for (const c of convs) {
     c.messages.forEach((m, i) => {
@@ -132,8 +132,8 @@ function recallHistory(args, conv) {
   }
   hits.sort((a, b) => b.score - a.score || b.t - a.t);
   const top = hits.slice(0, Math.min(20, Number(args.limit) || 8));
-  if (!top.length) return { content: 'Nada encontrado no histórico.', isError: false };
-  const role = { user: 'usuário', assistant: 'assistente', tool: 'ferramenta' };
+  if (!top.length) return { content: L('Nada encontrado no histórico.'), isError: false };
+  const role = { user: L('usuário'), assistant: 'assistente', tool: 'ferramenta' };
   return { content: top.map((h) => `### ${h.c.title} (${fmtStamp(h.t)}, ${role[h.role]})\n${h.snip}`).join('\n\n'), isError: false };
 }
 
@@ -164,16 +164,16 @@ function runCode(code, tctx, tmsg) {
   return new Promise((resolve) => {
     let done = false;
     const logText = () => (logs.length ? '[console]\n' + logs.join('\n').slice(-20000) : '');
-    const finish = (content, isError) => { if (done) return; done = true; clearTimeout(timer); w.terminate(); URL.revokeObjectURL(url); resolve({ content: content || '(sem saída)', isError }); };
-    const timer = setTimeout(() => finish([logText(), 'Tempo esgotado (120 s).'].filter(Boolean).join('\n\n'), true), 120000);
+    const finish = (content, isError) => { if (done) return; done = true; clearTimeout(timer); w.terminate(); URL.revokeObjectURL(url); resolve({ content: content || L('(sem saída)'), isError }); };
+    const timer = setTimeout(() => finish([logText(), L('Tempo esgotado (120 s).')].filter(Boolean).join('\n\n'), true), 120000);
     tctx.signal.addEventListener('abort', () => finish('Cancelado.', true), { once: true });
     w.onmessage = async (e) => {
       const m = e.data;
       if (m.t === 'log') logs.push(m.s);
       else if (m.t === 'call') {
         let r;
-        if (++calls > 200) r = { content: 'Limite de 200 chamadas por execução.', isError: true };
-        else if (['execute_code', 'explore'].includes(m.name)) r = { content: `${m.name} não pode ser chamada de dentro do código.`, isError: true };
+        if (++calls > 200) r = { content: L('Limite de 200 chamadas por execução.'), isError: true };
+        else if (['execute_code', 'explore'].includes(m.name)) r = { content: L('{0} não pode ser chamada de dentro do código.', m.name), isError: true };
         else {
           const step = { name: m.name, summary: toolSummary(m.name, m.args), status: 'running' };
           tmsg._sub.push(step); scheduleRender();
@@ -184,7 +184,7 @@ function runCode(code, tctx, tmsg) {
       } else if (m.t === 'done') finish([logText(), m.v != null ? '[retorno]\n' + m.v : ''].filter(Boolean).join('\n\n'), false);
       else if (m.t === 'error') finish([logText(), '[erro]\n' + m.s].filter(Boolean).join('\n\n'), true);
     };
-    w.onerror = (e) => finish('[erro]\n' + (e.message || 'falha ao executar o código'), true);
+    w.onerror = (e) => finish('[erro]\n' + (e.message || L('falha ao executar o código')), true);
     w.postMessage({ t: 'run', code });
   });
 }
@@ -195,22 +195,22 @@ async function runExplorer(args, tctx, tmsg) {
   if (tctx.groups.includes('browser')) only.push('browser_navigate', 'browser_read', 'browser_click', 'browser_back');
   if (tctx.groups.includes('history')) only.push('recall_history');
   const { tools } = await api('/api/tools', { groups: ['read', 'browser', 'history'], mcp: [], skills: [], only });
-  const sys = 'Você é um subagente explorador do llama studio. Investigue a tarefa usando só as ferramentas de leitura disponíveis. '
-    + 'Seja eficiente: procure antes de ler, leia só o necessário. Não faça perguntas. Quando terminar, responda com um relatório objetivo em português: '
-    + 'o que encontrou, com caminhos de arquivo, trechos curtos relevantes e URLs. Se algo não existir, diga.\n\n' + tctx.ctxText.split('\n\n').filter((p) => !p.startsWith('O usuário ativou as skills')).join('\n\n');
-  const msgs = [{ role: 'system', content: sys }, { role: 'user', content: args.task + (args.where ? `\n\nComece por: ${args.where}` : '') }];
+  const sys = L('Você é um subagente explorador do llama studio. Investigue a tarefa usando só as ferramentas de leitura disponíveis. ')
+    + L('Seja eficiente: procure antes de ler, leia só o necessário. Não faça perguntas. Quando terminar, responda com um relatório objetivo em português: ')
+    + L('o que encontrou, com caminhos de arquivo, trechos curtos relevantes e URLs. Se algo não existir, diga.\n\n') + tctx.ctxText.split('\n\n').filter((p) => !p.startsWith('The user turned on the sk') && !p.startsWith('O usuário ativou as skills')).join('\n\n');
+  const msgs = [{ role: 'system', content: sys }, { role: 'user', content: args.task + (args.where ? L('\n\nComece por: {0}', args.where) : '') }];
   tmsg._sub = [];
   const max = Math.max(3, Number(S.settings.explorerSteps) || 20);
   for (let step = 0; step <= max; step++) {
     if (tctx.signal.aborted) return { content: 'Cancelado.', isError: true };
     const last = step === max;
-    if (last) msgs.push({ role: 'user', content: 'Limite de passos atingido. Escreva agora o relatório final com o que já encontrou.' });
+    if (last) msgs.push({ role: 'user', content: L('Limite de passos atingido. Escreva agora o relatório final com o que já encontrou.') });
     const m = { content: '', reasoning: '', tool_calls: [] };
     await streamRaw(msgs, last ? [] : tools, m, tctx.signal, null);
     const calls = m.tool_calls.filter((t) => t && t.function?.name);
     calls.forEach((t) => { if (!t.id) t.id = 'call_' + uid(); });
     const text = splitThink(m.content).text;
-    if (!calls.length) return { content: text.trim() || 'O subagente terminou sem relatório.', isError: false };
+    if (!calls.length) return { content: text.trim() || L('O subagente terminou sem relatório.'), isError: false };
     msgs.push({ role: 'assistant', content: text, tool_calls: calls.map((t) => ({ id: t.id, type: 'function', function: { name: t.function.name, arguments: validArgs(t.function.arguments, () => {}) } })) });
     // leituras do mesmo passo rodam juntas; o navegador (uma página só) vai em ordem
     const results = new Array(calls.length);
@@ -220,7 +220,7 @@ async function runExplorer(args, tctx, tmsg) {
       const a = parseArgs(t.function.arguments) || {};
       const st = { name: t.function.name, summary: toolSummary(t.function.name, a), status: 'running' };
       tmsg._sub.push(st); scheduleRender();
-      const run = () => (only.includes(t.function.name) ? execTool(t.function.name, a, {}, tctx, {}) : Promise.resolve({ content: 'Ferramenta não permitida para o explorador.', isError: true }))
+      const run = () => (only.includes(t.function.name) ? execTool(t.function.name, a, {}, tctx, {}) : Promise.resolve({ content: L('Ferramenta não permitida para o explorador.'), isError: true }))
         .then((r) => { results[i] = r; st.status = r.isError ? 'error' : 'ok'; scheduleRender(); });
       if (PARALLEL_READS.has(t.function.name)) pend.push(run());
       else { await Promise.all(pend); pend.length = 0; await run(); }
@@ -228,5 +228,5 @@ async function runExplorer(args, tctx, tmsg) {
     await Promise.all(pend);
     calls.forEach((t, i) => msgs.push({ role: 'tool', tool_call_id: t.id, content: String(results[i].content).slice(0, 24000) }));
   }
-  return { content: 'O subagente não concluiu.', isError: true };
+  return { content: L('O subagente não concluiu.'), isError: true };
 }

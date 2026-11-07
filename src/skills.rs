@@ -118,7 +118,7 @@ pub fn write(app: &App, id: Option<&str>, name: &str, description: &str, body: &
     let folder = id.map(str::to_string).filter(|s| !s.is_empty()).unwrap_or_else(|| slug(name));
     let dir = app.skills_dir().join(&folder);
     if !is_inside(&app.skills_dir(), &dir) {
-        return Err("Nome inválido".into());
+        return Err(L!("Nome inválido", "Invalid name").into());
     }
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let n = if name.is_empty() { folder.clone() } else { name.replace('\n', " ") };
@@ -148,7 +148,7 @@ pub fn import_dir(app: &App, dir: &Path, fallback_name: Option<&str>) -> Result<
     let mut found = vec![];
     find_skill_dirs(dir, 0, &mut found);
     if found.is_empty() {
-        return Err("Nenhum SKILL.md encontrado nessa pasta.".into());
+        return Err(L!("Nenhum SKILL.md encontrado nessa pasta.", "No SKILL.md found in that folder.").into());
     }
     let mut imported = vec![];
     for src in found {
@@ -177,8 +177,8 @@ pub fn import_zip(app: &App, bytes: &[u8], filename: &str) -> Result<Vec<String>
     let out = tmp.join("x");
     std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
     let result = (|| {
-        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| format!("Não consegui abrir o .zip: {e}"))?;
-        zip.extract(&out).map_err(|e| format!("Não consegui extrair o .zip: {e}"))?;
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| LF!("Não consegui abrir o .zip: {e}", "Could not open the .zip: {e}"))?;
+        zip.extract(&out).map_err(|e| LF!("Não consegui extrair o .zip: {e}", "Could not extract the .zip: {e}"))?;
         let mut dir = out.clone();
         let entries: Vec<_> = std::fs::read_dir(&out).map_err(|e| e.to_string())?.flatten().filter(|e| e.file_name() != "__MACOSX").collect();
         if entries.len() == 1 && entries[0].path().is_dir() {
@@ -201,7 +201,7 @@ pub fn import_md(app: &App, text: &str, filename: &str) -> Result<Vec<String>, S
 
 pub fn import_path(app: &App, p: &Path) -> Result<Vec<String>, String> {
     if !p.exists() {
-        return Err(format!("Caminho não encontrado: {}", p.display()));
+        return Err(LF!("Caminho não encontrado: {}", "Path not found: {}", p.display()));
     }
     if p.is_file() {
         let n = crate::app::file_name(p).to_lowercase();
@@ -213,7 +213,7 @@ pub fn import_path(app: &App, p: &Path) -> Result<Vec<String>, String> {
             let t = std::fs::read_to_string(p).map_err(|e| e.to_string())?;
             return import_md(app, &t, &n);
         }
-        return Err("Use uma pasta com SKILL.md, um .zip/.skill ou um arquivo .md.".into());
+        return Err(L!("Use uma pasta com SKILL.md, um .zip/.skill ou um arquivo .md.", "Use a folder with SKILL.md, a .zip/.skill or an .md file.").into());
     }
     import_dir(app, p, None)
 }

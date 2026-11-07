@@ -43,10 +43,10 @@ fn state_color(s: &str) -> Option<[u8; 3]> {
 
 fn state_label(s: &str) -> &'static str {
     match s {
-        "ready" => "llama-server pronto",
-        "external" => "llama-server pronto (iniciado fora do studio)",
-        "loading" | "external-loading" => "llama-server carregando o modelo...",
-        _ => "llama-server parado",
+        "ready" => L!("llama-server pronto", "llama-server ready"),
+        "external" => L!("llama-server pronto (iniciado fora do studio)", "llama-server ready (started outside the studio)"),
+        "loading" | "external-loading" => L!("llama-server carregando o modelo...", "llama-server loading the model..."),
+        _ => L!("llama-server parado", "llama-server stopped"),
     }
 }
 
@@ -70,10 +70,10 @@ pub fn run(app: Arc<App>, url: String, start_hidden: bool) {
     let mut ui: Option<Ui> = None;
     let mut tray: Option<TrayIcon> = None;
 
-    let m_open = MenuItem::new("Abrir llama studio", true, None);
-    let m_start = MenuItem::new("Iniciar servidor", true, None);
-    let m_stop = MenuItem::new("Parar servidor", false, None);
-    let m_quit = MenuItem::new("Sair", true, None);
+    let m_open = MenuItem::new(L!("Abrir llama studio", "Open llama studio"), true, None);
+    let m_start = MenuItem::new(L!("Iniciar servidor", "Start server"), true, None);
+    let m_stop = MenuItem::new(L!("Parar servidor", "Stop server"), false, None);
+    let m_quit = MenuItem::new(L!("Sair", "Quit"), true, None);
     let (id_open, id_start, id_stop, id_quit) = (m_open.id().clone(), m_start.id().clone(), m_stop.id().clone(), m_quit.id().clone());
 
     {

@@ -79,9 +79,9 @@ async function undoChange(c, g) {
   const ids = [...g.items].reverse().map((x) => x.id);
   try {
     const r = await api('/api/checkpoints/undo', { conv: c.id, ids });
-    if (r.errors.length) toast('Não consegui desfazer: ' + r.errors.map((x) => x.error).join('; '), 'err');
-    else toast(`${basename(g.path)}: ${g.first.existed ? 'voltou ao original' : 'removido (foi criado pela conversa)'}`);
-  } catch (e) { toast('Erro: ' + e.message, 'err'); }
+    if (r.errors.length) toast(L('Não consegui desfazer: ') + r.errors.map((x) => x.error).join('; '), 'err');
+    else toast(`${basename(g.path)}: ${g.first.existed ? L('voltou ao original') : L('removido (foi criado pela conversa)')}`);
+  } catch (e) { toast(L('Erro: ') + e.message, 'err'); }
   if (wsOf(c) === S.ws.path) refreshTree();
   await refreshChanges(c, true);
 }
@@ -90,12 +90,12 @@ function changesSection(c) {
   if (!groups.length) return null;
   const sec = h('details.chg', { open: S.chg.section });
   listen(sec, 'toggle', () => { S.chg.section = sec.open; store.set('chgOpen', sec.open); });
-  sec.append(h('summary.chg-head', null, ic('filePen'), h('span', null, 'Alterações'), h('span.chg-n', null, `${groups.length} ${groups.length === 1 ? 'arquivo' : 'arquivos'}`),
+  sec.append(h('summary.chg-head', null, ic('filePen'), h('span', null, L('Alterações')), h('span.chg-n', null, `${groups.length} ${groups.length === 1 ? L('arquivo') : L('arquivos')}`),
     groups.length > 1 ? h('button.btn.sm', { onclick: async (e) => {
       e.preventDefault(); e.stopPropagation();
-      if (!(await confirmBox(`Desfazer as alterações em ${groups.length} arquivos? Arquivos criados pela conversa são apagados.`, 'Desfazer tudo', true))) return;
+      if (!(await confirmBox(L('Desfazer as alterações em {0} arquivos? Arquivos criados pela conversa são apagados.', groups.length), L('Desfazer tudo'), true))) return;
       for (const g of groups) await undoChange(c, g);
-    } }, 'Desfazer tudo') : null));
+    } }, L('Desfazer tudo')) : null));
   for (const g of groups) {
     const key = g.first.id + ':' + g.last.id;
     const open = S.chg.open.has(g.path);
@@ -110,7 +110,7 @@ function changesSection(c) {
     item.append(h('summary', { title: g.path },
       h('span', { html: svg(g.first.existed ? 'filePen' : 'plus'), class: 'chg-ico' + (g.first.existed ? '' : ' new') }),
       h('span.chg-name', null, basename(rel), h('small', null, rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '')),
-      counts || h('span.chg-cnt', null, g.items.length > 1 ? `${g.items.length} vezes` : g.first.existed ? 'editado' : 'novo')));
+      counts || h('span.chg-cnt', null, g.items.length > 1 ? L('{0} vezes', g.items.length) : g.first.existed ? L('editado') : L('novo'))));
     const body = h('div.chg-body');
     if (open) {
       if (!d) { body.append(h('div.chg-note', null, 'Carregando...')); if (!S.chg.diffs.has(key)) loadDiff(c, g, key); }
@@ -118,9 +118,9 @@ function changesSection(c) {
       else body.append(diffEl(d.ops));
       const owner = chgOwner(c, g.last.id);
       body.append(h('div.chg-acts', null,
-        h('button.btn.sm', { onclick: () => undoChange(c, g) }, ic('history'), g.first.existed ? 'Desfazer' : 'Remover arquivo'),
-        d?.exists !== false ? h('button.btn.sm', { onclick: () => api('/api/reveal', { path: g.path, ws: wsOf(c) }).catch((e) => toast(e.message, 'err')) }, ic('external'), 'Mostrar na pasta') : null,
-        owner ? h('button.btn.sm', { onclick: () => jumpToTool(c, owner) }, ic('chat'), 'Ver na conversa') : null));
+        h('button.btn.sm', { onclick: () => undoChange(c, g) }, ic('history'), g.first.existed ? L('Desfazer') : L('Remover arquivo')),
+        d?.exists !== false ? h('button.btn.sm', { onclick: () => api('/api/reveal', { path: g.path, ws: wsOf(c) }).catch((e) => toast(e.message, 'err')) }, ic('external'), L('Mostrar na pasta')) : null,
+        owner ? h('button.btn.sm', { onclick: () => jumpToTool(c, owner) }, ic('chat'), L('Ver na conversa')) : null));
     }
     item.append(body);
     sec.append(item);
@@ -134,16 +134,16 @@ async function loadDiff(c, g, key) {
     const txt = (x) => (x && typeof x.text === 'string' ? x.text : null);
     let v;
     if (r.error) v = { note: r.error };
-    else if (r.before?.tooBig || r.after?.tooBig) v = { note: 'Arquivo grande demais para mostrar a diferença.' };
-    else if (r.before?.binary || r.after?.binary) v = { note: 'Arquivo binário: a diferença não é mostrada.' };
-    else if (r.after?.dir || r.before?.dir) v = { note: 'Pasta criada pela conversa.' };
-    else if (r.after === null) v = { note: 'O arquivo não existe mais.', exists: false };
+    else if (r.before?.tooBig || r.after?.tooBig) v = { note: L('Arquivo grande demais para mostrar a diferença.') };
+    else if (r.before?.binary || r.after?.binary) v = { note: L('Arquivo binário: a diferença não é mostrada.') };
+    else if (r.after?.dir || r.before?.dir) v = { note: L('Pasta criada pela conversa.') };
+    else if (r.after === null) v = { note: L('O arquivo não existe mais.'), exists: false };
     else {
       const a = txt(r.before) ?? ''; const b = txt(r.after) ?? '';
-      v = a === b ? { note: 'Sem diferença: o arquivo está igual ao original.' } : { ops: lineDiff(a, b) };
+      v = a === b ? { note: L('Sem diferença: o arquivo está igual ao original.') } : { ops: lineDiff(a, b) };
     }
     S.chg.diffs.set(key, v);
-  } catch (e) { S.chg.diffs.set(key, { note: 'Erro: ' + e.message }); }
+  } catch (e) { S.chg.diffs.set(key, { note: L('Erro: ') + e.message }); }
   drawActivity();
 }
 
@@ -158,8 +158,8 @@ function drawActivity() {
   const c = cur();
   const keep = box.scrollTop; const atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
   box.innerHTML = '';
-  if (!c || !c.messages.length) { box.append(h('div.act-empty', null, ic('list'), 'Os passos do modelo (raciocínio, ferramentas, respostas) desta conversa aparecem aqui conforme ele trabalha.')); return; }
-  box.append(h('div.ws-scope', null, ic('list'), `Atividade de "${clipText(c.title, 40)}"`));
+  if (!c || !c.messages.length) { box.append(h('div.act-empty', null, ic('list'), L('Os passos do modelo (raciocínio, ferramentas, respostas) desta conversa aparecem aqui conforme ele trabalha.'))); return; }
+  box.append(h('div.ws-scope', null, ic('list'), L('Atividade de "{0}"', clipText(c.title, 40))));
   const blocks = blocksOf(c);
   let nTools = 0; let nErr = 0; let ms = 0;
   const list = h('div.act');
@@ -169,16 +169,16 @@ function drawActivity() {
       list.append(h('button.act-user', { onclick: () => jumpTo(b.start) }, h('span.act-time', null, fmtStamp(m.ts).slice(11)), h('span.act-u', null, plainOf(m).replace(/\s+/g, ' ').slice(0, 140))));
       return;
     }
-    if (b.type === 'notice') { list.append(h('button.act-row', { onclick: () => jumpTo(b.start) }, h('span.act-ico', { html: svg(b.msgs[0].icon || 'arrowUp') }), h('span.act-main', null, h('span.act-name', null, 'Studio'), h('span.act-sub', null, b.msgs[0].content.slice(0, 120))))); return; }
-    if (b.type === 'error') { list.append(h('button.act-row.err', { onclick: () => jumpTo(b.start) }, h('span.act-ico', { html: svg('alert') }), h('span.act-main', null, h('span.act-name', null, 'Erro'), h('span.act-sub', null, b.msgs[0].content.slice(0, 120))))); return; }
+    if (b.type === 'notice') { list.append(h('button.act-row', { onclick: () => jumpTo(b.start) }, h('span.act-ico', { html: svg(b.msgs[0].icon || 'arrowUp') }), h('span.act-main', null, h('span.act-name', null, L('Studio')), h('span.act-sub', null, b.msgs[0].content.slice(0, 120))))); return; }
+    if (b.type === 'error') { list.append(h('button.act-row.err', { onclick: () => jumpTo(b.start) }, h('span.act-ico', { html: svg('alert') }), h('span.act-main', null, h('span.act-name', null, L('Erro')), h('span.act-sub', null, b.msgs[0].content.slice(0, 120))))); return; }
     const live = bi === blocks.length - 1 && running(c);
     const results = new Map(b.msgs.filter((m) => m.role === 'tool').map((m) => [m.tool_call_id, m]));
     const asts = b.msgs.filter((m) => m.role === 'assistant');
     asts.forEach((m) => {
       const sp = splitThink(m.content);
       const think = (m.reasoning || '') + (sp.think || '');
-      if (think.trim()) list.append(h('button.act-row.k-think', { onclick: () => jumpTo(b.start) }, h('span.act-ico', { html: svg('brain') }), h('span.act-main', null, h('span.act-name', null, 'Raciocínio'), h('span.act-sub', null, think.trim().replace(/\s+/g, ' ').slice(0, 90)))));
-      if (sp.text.trim() && m.tool_calls?.length) list.append(h('button.act-row.k-say', { onclick: () => jumpTo(b.start) }, h('span.act-ico', { html: svg('chat') }), h('span.act-main', null, h('span.act-name', null, 'Comentário'), h('span.act-sub', null, sp.text.trim().replace(/\s+/g, ' ').slice(0, 90)))));
+      if (think.trim()) list.append(h('button.act-row.k-think', { onclick: () => jumpTo(b.start) }, h('span.act-ico', { html: svg('brain') }), h('span.act-main', null, h('span.act-name', null, L('Raciocínio')), h('span.act-sub', null, think.trim().replace(/\s+/g, ' ').slice(0, 90)))));
+      if (sp.text.trim() && m.tool_calls?.length) list.append(h('button.act-row.k-say', { onclick: () => jumpTo(b.start) }, h('span.act-ico', { html: svg('chat') }), h('span.act-main', null, h('span.act-name', null, L('Comentário')), h('span.act-sub', null, sp.text.trim().replace(/\s+/g, ' ').slice(0, 90)))));
       for (const tc of m.tool_calls || []) {
         const r = results.get(tc.id); const name = tc.function?.name || '?';
         const st = r ? r.status || (r.isError ? 'error' : 'ok') : (live ? 'running' : 'error');
@@ -188,16 +188,16 @@ function drawActivity() {
         list.append(h('button.act-row.k-tool.s-' + st, { onclick: () => jumpTo(b.start, tc.id), title: name },
           h('span.act-ico', { html: svg(st === 'running' || st === 'pending' || st === 'audit' ? 'loader' : toolIcon(name, src), st === 'running' || st === 'pending' || st === 'audit' ? 'spin' : '') }),
           h('span.act-main', null, h('span.act-name', null, nm), h('span.act-sub', null, toolSummary(name, parseArgs(tc.function?.arguments)) || '')),
-          h('span.act-st', null, st === 'ok' ? (r?.ms != null ? fmtMs(r.ms) : '') : st === 'error' ? 'erro' : st === 'denied' ? 'negada' : st === 'approval' ? 'aguarda' : st === 'audit' ? 'auditando' : '')));
+          h('span.act-st', null, st === 'ok' ? (r?.ms != null ? fmtMs(r.ms) : '') : st === 'error' ? L('erro') : st === 'denied' ? L('negada') : st === 'approval' ? L('aguarda') : st === 'audit' ? L('auditando') : '')));
       }
-      if (sp.text.trim() && !m.tool_calls?.length) list.append(h('button.act-row.k-answer', { onclick: () => jumpTo(b.start) }, h('span.act-ico', { html: svg('check') }), h('span.act-main', null, h('span.act-name', null, 'Resposta'), h('span.act-sub', null, sp.text.trim().replace(/\s+/g, ' ').slice(0, 90)))));
+      if (sp.text.trim() && !m.tool_calls?.length) list.append(h('button.act-row.k-answer', { onclick: () => jumpTo(b.start) }, h('span.act-ico', { html: svg('check') }), h('span.act-main', null, h('span.act-name', null, L('Resposta')), h('span.act-sub', null, sp.text.trim().replace(/\s+/g, ' ').slice(0, 90)))));
     });
-    if (live) list.append(h('div.act-row.k-live', null, h('span.act-ico', { html: svg('loader', 'spin') }), h('span.act-main', null, h('span.act-name', null, c._waitingModel ? 'Esperando o modelo' : 'Trabalhando...'))));
+    if (live) list.append(h('div.act-row.k-live', null, h('span.act-ico', { html: svg('loader', 'spin') }), h('span.act-main', null, h('span.act-name', null, c._waitingModel ? L('Esperando o modelo') : 'Trabalhando...'))));
   });
   box.append(h('div.act-stats', null,
-    h('div', null, h('b', null, String(nTools)), h('span', null, 'ferramentas')),
-    h('div', { class: nErr ? 'bad' : '' }, h('b', null, String(nErr)), h('span', null, 'erros')),
-    h('div', null, h('b', null, fmtMs(ms)), h('span', null, 'em ferramentas'))));
+    h('div', null, h('b', null, String(nTools)), h('span', null, L('ferramentas'))),
+    h('div', { class: nErr ? 'bad' : '' }, h('b', null, String(nErr)), h('span', null, L('erros'))),
+    h('div', null, h('b', null, fmtMs(ms)), h('span', null, L('em ferramentas')))));
   const chg = changesSection(c);
   if (chg) box.append(chg);
   box.append(list);

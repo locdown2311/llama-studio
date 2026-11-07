@@ -131,7 +131,7 @@ function fmtSize(n) {
   if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB';
   return (n / 1073741824).toFixed(2) + ' GB';
 }
-function fmtMs(ms) { return ms < 1000 ? `${Math.round(ms)} ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.floor(ms / 60000)} min ${Math.round((ms % 60000) / 1000)} s`; }
+function fmtMs(ms) { return ms < 1000 ? `${Math.round(ms)} ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)} s` : L('{0} min {1} s', Math.floor(ms / 60000), Math.round((ms % 60000) / 1000)); }
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
 const store = {
@@ -164,7 +164,7 @@ function modal({ title, body, foot, wide, onClose }) {
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   document.addEventListener('keydown', onKey);
   const m = h('div.modal' + (wide ? '.wide' : ''), { role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
-    h('div.modal-head', null, h('h3', null, title), h('button.icon-btn', { onclick: close, 'aria-label': 'Fechar', html: svg('x') })),
+    h('div.modal-head', null, h('h3', null, title), h('button.icon-btn', { onclick: close, 'aria-label': L('Fechar'), html: svg('x') })),
     h('div.modal-body', null, body),
     foot ? h('div.modal-foot', null, foot) : null);
   back.append(m);
@@ -174,13 +174,13 @@ function modal({ title, body, foot, wide, onClose }) {
   return { close, el: m };
 }
 
-function confirmBox(text, okLabel = 'Confirmar', danger = false) {
+function confirmBox(text, okLabel = L('Confirmar'), danger = false) {
   return new Promise((resolve) => {
     let done = false;
     const m = modal({
-      title: 'Confirmar', body: h('p', null, text),
+      title: L('Confirmar'), body: h('p', null, text),
       foot: [
-        h('button.btn', { onclick: () => { done = true; m.close(); resolve(false); } }, 'Cancelar'),
+        h('button.btn', { onclick: () => { done = true; m.close(); resolve(false); } }, L('Cancelar')),
         h('button.btn' + (danger ? '.danger' : '.primary'), { onclick: () => { done = true; m.close(); resolve(true); } }, okLabel),
       ],
       onClose: () => { if (!done) resolve(false); },
@@ -196,7 +196,7 @@ function promptBox(title, label, value = '', okLabel = 'OK') {
     inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') ok(); });
     const m = modal({
       title, body: h('div.field', null, h('label', null, label), inp),
-      foot: [h('button.btn', { onclick: () => m.close() }, 'Cancelar'), h('button.btn.primary', { onclick: ok }, okLabel)],
+      foot: [h('button.btn', { onclick: () => m.close() }, L('Cancelar')), h('button.btn.primary', { onclick: ok }, okLabel)],
       onClose: () => { if (!done) resolve(null); },
     });
   });
@@ -225,7 +225,7 @@ function ftype(name, isDir) {
   return { color: 'var(--muted)', icon: 'file', lang: '' };
 }
 const LANG_ALIAS = { js: 'javascript', ts: 'typescript', py: 'python', sh: 'bash', shell: 'bash', ps1: 'powershell', ps: 'powershell', yml: 'yaml', html: 'xml', vue: 'xml', md: 'markdown', 'c++': 'cpp', 'c#': 'csharp', cs: 'csharp', rs: 'rust', bat: 'dos', cmd: 'dos', text: 'plaintext', txt: 'plaintext', jsonc: 'json' };
-const LANG_NAME = { javascript: 'JavaScript', typescript: 'TypeScript', python: 'Python', bash: 'Bash', powershell: 'PowerShell', json: 'JSON', yaml: 'YAML', xml: 'HTML', css: 'CSS', markdown: 'Markdown', cpp: 'C++', c: 'C', csharp: 'C#', java: 'Java', go: 'Go', rust: 'Rust', sql: 'SQL', dos: 'Batch', plaintext: 'Texto', php: 'PHP', ruby: 'Ruby' };
+const LANG_NAME = { javascript: L('JavaScript'), typescript: L('TypeScript'), python: L('Python'), bash: L('Bash'), powershell: L('PowerShell'), json: 'JSON', yaml: 'YAML', xml: 'HTML', css: 'CSS', markdown: L('Markdown'), cpp: 'C++', c: 'C', csharp: 'C#', java: L('Java'), go: L('Go'), rust: L('Rust'), sql: 'SQL', dos: L('Batch'), plaintext: L('Texto'), php: 'PHP', ruby: L('Ruby') };
 const LANG_COLOR = { javascript: '#e5c07b', typescript: '#6aa5e8', python: '#5fa8d3', bash: '#8cc497', powershell: '#5f9fd6', json: '#d4a84b', yaml: '#b39ddb', xml: '#e57d5f', css: '#6a9fe8', markdown: '#9fb3c8', cpp: '#6c8fd8', c: '#8fa3c0', csharp: '#9b7fe0', java: '#e0875f', go: '#5fc4d6', rust: '#d98b5f', sql: '#e5c07b', dos: '#8cc497' };
 
 /* ============================================================ código e markdown */
@@ -243,10 +243,10 @@ function highlight(text, lang) {
 
 function codeHTML(text, lang, { title, collapse } = {}) {
   const r = highlight(text.replace(/\n$/, ''), (lang || '').toLowerCase());
-  const label = title || LANG_NAME[r.lang] || r.lang || 'Texto';
+  const label = title || LANG_NAME[r.lang] || r.lang || L('Texto');
   const lines = text.split('\n').length;
   const col = collapse && lines > 18;
-  return `<div class="code${col ? ' collapsed' : ''}"><div class="code-head"><span class="code-lang" style="--lang:${LANG_COLOR[r.lang] || 'var(--muted)'}"><i></i>${esc(label)}</span><span class="spacer"></span><span class="code-lines">${lines} ${lines === 1 ? 'linha' : 'linhas'}</span><button class="copy-btn" data-copy="1">${svg('copy')}<span>Copiar</span></button></div><pre><code class="hljs">${r.html}</code></pre>${col ? '<button class="code-more" data-expand="1">Mostrar tudo</button>' : ''}</div>`;
+  return `<div class="code${col ? ' collapsed' : ''}"><div class="code-head"><span class="code-lang" style="--lang:${LANG_COLOR[r.lang] || 'var(--muted)'}"><i></i>${esc(label)}</span><span class="spacer"></span><span class="code-lines">${lines} ${lines === 1 ? L('linha') : L('linhas')}</span><button class="copy-btn" data-copy="1">${svg('copy')}<span>${L('Copiar')}</span></button></div><pre><code class="hljs">${r.html}</code></pre>${col ? `<button class="code-more" data-expand="1">${L('Mostrar tudo')}</button>` : ''}</div>`;
 }
 
 if (window.marked) {
@@ -302,8 +302,8 @@ document.addEventListener('click', (e) => {
   if (cb) {
     const code = cb.closest('.code')?.querySelector('pre')?.innerText ?? cb.dataset.text ?? '';
     navigator.clipboard.writeText(code).then(() => {
-      cb.classList.add('done'); const s = cb.querySelector('span'); if (s) s.textContent = 'Copiado';
-      setTimeout(() => { cb.classList.remove('done'); if (s) s.textContent = 'Copiar'; }, 1400);
+      cb.classList.add('done'); const s = cb.querySelector('span'); if (s) s.textContent = L('Copiado');
+      setTimeout(() => { cb.classList.remove('done'); if (s) s.textContent = L('Copiar'); }, 1400);
     });
     return;
   }
@@ -374,7 +374,7 @@ function applyKit(id, announce) {
   updatePickers();
   if (announce && !same) {
     const n = S.sel.skills.length; const m = S.sel.mcp.length;
-    toast(`Seleção de ${modelById(id)?.name || 'modelo'}: ${n} habilidade${n === 1 ? '' : 's'}, ${m} conector${m === 1 ? '' : 'es'}`);
+    toast(L('Seleção de {0}: {1} habilidade{2}, {3} conector{4}', modelById(id)?.name || L('modelo'), n, n === 1 ? '' : 's', m, m === 1 ? '' : 'es'));
   }
   return true;
 }

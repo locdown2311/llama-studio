@@ -39,14 +39,14 @@ impl Pe {
     pub fn open(path: &Path) -> Result<Pe, String> {
         let md = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
         if md.len() > 512 * 1024 * 1024 {
-            return Err("Binário grande demais (mais de 512 MB).".into());
+            return Err(L!("Binário grande demais (mais de 512 MB).", "Binary too large (over 512 MB).").into());
         }
         let data = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
         Self::parse(data)
     }
 
     pub fn parse(data: Vec<u8>) -> Result<Pe, String> {
-        let bad = || "Não é um executável do Windows (PE) válido.".to_string();
+        let bad = || L!("Não é um executável do Windows (PE) válido.", "Not a valid Windows executable (PE).").to_string();
         if data.get(0..2) != Some(b"MZ") {
             return Err(bad());
         }
@@ -95,9 +95,9 @@ impl Pe {
 
 /// Bytes da função com curingas (None) nos operandos que mudam entre versões.
 pub fn make_pattern(pe: &Pe, rva: u64, len: usize) -> Result<Vec<Option<u8>>, String> {
-    let (off, sec) = pe.rva_to_off(rva).ok_or("Esse endereço não cai em nenhuma seção do binário.")?;
+    let (off, sec) = pe.rva_to_off(rva).ok_or(L!("Esse endereço não cai em nenhuma seção do binário.", "That address does not fall in any section of the binary."))?;
     if !sec.exec {
-        return Err(format!("O endereço cai na seção {}, que não é de código.", sec.name));
+        return Err(LF!("O endereço cai na seção {}, que não é de código.", "The address falls in section {}, which is not code.", sec.name));
     }
     let end = (off + len).min(pe.data.len()).min((sec.raw + sec.raw_size) as usize);
     let bytes = &pe.data[off..end];
@@ -155,7 +155,7 @@ pub fn make_pattern(pe: &Pe, rva: u64, len: usize) -> Result<Vec<Option<u8>>, St
         pat.pop();
     }
     if pat.iter().filter(|p| p.is_some()).count() < 8 {
-        return Err("Sobraram poucos bytes fixos para uma assinatura confiável; aumente o tamanho.".into());
+        return Err(L!("Sobraram poucos bytes fixos para uma assinatura confiável; aumente o tamanho.", "Too few fixed bytes left for a reliable signature; increase the size.").into());
     }
     Ok(pat)
 }
@@ -226,16 +226,16 @@ pub fn save(app: &App, v: &Value) -> Result<(), String> {
 /// Cria a assinatura de `addr` (VA do debugger, VA preferida ou RVA) em `path`.
 pub fn make(path: &Path, addr: &str, base: &str, len: usize) -> Result<Value, String> {
     let pe = Pe::open(path)?;
-    let a = parse_hex(addr).ok_or("Endereço inválido (use hexadecimal, ex.: 0x401000).")?;
+    let a = parse_hex(addr).ok_or(L!("Endereço inválido (use hexadecimal, ex.: 0x401000).", "Invalid address (use hexadecimal, e.g.: 0x401000)."))?;
     let rva = if let Some(b) = parse_hex(base).filter(|b| *b > 0) {
-        a.checked_sub(b).ok_or("O endereço é menor que a base do módulo.")?
+        a.checked_sub(b).ok_or(L!("O endereço é menor que a base do módulo.", "The address is lower than the module base."))?
     } else if a >= pe.image_base && a < pe.image_base + pe.size_of_image {
         a - pe.image_base
     } else if a < pe.size_of_image {
         a
     } else {
-        return Err(format!(
-            "O endereço {a:#x} não está na imagem (base preferida {:#x}). Se o x64dbg carregou o módulo em outra base (ASLR), informe a base do módulo.",
+        return Err(LF!(
+            "O endereço {a:#x} não está na imagem (base preferida {:#x}). Se o x64dbg carregou o módulo em outra base (ASLR), informe a base do módulo.", "The address {a:#x} is not in the image (preferred base {:#x}). If x64dbg loaded the module at another base (ASLR), enter the module base.",
             pe.image_base
         ));
     };

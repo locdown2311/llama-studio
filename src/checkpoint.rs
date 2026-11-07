@@ -91,7 +91,7 @@ pub fn undo(app: &App, conv: &str, ids: &[String]) -> Value {
         };
         let path = PathBuf::from(v["path"].as_str().unwrap_or(""));
         let r: Result<(), String> = if v["tooBig"] == true {
-            Err("arquivo grande demais, não foi guardado".into())
+            Err(L!("arquivo grande demais, não foi guardado", "file too large, it was not saved").into())
         } else if v["existed"] == true {
             let bin = d.join(format!("{id}.bin"));
             path.parent().map(std::fs::create_dir_all);
@@ -161,7 +161,7 @@ pub fn diff(app: &App, conv: &str, id: &str) -> Value {
     let d = dir(app, conv);
     let id = clean(id);
     let Some(v) = std::fs::read(d.join(format!("{id}.json"))).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()) else {
-        return json!({"error": "ponto não encontrado"});
+        return json!({"error": L!("ponto não encontrado", "restore point not found")});
     };
     let path = PathBuf::from(v["path"].as_str().unwrap_or(""));
     let before = if v["existed"] == true {

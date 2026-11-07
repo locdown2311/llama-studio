@@ -69,15 +69,15 @@ fn bench_exe(server: &str) -> Option<PathBuf> {
 
 pub fn start(app: &Arc<App>, model_id: &str) -> Result<Value, String> {
     if ST.lock().unwrap().as_ref().is_some_and(|s| s.running) {
-        return Err("Já tem uma otimização rodando.".into());
+        return Err(L!("Já tem uma otimização rodando.", "An optimization is already running.").into());
     }
     let list = crate::models::load(app);
-    let p = list.iter().find(|m| m.id == model_id).cloned().ok_or("Modelo não encontrado.")?;
+    let p = list.iter().find(|m| m.id == model_id).cloned().ok_or(L!("Modelo não encontrado.", "Model not found."))?;
     if !Path::new(&p.model).is_file() {
-        return Err(format!("O arquivo do modelo não existe: {}", p.model));
+        return Err(LF!("O arquivo do modelo não existe: {}", "The model file does not exist: {}", p.model));
     }
     let server = app.llama.cfg().server_exe;
-    let bench = bench_exe(&server).ok_or("O motor em uso não tem o llama-bench. Instale um motor pelo studio (Servidor > Motor).")?;
+    let bench = bench_exe(&server).ok_or(L!("O motor em uso não tem o llama-bench. Instale um motor pelo studio (Servidor > Motor).", "The engine in use does not have llama-bench. Install an engine from the studio (Server > Engine)."))?;
     let help = crate::llama::engine_help(&bench.to_string_lossy());
     let has = |f: &str| help.as_ref().map(|h| h.flags.contains(f)).unwrap_or(true);
 
@@ -136,7 +136,7 @@ pub fn start(app: &Arc<App>, model_id: &str) -> Result<Value, String> {
 async fn run(app: &Arc<App>, bench: &Path, args: &[String], p: &crate::models::Profile) -> Result<Value, String> {
     // o modelo não cabe duas vezes na memória: para o servidor durante o teste
     if app.llama.is_running() {
-        with(|s| s.log.push("Parando o llama-server para medir...".into()));
+        with(|s| s.log.push(L!("Parando o llama-server para medir...", "Stopping the llama-server to measure...").into()));
         app.llama.stop();
         for _ in 0..100 {
             if !app.llama.is_running() {
@@ -153,7 +153,7 @@ async fn run(app: &Arc<App>, bench: &Path, args: &[String], p: &crate::models::P
     }
     #[cfg(windows)]
     c.creation_flags(crate::CREATE_NO_WINDOW);
-    let mut child = c.spawn().map_err(|e| format!("Não consegui rodar o llama-bench: {e}"))?;
+    let mut child = c.spawn().map_err(|e| LF!("Não consegui rodar o llama-bench: {e}", "Could not run llama-bench: {e}"))?;
     let out = child.stdout.take().unwrap();
     let err = child.stderr.take().unwrap();
     tokio::spawn(async move {
@@ -198,7 +198,7 @@ async fn run(app: &Arc<App>, bench: &Path, args: &[String], p: &crate::models::P
     let rows = ST.lock().unwrap().as_ref().map(|s| s.rows.clone()).unwrap_or_default();
     if rows.is_empty() {
         let tail = ST.lock().unwrap().as_ref().map(|s| s.log.iter().rev().take(4).rev().cloned().collect::<Vec<_>>().join(" | ")).unwrap_or_default();
-        return Err(format!("O llama-bench terminou sem resultados (código {:?}). {tail}", st.code()));
+        return Err(LF!("O llama-bench terminou sem resultados (código {:?}). {tail}", "llama-bench finished without results (code {:?}). {tail}", st.code()));
     }
     // pontua cada (ub, threads): metade leitura do prompt, metade geração
     let mut combos: Vec<(u64, u64, f64, f64)> = vec![];

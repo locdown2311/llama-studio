@@ -47,34 +47,34 @@ const clipText = (t, n) => { t = String(t ?? ''); return t.length > n ? t.slice(
 async function ruleFrom(conv, res, tc, what) {
   const args = parseArgs(tc.function?.arguments) ?? tc.function?.arguments;
   const proj = projectOf(conv);
-  const ta = h('textarea.textarea', { rows: 3, placeholder: 'Escrevendo uma sugestão...' });
-  const dests = [['system', 'Todas as conversas (prompt de sistema)'], ...(proj ? [['project', `Só o projeto "${proj.name}"`]] : []), ['auditor', 'Política do auditor' + (S.settings.auditor ? '' : ' (desligado)')]];
+  const ta = h('textarea.textarea', { rows: 3, placeholder: L('Escrevendo uma sugestão...') });
+  const dests = [['system', L('Todas as conversas (prompt de sistema)')], ...(proj ? [['project', L('Só o projeto "{0}"', proj.name)]] : []), ['auditor', L('Política do auditor') + (S.settings.auditor ? '' : ' (desligado)')]];
   const dest = h('select.select', null, dests.map(([v, l]) => h('option', { value: v }, l)));
   dest.value = proj ? 'project' : 'system';
   let m;
   const save = () => {
     const rule = ta.value.trim().replace(/^[-*]\s*/, '');
-    if (!rule) { toast('Escreva a regra.', 'err'); return; }
+    if (!rule) { toast(L('Escreva a regra.'), 'err'); return; }
     const add = (txt) => {
-      const head = 'Regras aprendidas com o usuário:';
+      const head = L('Regras aprendidas com o usuário:');
       txt = (txt || '').trimEnd();
       return txt.includes(head) ? `${txt}\n- ${rule}` : `${txt}${txt ? '\n\n' : ''}${head}\n- ${rule}`;
     };
     if (dest.value === 'project' && proj) { proj.instructions = add(proj.instructions); saveProjects(); }
     else if (dest.value === 'auditor') { S.settings.auditPolicy = add(S.settings.auditPolicy?.trim() || AUDIT_POLICY); store.set('settings', S.settings); }
     else { S.settings.systemPrompt = add(S.settings.systemPrompt); store.set('settings', S.settings); }
-    m.close(); toast('Regra salva. Vale a partir da próxima mensagem.');
+    m.close(); toast(L('Regra salva. Vale a partir da próxima mensagem.'));
   };
-  m = modal({ title: 'Transformar em regra', body: h('div.form', null,
-    h('p.muted', { style: { margin: 0 } }, `Você ${what === 'negou' ? 'negou' : 'desfez'} ${tc.function?.name} (${clipText(toolSummary(tc.function?.name, args), 80)}). Uma regra curta evita que isso se repita.`),
-    h('div.field', null, h('label', null, 'Regra'), ta),
-    h('div.field', null, h('label', null, 'Onde vale'), dest, h('small', null, 'No prompt ou no projeto, o modelo evita a ação. No auditor, ela passa a exigir sua aprovação.'))),
-  foot: [h('button.btn', { onclick: () => m.close() }, 'Cancelar'), h('button.btn.primary', { onclick: save }, 'Salvar regra')] });
+  m = modal({ title: L('Transformar em regra'), body: h('div.form', null,
+    h('p.muted', { style: { margin: 0 } }, L('Você {0} {1} ({2}). Uma regra curta evita que isso se repita.', what === 'negou' ? L('negou') : L('desfez'), tc.function?.name, clipText(toolSummary(tc.function?.name, args), 80))),
+    h('div.field', null, h('label', null, L('Regra')), ta),
+    h('div.field', null, h('label', null, L('Onde vale')), dest, h('small', null, L('No prompt ou no projeto, o modelo evita a ação. No auditor, ela passa a exigir sua aprovação.')))),
+  foot: [h('button.btn', { onclick: () => m.close() }, L('Cancelar')), h('button.btn.primary', { onclick: save }, L('Salvar regra'))] });
   const lastUser = [...conv.messages].reverse().find((x) => x.role === 'user' && !x.hidden);
-  const fallback = `Não use ${tc.function?.name} para "${clipText(toolSummary(tc.function?.name, args), 60)}" sem perguntar antes.`;
+  const fallback = L('Não use {0} para "{1}" sem perguntar antes.', tc.function?.name, clipText(toolSummary(tc.function?.name, args), 60));
   try {
-    const r = await sideAsk(conv, 'Você transforma uma correção do usuário numa regra curta para um agente de IA. Escreva UMA regra no imperativo, em português, com no máximo 25 palavras, generalizando o que o usuário não quer (não cite valores únicos se uma regra geral servir). Responda só com a regra, sem aspas.',
-      `Pedido do usuário: ${clipText(lastUser ? plainOf(lastUser) : '', 600)}\nAção do agente: ${tc.function?.name} ${clipText(JSON.stringify(args), 1200)}\nO usuário ${what === 'negou' ? 'negou a execução' : 'desfez o resultado'} dessa ação.`, { maxTokens: 80 });
+    const r = await sideAsk(conv, L('Você transforma uma correção do usuário numa regra curta para um agente de IA. Escreva UMA regra no imperativo, em português, com no máximo 25 palavras, generalizando o que o usuário não quer (não cite valores únicos se uma regra geral servir). Responda só com a regra, sem aspas.'),
+      L('Pedido do usuário: {0}\nAção do agente: {1} {2}\nO usuário {3} dessa ação.', clipText(lastUser ? plainOf(lastUser) : '', 600), tc.function?.name, clipText(JSON.stringify(args), 1200), what === 'negou' ? L('negou a execução') : L('desfez o resultado')), { maxTokens: 80 });
     if (!ta.value) ta.value = r.split('\n')[0].replace(/^["'“]|["'”]$/g, '') || fallback;
   } catch { if (!ta.value) ta.value = fallback; }
   ta.placeholder = '';
@@ -85,35 +85,35 @@ function transcriptOf(c, limit = 14000) {
   const out = [];
   for (const m of c.messages) {
     if (m.hidden) continue;
-    if (m.role === 'user') out.push(`USUÁRIO: ${clipText(plainOf(m), 1500)}`);
+    if (m.role === 'user') out.push(L('USUÁRIO: {0}', clipText(plainOf(m), 1500)));
     else if (m.role === 'assistant') {
       const t = splitThink(m.content || '').text.trim();
-      if (t) out.push(`AGENTE: ${clipText(t, 700)}`);
+      if (t) out.push(L('AGENTE: {0}', clipText(t, 700)));
       for (const tc of m.tool_calls || []) {
         const r = c.messages.find((x) => x.role === 'tool' && x.tool_call_id === tc.id);
-        const st = !r ? '?' : r.status === 'denied' ? 'negada' : r.isError ? 'erro: ' + clipText(r.content, 160) : 'ok';
+        const st = !r ? '?' : r.status === 'denied' ? L('negada') : r.isError ? L('erro: ') + clipText(r.content, 160) : 'ok';
         out.push(`  → ${tc.function?.name}(${clipText(tc.function?.arguments, 160)}) = ${st}`);
       }
-    } else if (m.role === 'error') out.push(`ERRO: ${clipText(m.content, 200)}`);
+    } else if (m.role === 'error') out.push(L('ERRO: {0}', clipText(m.content, 200)));
   }
   let t = out.join('\n');
   if (t.length > limit) t = t.slice(0, limit * 0.35) + '\n[... meio omitido ...]\n' + t.slice(-limit * 0.65);
   return t;
 }
 async function skillFromConv(c) {
-  if (!c.messages.some((m) => m.role === 'assistant')) { toast('A conversa ainda não tem trabalho para virar habilidade.'); return; }
+  if (!c.messages.some((m) => m.role === 'assistant')) { toast(L('A conversa ainda não tem trabalho para virar habilidade.')); return; }
   const ac = new AbortController();
-  const m = modal({ title: 'Criar habilidade', body: h('div.gen-wait', null, h('span', { html: svg('loader', 'spin') }), 'Lendo a conversa e escrevendo a habilidade...'), foot: [h('button.btn', { onclick: () => { ac.abort(); m.close(); } }, 'Cancelar')] });
+  const m = modal({ title: L('Criar habilidade'), body: h('div.gen-wait', null, h('span', { html: svg('loader', 'spin') }), L('Lendo a conversa e escrevendo a habilidade...')), foot: [h('button.btn', { onclick: () => { ac.abort(); m.close(); } }, L('Cancelar'))] });
   try {
-    const out = await sideAsk(c, 'Você escreve habilidades (SKILL.md) para um agente de IA local a partir de uma conversa que deu certo. Extraia o procedimento reutilizável: quando usar, passos na ordem, ferramentas e comandos que funcionaram, armadilhas e erros que apareceram e como foram resolvidos, e como verificar o resultado. Generalize (troque nomes de arquivos e valores específicos por descrições). Seja conciso. Responda exatamente neste formato:\nNOME: nome-em-kebab-case\nDESCRIÇÃO: uma frase dizendo quando usar\n---\n# Título\n(corpo em Markdown)',
-      `Conversa "${c.title}":\n\n${transcriptOf(c)}`, { maxTokens: 1600, temperature: 0.2, signal: ac.signal });
+    const out = await sideAsk(c, L('Você escreve habilidades (SKILL.md) para um agente de IA local a partir de uma conversa que deu certo. Extraia o procedimento reutilizável: quando usar, passos na ordem, ferramentas e comandos que funcionaram, armadilhas e erros que apareceram e como foram resolvidos, e como verificar o resultado. Generalize (troque nomes de arquivos e valores específicos por descrições). Seja conciso. Responda exatamente neste formato:\nNOME: nome-em-kebab-case\nDESCRIÇÃO: uma frase dizendo quando usar\n---\n# Título\n(corpo em Markdown)'),
+      L('Conversa "{0}":\n\n{1}', c.title, transcriptOf(c)), { maxTokens: 1600, temperature: 0.2, signal: ac.signal });
     m.close();
     const name = (out.match(/^\s*NOME:\s*(.+)$/mi)?.[1] || c.title).trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50);
     const description = (out.match(/^\s*DESCRI[CÇ][AÃ]O:\s*(.+)$/mi)?.[1] || '').trim();
     const i = out.indexOf('\n---');
     const body = (i >= 0 ? out.slice(i + 4) : out.replace(/^\s*(NOME|DESCRI[CÇ][AÃ]O):.*$/gmi, '')).trim();
     editSkill(null, { name, description, body });
-  } catch (e) { if (!ac.signal.aborted) { m.close(); toast('Não consegui gerar: ' + e.message, 'err'); } }
+  } catch (e) { if (!ac.signal.aborted) { m.close(); toast(L('Não consegui gerar: ') + e.message, 'err'); } }
 }
 
 /* ------------------------------------------------------------ pré-leitura do projeto */
@@ -133,7 +133,7 @@ async function maybeSummarizeMap(conv, force) {
   const map = await ensureMap(conv);
   if (!map || (map.summary && !force) || map.files === 0) return;
   try {
-    const sum = await sideAsk(conv, 'Você recebe o mapa de uma pasta de trabalho (estrutura, tipos de arquivo e o começo de arquivos-chave). Escreva em português, em no máximo 6 linhas curtas: do que se trata, linguagem e ferramentas, onde fica o código principal, como rodar ou compilar se der para saber, e o que parecer importante. Não invente o que o mapa não mostra.',
+    const sum = await sideAsk(conv, L('Você recebe o mapa de uma pasta de trabalho (estrutura, tipos de arquivo e o começo de arquivos-chave). Escreva em português, em no máximo 6 linhas curtas: do que se trata, linguagem e ferramentas, onde fica o código principal, como rodar ou compilar se der para saber, e o que parecer importante. Não invente o que o mapa não mostra.'),
       map.text, { maxTokens: 260 });
     if (sum) { const r = await api('/api/projmap/summary', { ws, summary: sum }); S.maps.set(ws, r); }
   } catch { /* tenta de novo na próxima abertura */ }
@@ -141,14 +141,14 @@ async function maybeSummarizeMap(conv, force) {
 async function showMap(conv) {
   const box = h('pre.map-text', null, 'Carregando...');
   const sum = h('div.map-sum');
-  const fill = (m) => { box.textContent = m?.text || 'Sem mapa.'; sum.textContent = m?.summary || 'Sem resumo ainda.'; meta.textContent = m ? `${m.files} arquivos lidos em ${m.ms} ms · ${new Date(m.built).toLocaleString('pt-BR')}` : ''; };
+  const fill = (m) => { box.textContent = m?.text || L('Sem mapa.'); sum.textContent = m?.summary || L('Sem resumo ainda.'); meta.textContent = m ? L('{0} arquivos lidos em {1} ms · {2}', m.files, m.ms, new Date(m.built).toLocaleString(LOCALE)) : ''; };
   const meta = h('small.muted');
-  const m = modal({ title: 'Mapa da pasta', wide: true, body: h('div.form', null,
-    h('p.muted', { style: { margin: 0 } }, 'O que o modelo recebe sobre esta pasta no começo de cada conversa. Montado sem o modelo; o resumo é opcional.'),
-    h('div.field', null, h('label', null, 'Resumo'), sum), h('div.field', null, h('label', null, 'Estrutura'), box), meta),
+  const m = modal({ title: L('Mapa da pasta'), wide: true, body: h('div.form', null,
+    h('p.muted', { style: { margin: 0 } }, L('O que o modelo recebe sobre esta pasta no começo de cada conversa. Montado sem o modelo; o resumo é opcional.')),
+    h('div.field', null, h('label', null, L('Resumo')), sum), h('div.field', null, h('label', null, L('Estrutura')), box), meta),
   foot: [
-    h('button.btn', { onclick: async () => { fill(await ensureMap(conv, true)); toast('Mapa atualizado'); } }, ic('refresh'), 'Ler de novo'),
-    h('button.btn', { onclick: async (e) => { e.currentTarget.disabled = true; sum.textContent = 'Resumindo...'; await maybeSummarizeMap(conv, true); fill(S.maps.get(wsOf(conv))); e.currentTarget.disabled = false; } }, ic('sparkles'), 'Resumir com o modelo'),
-    h('button.btn.primary', { onclick: () => m.close() }, 'Fechar')] });
+    h('button.btn', { onclick: async () => { fill(await ensureMap(conv, true)); toast(L('Mapa atualizado')); } }, ic('refresh'), L('Ler de novo')),
+    h('button.btn', { onclick: async (e) => { e.currentTarget.disabled = true; sum.textContent = 'Resumindo...'; await maybeSummarizeMap(conv, true); fill(S.maps.get(wsOf(conv))); e.currentTarget.disabled = false; } }, ic('sparkles'), L('Resumir com o modelo')),
+    h('button.btn.primary', { onclick: () => m.close() }, L('Fechar'))] });
   fill(await ensureMap(conv));
 }
