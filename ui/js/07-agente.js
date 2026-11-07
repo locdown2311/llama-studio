@@ -62,16 +62,22 @@ async function sideSlot(conv) {
   const sl = S.slots;
   const busy = new Set([...S.runs.keys()].map((id) => S.convs.find((c) => c.id === id)?._slot).filter((x) => x != null));
   busy.add(conv._slot);
-  let best = -1;
-  for (let k = 0; k < S.nSlots; k++) {
-    if (busy.has(k)) continue;
-    if (!sl.owner[k]) return k;
-    if (best < 0 || (sl.used[k] || 0) < (sl.used[best] || 0)) best = k;
+  // com o auditor ligado há um slot só dele (o último); senão, o que já serviu pedidos laterais. Assim as
+  // instruções e a política do auditor ficam no cache e cada auditoria só lê o pedido novo
+  const res = auditSlot();
+  let best = res >= 0 && !busy.has(res) ? res : -1;
+  if (best < 0) {
+    for (let k = 0; k < S.nSlots; k++) if (!busy.has(k) && sl.owner[k] === '__lateral') { sl.used[k] = Date.now(); return k; }
+    for (let k = 0; k < S.nSlots; k++) {
+      if (busy.has(k)) continue;
+      if (!sl.owner[k]) { sl.owner[k] = '__lateral'; sl.used[k] = Date.now(); return k; }
+      if (best < 0 || (sl.used[k] || 0) < (sl.used[best] || 0)) best = k;
+    }
   }
   if (best < 0) return null;
   // o slot guarda o cache de outra conversa parada: vai para o disco antes, senão ela relê tudo ao voltar
   const prev = sl.owner[best] ? S.convs.find((c) => c.id === sl.owner[best]) : null;
-  sl.owner[best] = '__lateral'; sl.used[best] = Date.now(); // ninguém escolhe este slot enquanto salva
+  sl.owner[best] = '__lateral'; sl.used[best] = Date.now(); // fica para os próximos pedidos laterais
   if (prev && (prev.ctx?.tokens || prev.cacheLast?.total || 0) >= 3000 && sl.ok) {
     try {
       await api(`/slots/${best}?action=save`, { filename: kvFile(prev) });
@@ -79,7 +85,6 @@ async function sideSlot(conv) {
       api('/api/kvcache/prune', { keep: 6 }).catch(() => {});
     } catch { /* sem --slot-save-path: ela relê */ }
   }
-  sl.owner[best] = null;
   return best;
 }
 
@@ -111,7 +116,7 @@ function auditorSection() {
   const st = S.settings;
   const save = () => store.set('settings', S.settings);
   const sw = (key, title, desc) => {
-    const on = key === 'auditReversible' ? st[key] !== false : !!st[key];
+    const on = key === 'auditReversible' || key === 'auditLearn' ? st[key] !== false : !!st[key];
     const i = h('input', { type: 'checkbox', checked: on });
     i.addEventListener('change', () => { S.settings[key] = i.checked; save(); if (key === 'auditor') more.hidden = !i.checked; });
     return h('label.tcard', null, h('span.tc-main', null, h('span.tc-title', null, title), h('span.tc-desc', null, desc)), h('span.switch', null, i, h('span')));
@@ -124,7 +129,8 @@ function auditorSection() {
   const reset = h('button.btn.sm', { type: 'button', onclick: () => { pol.value = AUDIT_POLICY; S.settings.auditPolicy = ''; save(); toast(L('Política padrão restaurada')); } }, L('Restaurar a padrão'));
   const more = h('div', { hidden: !st.auditor },
     sw('auditReversible', L('Ações seguras passam direto'), L('Criar e editar arquivos na pasta (sempre há ponto de restauração) e comandos que só compilam, testam ou leem dentro dela são aprovados sem chamar o modelo: a ação não espera e o cache da conversa não se perde.')),
-    sw('auditMcp', L('Auditar também as ferramentas de conectores'), L('Debuggers, bancos de dados e APIs também passam por ele.')),
+    sw('auditLearn', L('Confiar numa ferramenta depois de 3 aprovações'), L('Na mesma conversa, uma ferramenta que o auditor já aprovou 3 vezes com risco baixo passa direto, a não ser que os argumentos tenham algo perigoso (apagar, formatar, matar processo...).')),
+    sw('auditMcp', L('Auditar também as ferramentas de conectores'), L('Debuggers, bancos de dados e APIs também passam por ele. As que só leem passam direto.')),
     h('div.field', null, h('label', null, L('O auditor aprova sozinho')), max, h('small', null, L('Acima disso, ou se ele tiver dúvida, a ação espera você com a análise dele, mesmo em "Nunca perguntar".'))),
     h('div.field', null, h('label', null, L('Política do auditor')), pol, h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', marginTop: '6px' } }, h('small', { style: { flex: 1 } }, L('Regras que ele segue para decidir. Escreva o que é seguro e o que deve sempre passar por você.')), reset)));
   return h('div', null,
@@ -142,6 +148,8 @@ function shouldAudit(info, conv) {
 
 // aprovações já dadas nesta sessão (fora do objeto da conversa: ele é salvo como JSON)
 const AUDITS = new WeakMap();
+// quantas vezes cada ferramenta foi aprovada pelo modelo com risco baixo, por conversa
+const AUDIT_OK = new WeakMap();
 async function auditCall(tc, info, conv, signal) {
   const t0 = performance.now();
   const name = tc.function.name;
@@ -158,20 +166,25 @@ async function auditCall(tc, info, conv, signal) {
   // de restauração antes: dá para desfazer, então não vale uma chamada ao modelo (nem estragar o cache)
   if (S.settings.auditReversible !== false && name === 'run_command' && safeCommand(args?.command, ws) && (!args?.cwd || insideWs(args.cwd, ws))) return done({ risk: 'baixo', approve: true, reason: L('Comando seguro (compilar, testar ou só ler) dentro da pasta de trabalho, sem nada que apague, baixe ou mude o sistema.'), rule: true });
   if (S.settings.auditReversible !== false && info.source === 'builtin' && FILE_MUT.has(name) && insideWs(args?.path, ws)) return done({ risk: 'baixo', approve: true, reason: L('Alteração de arquivo dentro da pasta de trabalho, com ponto de restauração guardado antes (dá para desfazer).'), rule: true });
+  // ferramenta de conector marcada como só leitura
+  if (info.source === 'mcp' && !info.mutating) return done({ risk: 'baixo', approve: true, reason: L('Ferramenta de conector que só lê.'), rule: true });
+  const argText = typeof args === 'string' ? args : JSON.stringify(args, null, 2);
+  if (!AUDIT_OK.has(conv)) AUDIT_OK.set(conv, new Map());
+  const okN = AUDIT_OK.get(conv).get(name) || 0;
+  if (S.settings.auditLearn !== false && okN >= 3 && !DANGER_CMD.test(argText)) return done({ risk: 'baixo', approve: true, reason: L('{0} já foi aprovada {1} vezes nesta conversa com risco baixo.', name, okN), rule: true });
 
   const lastUser = [...conv.messages].reverse().find((m) => m.role === 'user' && !m.hidden);
   const lastAsst = [...conv.messages].reverse().find((m) => m.role === 'assistant' && m.tool_calls?.some((t) => t.id === tc.id));
   const said = lastAsst ? splitThink(lastAsst.content || '').text.trim() : '';
   const clip = (t, n) => (t.length > n ? t.slice(0, n) + L('\n[... mais {0} caracteres]', t.length - n) : t);
-  const argText = typeof args === 'string' ? args : JSON.stringify(args, null, 2);
   const where = info.source === 'mcp' ? L('do conector "{0}"', info.server || name.split('__')[0]) : L('interna do studio');
   const user = [
     L('Pasta de trabalho: {0}', ws || '(nenhuma)'),
-    L('Pedido mais recente do usuário:\n{0}', clip(lastUser ? userContent(lastUser) : '(nenhum)', 2000)),
-    said ? L('O que o agente disse antes da ação:\n{0}', clip(said, 800)) : '',
+    L('Pedido mais recente do usuário:\n{0}', clip(lastUser ? userContent(lastUser) : '(nenhum)', 800)),
+    said ? L('O que o agente disse antes da ação:\n{0}', clip(said, 400)) : '',
     lastUser?.plan ? L('Atenção: o usuário pediu só um plano (modo plano). Aprove apenas ações que não alteram nada.') : '',
     L('Ação proposta: {0} (ferramenta {1}{2})', name, where, info.mutating ? L(', altera algo') : ''),
-    L('Argumentos:\n```json\n') + clip(argText, 6000) + '\n```',
+    L('Argumentos:\n```json\n') + clip(argText, 2500) + '\n```',
   ].filter(Boolean).join('\n\n');
   const msgs = [{ role: 'system', content: AUDIT_SYS + L('\n\n# Política\n') + (S.settings.auditPolicy?.trim() || AUDIT_POLICY) }, { role: 'user', content: user }];
   const schema = { type: 'object', properties: { motivo: { type: 'string' }, risco: { enum: ['baixo', 'medio', 'alto'] }, decisao: { enum: ['aprovar', 'usuario'] } }, required: ['motivo', 'risco', 'decisao'] };
@@ -200,6 +213,7 @@ async function auditCall(tc, info, conv, signal) {
   const approve = /^aprov/i.test(String(v.decisao || '')) && RISK_RANK[risk] <= max;
   const out = { risk, approve, reason: String(v.motivo || '').trim().slice(0, 400) || (approve ? L('Sem observações.') : L('Sem motivo informado.')) };
   if (approve) AUDITS.get(conv).set(key, out);
+  if (approve && risk === 'baixo') AUDIT_OK.get(conv).set(name, okN + 1);
   return done(out);
 }
 

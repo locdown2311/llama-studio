@@ -1398,5 +1398,10 @@ const I18N_EN = {
 "a personalidade mudou": "the persona changed",
 "as instruções do projeto mudaram": "the project instructions changed",
 "as suas instruções nas configurações mudaram": "your instructions in Settings changed",
-"as instruções do sistema mudaram": "the system instructions changed"
+"as instruções do sistema mudaram": "the system instructions changed",
+"Confiar numa ferramenta depois de 3 aprovações": "Trust a tool after 3 approvals",
+"Na mesma conversa, uma ferramenta que o auditor já aprovou 3 vezes com risco baixo passa direto, a não ser que os argumentos tenham algo perigoso (apagar, formatar, matar processo...).": "In the same chat, a tool the auditor has already approved 3 times as low risk goes through directly, unless the arguments have something dangerous (delete, format, kill a process...).",
+"Debuggers, bancos de dados e APIs também passam por ele. As que só leem passam direto.": "Debuggers, databases and APIs go through it too. The ones that only read go through directly.",
+"Ferramenta de conector que só lê.": "Connector tool that only reads.",
+"{0} já foi aprovada {1} vezes nesta conversa com risco baixo.": "{0} was already approved {1} times in this chat as low risk."
 };

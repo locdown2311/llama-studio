@@ -74,6 +74,9 @@ function kvKey() {
 }
 function kvFile(c) { return L('{0}-{1}.bin', c.id, kvKey()); }
 
+/** Slot reservado para o auditor e outros pedidos laterais (-1 se não houver). */
+function auditSlot() { return S.settings.auditor && S.nSlots >= 2 && S.settings.kvSave !== false ? S.nSlots - 1 : -1; }
+
 async function assignSlot(conv) {
   conv._slot = null;
   const sl = S.slots;
@@ -84,12 +87,19 @@ async function assignSlot(conv) {
   const busy = new Set([...S.runs.keys()].filter((id) => id !== conv.id).map((id) => S.convs.find((c) => c.id === id)?._slot).filter((x) => x != null));
   const mine = sl.owner.indexOf(conv.id);
   if (mine >= 0 && !busy.has(mine)) { conv._slot = mine; sl.used[mine] = Date.now(); return; }
-  let best = -1;
-  for (let k = 0; k < S.nSlots; k++) {
-    if (busy.has(k)) continue;
-    if (!sl.owner[k]) { best = k; break; }
-    if (best < 0 || (sl.used[k] || 0) < (sl.used[best] || 0)) best = k;
-  }
+  // com o auditor ligado, o último slot é dele: as conversas só usam se todos os outros estiverem ocupados
+  const res = auditSlot();
+  const pick = (skipRes) => {
+    let b = -1;
+    for (let k = 0; k < S.nSlots; k++) {
+      if (busy.has(k) || (skipRes && k === res)) continue;
+      if (!sl.owner[k]) return k;
+      if (b < 0 || (sl.used[k] || 0) < (sl.used[b] || 0)) b = k;
+    }
+    return b;
+  };
+  let best = pick(true);
+  if (best < 0 && res >= 0) best = pick(false);
   if (best < 0) return;
   const prev = sl.owner[best] && sl.owner[best] !== conv.id ? S.convs.find((c) => c.id === sl.owner[best]) : null;
   try {
