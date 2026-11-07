@@ -1442,5 +1442,6 @@ const I18N_EN = {
 "API externa respondeu {0}: {1}": "External API answered {0}: {1}",
 ", via API: {0}": ", via API: {0}",
 "; a API falhou e usou o modelo local": "; the API failed and the local model was used",
-"o pedido divergiu do que o servidor tinha guardado logo depois de «{0}»: antes vinha «{1}», agora «{2}»": "the request diverged from what the server had stored right after «{0}»: before it was «{1}», now «{2}»"
+"o pedido divergiu do que o servidor tinha guardado logo depois de «{0}»: antes vinha «{1}», agora «{2}»": "the request diverged from what the server had stored right after «{0}»: before it was «{1}», now «{2}»",
+"a API respondeu sem um veredito em JSON": "the API answered without a JSON verdict"
 };

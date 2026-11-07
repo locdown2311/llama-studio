@@ -194,7 +194,8 @@ async function auditCall(tc, info, conv, signal) {
   let via = null, apiErr = '';
   if (apiFor('auditor')) {
     // fora do llama-server: não ocupa slot nem mexe no cache de ninguém
-    const ex = { temperature: 0, max_tokens: 400 };
+    // folga para modelos que raciocinam antes (gpt-oss, qwen3 na Groq): o raciocínio também conta no limite
+    const ex = { temperature: 0, max_tokens: 1500 };
     try {
       try { await streamApi(msgs, [], m, signal, null, { ...ex, response_format: { type: 'json_schema', json_schema: { name: 'veredito', schema } } }); }
       catch (e) {
@@ -202,6 +203,7 @@ async function auditCall(tc, info, conv, signal) {
         m = { content: '', reasoning: '', tool_calls: [] };
         await streamApi(msgs, [], m, signal, null, ex);
       }
+      if (!/\{[\s\S]*\}/.test(splitThink(m.content || '').text)) throw new Error(L('a API respondeu sem um veredito em JSON'));
       via = m.via;
     } catch (e) {
       if (signal.aborted) throw e;
