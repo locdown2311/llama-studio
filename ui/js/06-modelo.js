@@ -3,6 +3,7 @@
 
 /* ============================================================ raciocínio por conversa e slot */
 const THINK_OPTS = [
+  ['eco', 'Econômico', 'Pensa no começo de cada pedido e quando algo falha; nos outros passos age direto. Gasta bem menos tokens.'],
   ['auto', 'Padrão do modelo', 'O modelo decide (como vem no template dele).'],
   ['on', 'Pensar', 'Raciocina antes de responder. Melhor para tarefas difíceis.'],
   ['off', 'Responder direto', 'Sem raciocínio: bem mais rápido para pedidos simples.'],
@@ -32,10 +33,18 @@ async function runPlan(conv) {
   await submit(conv, { content: text, parts: [{ t: 'text', v: text }], refs: [] });
 }
 
-function thinkOf(c) { return (c ? c.think || c.autoThink : S.draftThink) || 'auto'; }
+function thinkDefault() { return S.settings.thinkDefault || 'eco'; }
+function thinkOf(c) { return (c ? c.think || c.autoThink : S.draftThink) || thinkDefault(); }
+/** Econômico: raciocínio no primeiro passo do pedido, depois de erro ou de mensagem nova; nos outros, direto.
+   Só muda o fim do prompt (a abertura da resposta), então não estraga o cache. */
+function thinkNow(conv) {
+  const t = thinkOf(conv);
+  if (t !== 'eco') return t;
+  return !conv._step || conv._thinkNext ? 'on' : 'off';
+}
 function requestExtras(conv) {
   const x = {};
-  const t = thinkOf(conv);
+  const t = thinkNow(conv);
   if (t !== 'auto') x.chat_template_kwargs = { enable_thinking: t === 'on' };
   if (t === 'off') x.reasoning_budget = 0;
   if (conv._slot != null) x.id_slot = conv._slot;

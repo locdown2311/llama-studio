@@ -429,6 +429,9 @@ function apiMessages(conv, system) {
       const calls = (m.tool_calls || []).filter((t) => t.function?.name);
       if (!text.trim() && !calls.length) continue;
       const o = { role: 'assistant', content: text };
+      // raciocínio dos passos deste pedido volta para o modelo: ele continua o plano em vez de
+      // recomeçar a cada passo (os templates descartam o de pedidos anteriores)
+      if (m.__i > lastUserIdx && m.reasoning?.trim()) o.reasoning_content = m.reasoning;
       // argumentos cortados (resposta interrompida no meio da chamada) ou JSON inválido do próprio modelo:
       // o llama-server recusa o pedido inteiro (erro 500), então vão como {} com um aviso no resultado
       const broken = new Set();
@@ -436,7 +439,7 @@ function apiMessages(conv, system) {
       out.push(o);
       for (const t of calls) {
         const r = msgs.find((x) => x.role === 'tool' && x.tool_call_id === t.id);
-        let c = r && r.content ? r.content : 'Execução cancelada pelo usuário.';
+        let c = r && (r.apiContent || r.content) ? (r.apiContent || r.content) : 'Execução cancelada pelo usuário.';
         if (broken.has(t.id)) c = 'A chamada foi interrompida antes de os argumentos terminarem de ser gerados (JSON incompleto) e não foi executada.' + (r?.content ? '\n' + r.content : '');
         if (r?.short && c.length > 1500) c = c.slice(0, 1500) + '\n[... resultado antigo encurtado pela compactação]';
         out.push({ role: 'tool', tool_call_id: t.id, content: c });

@@ -40,11 +40,50 @@ async function undoTools(conv, tmsgs) {
   return r;
 }
 
+/** Até onde a conversa já leu o arquivo (trechos "[linhas A-B de N]" dos resultados), a partir da linha 1. */
+function readCoverage(conv, path, self) {
+  const cut = conv.compactCut || 0; const want = normP(path);
+  const calls = new Map();
+  for (const m of conv.messages) if (m.role === 'assistant') for (const tc of m.tool_calls || []) calls.set(tc.id, tc);
+  const spans = []; let total = 0;
+  conv.messages.forEach((m, i) => {
+    if (i < cut || m === self || m.role !== 'tool' || m.status !== 'ok') return;
+    const tc = calls.get(m.tool_call_id); if (tc?.function?.name !== 'read_file') return;
+    const a = parseArgs(tc.function.arguments) || {}; if (normP(a.path || '') !== want) return;
+    const hm = /\[linhas (\d+)-(\d+) de (\d+)/.exec(String(m.content).slice(0, 400));
+    if (hm) { spans.push([+hm[1], +hm[2]]); total = +hm[3]; }
+    const om = /^\[(\d+) linhas, /.exec(String(m.content)); if (om) total = total || +om[1];
+  });
+  let next = 1;
+  for (const [a, b] of spans.sort((x, y) => x[0] - y[0])) if (a <= next && b >= next) next = b + 1;
+  return { next, total };
+}
+
+/** Esta conversa já recebeu o sumário desse arquivo (read_file sem trecho de um arquivo grande)? */
+function outlineGiven(conv, path, self) {
+  const cut = conv.compactCut || 0; const want = normP(path);
+  const calls = new Map();
+  for (const m of conv.messages) if (m.role === 'assistant') for (const tc of m.tool_calls || []) calls.set(tc.id, tc);
+  return conv.messages.some((m, i) => {
+    if (i < cut || m === self || m.role !== 'tool' || m.status !== 'ok' || !/^\[\d+ linhas, .*Sumário/.test(String(m.content))) return false;
+    const a = parseArgs(calls.get(m.tool_call_id)?.function?.arguments) || {};
+    return a.offset == null && a.limit == null && normP(a.path || '') === want;
+  });
+}
+
 async function execTool(name, args, info, tctx, tmsg) {
   try {
     if (['write_file', 'edit_file', 'create_directory'].includes(name) && args?.path && tctx.conv) {
       const why = busyBlock(tctx.conv, tmsg?.tool_call_id, joinPath(tctx.ws, args.path));
       if (why) return { content: why, isError: true };
+    }
+    // sumário já entregue e o modelo pede o arquivo inteiro de novo: em vez de repetir o sumário,
+    // entrega o próximo trecho que ele ainda não leu (ou avisa que já leu tudo)
+    if (name === 'read_file' && args?.path && args.offset == null && args.limit == null && tctx.conv && outlineGiven(tctx.conv, args.path, tmsg)) {
+      const { next, total } = readCoverage(tctx.conv, args.path, tmsg);
+      if (total && next > total) return { content: `[Você já leu este arquivo inteiro nesta conversa (linhas 1-${total}); o conteúdo está mais acima. Use o que já tem, ou leia de novo só um trecho com offset/limit se ele mudou.]`, isError: false };
+      const r = await api('/api/tools/call', { name, arguments: { ...args, offset: next, limit: 600 }, allow: tctx.refs, ws: tctx.ws });
+      return { ...r, content: `[O sumário deste arquivo já está mais acima. Seguem as linhas a partir da ${next}, que você ainda não leu; continue com offset para o resto.]\n` + r.content };
     }
     if (name === 'execute_code') return await runCode(args?.code ?? '', tctx, tmsg);
     if (name === 'recall_history') return recallHistory(args || {}, tctx.conv);

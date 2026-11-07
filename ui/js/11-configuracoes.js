@@ -37,6 +37,9 @@ function renderSettings() {
         field('Temperatura', input('input.input', { value: st.temperature, placeholder: 'padrão do servidor', inputmode: 'decimal' }, (x) => put({ temperature: x.value.trim() }))),
         field('Top P', input('input.input', { value: st.topP, placeholder: 'padrão do servidor', inputmode: 'decimal' }, (x) => put({ topP: x.value.trim() }))),
         field('Máximo de tokens', input('input.input', { value: st.maxTokens, placeholder: 'sem limite', inputmode: 'numeric' }, (x) => put({ maxTokens: x.value.trim() }))))),
+    group('Economia de tokens',
+      field('Raciocínio nas conversas novas', (() => { const x = h('select.select', null, THINK_OPTS.map(([v, l]) => h('option', { value: v }, l))); x.value = thinkDefault(); x.addEventListener('change', () => { put({ thinkDefault: x.value }); updatePickers(); }); return x; })(), 'Econômico: o modelo pensa no começo de cada pedido e quando algo falha; nos passos seguintes (ler, editar, rodar) age direto. Cada conversa pode mudar pelo botão de raciocínio.'),
+      sw('Respostas enxutas', 'Pede ao modelo para ir direto ao ponto, sem repetir o pedido nem resumir no fim o que já está na conversa.', st.concise !== false, (v) => put({ concise: v }))),
     field('Enviar imagens ao modelo', seg([['auto', `Automático (${S.vision ? 'tem visão' : 'sem visão'})`], ['on', 'Sempre'], ['off', 'Nunca']], st.vision, (v) => put({ vision: v })), 'Capturas de tela e imagens coladas na mensagem.'));
 
   section('tools', 'Ferramentas', 'hammer', 'O que o modelo pode usar. Também dá para ligar e desligar pela barra do chat.',

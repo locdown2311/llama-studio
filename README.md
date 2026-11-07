@@ -114,6 +114,9 @@ Modelo local tem contexto curto e processamento caro, então o harness foi pensa
 
 | | |
 |---|---|
+| **Raciocínio econômico** | Padrão das conversas novas: o modelo pensa no primeiro passo de cada pedido, depois de um erro ou de uma mensagem nova; nos passos seguintes (ler, editar, rodar) age direto. O raciocínio dos passos do pedido atual volta para o modelo, que continua o plano em vez de recomeçar. Muda em Configurações > Modelo ou por conversa. |
+| **Respostas enxutas** | Instrução curta para ir direto ao ponto, sem repetir o pedido nem resumir no fim o que já está visível. Liga e desliga em Configurações > Modelo. |
+| **Sem leituras repetidas** | Resultado idêntico a um que ainda está no contexto vai como referência curta. Pedir de novo o arquivo inteiro depois do sumário entrega o próximo trecho ainda não lido, e, quando tudo já foi lido, só um aviso. |
 | **Cache por conversa** | Cada conversa tem um slot no llama-server. Quando outra conversa precisa do slot, o cache vai para o disco e volta quando ela é retomada, então uma conversa longa não é reprocessada do zero. |
 | **Pensar ou responder direto** | Um botão na barra do chat liga ou desliga o raciocínio por conversa. Pedidos simples saem na hora. |
 | **Prompt estável** | O prompt de sistema é idêntico entre mensagens (sem hora, sem listas que mudam). Assim o llama-server reaproveita o cache e não relê a conversa inteira. |

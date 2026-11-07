@@ -246,7 +246,7 @@ function updatePickers() {
   iconBtn($('#pick-persona'), pers ? h('span.p-ava', { style: { background: pers.color } }, (pers.name[0] || '?').toUpperCase()) : ic('user'),
     pers ? `Personalidade: ${pers.name}` : 'Personalidade: nenhuma', !!pers, 0, pers?.color);
   const tk = thinkOf(c);
-  iconBtn($('#pick-think'), ic(tk === 'off' ? ('zap' in ICONS ? 'zap' : 'send') : 'brain'), `Raciocínio: ${THINK_OPTS.find((o) => o[0] === tk)[1]}`, tk !== 'auto', 0, tk === 'off' ? '#d99a1e' : 'var(--accent)');
+  iconBtn($('#pick-think'), ic(tk === 'off' ? ('zap' in ICONS ? 'zap' : 'send') : 'brain'), `Raciocínio: ${THINK_OPTS.find((o) => o[0] === tk)[1]}`, tk !== thinkDefault(), 0, tk === 'off' ? '#d99a1e' : 'var(--accent)');
   const al = autoLevelOf(c);
   iconBtn($('#pick-auto'), ic(al === 'desligado' ? 'ban' : 'signpost'), `Recursos automáticos: ${AUTO_LEVELS.find((o) => o[0] === al)[1]}`, al !== 'equilibrado', 0, al === 'desligado' ? 'var(--muted)' : al === 'liberal' ? '#d99a1e' : 'var(--accent)');
   const pl = planOf(c);
@@ -351,6 +351,7 @@ async function escalate(conv, why, st, signal) {
     conv.messages.push({ role: 'notice', icon: 'flask', content: `Ia escalar para ${big.name} (${why}), mas outra conversa está usando o servidor.` });
     return;
   }
+  conv._thinkNext = true;
   conv.messages.push({ role: 'notice', content: `Escalado para ${big.name}: ${small?.name || 'o modelo atual'} ${why}.` });
   conv.messages.push({ role: 'user', hidden: true, note: true, content: `(Nota do studio: o modelo anterior${small ? ` (${small.name})` : ''} ${why} nesta tarefa. Você é um modelo maior assumindo daqui. Releia os erros acima, descubra a causa e, se preciso, siga por outro caminho.)` });
   saveConvs(); scheduleRender();

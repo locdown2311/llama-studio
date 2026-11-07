@@ -27,6 +27,24 @@ const RISK_RANK = { baixo: 0, medio: 1, alto: 2 };
 const RISK_LABEL = { baixo: 'risco baixo', medio: 'risco médio', alto: 'risco alto' };
 
 /** Slot livre para tarefas laterais, sem estragar o cache da conversa. */
+/** Resultado igual a um anterior que ainda está no contexto vai como referência curta (o modelo já o tem). */
+function dedupeResults(conv, results) {
+  const cut = conv.compactCut || 0;
+  for (const r of results) {
+    const c = String(r.content || '');
+    if (r.status !== 'ok' || c.length < 300) continue;
+    const i = conv.messages.indexOf(r);
+    for (let j = i - 1; j >= cut; j--) {
+      const o = conv.messages[j];
+      if (o.role !== 'tool' || o === r || o.short || o.apiContent || o.status !== 'ok') continue;
+      if (o.content === c) {
+        r.apiContent = `[Mesmo resultado de antes (${o.name || 'ferramenta'}, ${c.length.toLocaleString('pt-BR')} caracteres): nada mudou desde a chamada anterior, que está mais acima na conversa.]`;
+        break;
+      }
+    }
+  }
+}
+
 function sideSlot(conv) {
   if (!S.nSlots || S.nSlots < 2 || S.settings.kvSave === false) return null;
   const sl = S.slots;
@@ -139,6 +157,9 @@ async function auditCall(tc, info, conv, signal) {
   return done(out);
 }
 
+// respostas enxutas: o texto que o modelo escreve também é token
+const CONCISE_NOTE = 'Seja direto e econômico: responda só o que foi pedido, sem repetir a pergunta, sem introdução e sem resumir no fim o que já está visível na conversa. Use listas e títulos só quando ajudarem de verdade.';
+
 async function runAgent(conv) {
   const ac = new AbortController();
   S.runs.set(conv.id, ac);
@@ -169,6 +190,7 @@ async function runAgent(conv) {
     const persona = personaOf(conv); const proj = projectOf(conv);
     const system = [
       S.settings.systemPrompt.trim(),
+      S.settings.concise !== false ? CONCISE_NOTE : '',
       persona?.prompt?.trim() ? `# Personalidade: ${persona.name}\n${persona.prompt.trim()}` : '',
       proj?.instructions?.trim() ? `# Instruções do projeto "${proj.name}"\n${proj.instructions.trim()}` : '',
       ctx.text,
@@ -182,6 +204,7 @@ async function runAgent(conv) {
 
     for (let step = 0; step < maxSteps; step++) {
       const msg = { role: 'assistant', content: '', reasoning: '', tool_calls: [], t0: step === 0 ? t0 : Date.now() };
+      conv._step = step;
       conv.messages.push(msg);
       scheduleRender();
       if (step === 0) { await ensureModel(conv, ac.signal); await waitModel(conv, ac.signal); await assignSlot(conv); await preloadImgs(conv); }
@@ -270,6 +293,10 @@ async function runAgent(conv) {
         saveConvs(); scheduleRender();
       }
       if (parallel.length || reads.length) await Promise.all([...parallel, ...reads]);
+      // econômico: depois de um erro o modelo volta a pensar no passo seguinte
+      const stepResults = msg.tool_calls.map((tc) => conv.messages.find((m) => m.role === 'tool' && m.tool_call_id === tc.id)).filter(Boolean);
+      conv._thinkNext = stepResults.some((m) => m.status === 'error' || m.status === 'denied');
+      dedupeResults(conv, stepResults);
       if (images.length && visionOn()) {
         for (const im of images) conv.messages.push({ role: 'user', hidden: true, content: `[Imagem devolvida pela ferramenta ${im.name}]`, _images: im.images });
       }
@@ -277,6 +304,7 @@ async function runAgent(conv) {
       if (why) await escalate(conv, why, esc, ac.signal);
       // mensagens marcadas na fila (⚡) entram agora, entre um passo e o próximo
       const urgent = takeUrgent(conv);
+      if (urgent.length) conv._thinkNext = true;
       for (const it of urgent) {
         const um = { role: 'user', content: it.content, parts: it.parts, refs: it.refs, ts: Date.now(), steer: true, ...(conv.plan ? { plan: true } : {}) };
         conv.messages.push(um);
