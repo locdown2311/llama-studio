@@ -75,6 +75,9 @@ const DEFS: &[Def] = &[
       r#"{"type":"object","properties":{"keys":{"type":"string"}},"required":["keys"]}"#),
     d("computer_scroll", "computer", true, false, "Rola a roda do mouse. amount negativo desce, positivo sobe. x e y opcionais (da última captura).",
       r#"{"type":"object","properties":{"amount":{"type":"integer"},"x":{"type":"integer"},"y":{"type":"integer"}},"required":["amount"]}"#),
+    // ---------------- interface
+    d("customize_ui", "interface", true, false, "Personalização da interface: temas (cores, fontes), layouts e widgets customizados. Cria e aplica configurações de visualização.",
+      r#"{"type":"object","properties":{"theme":{"type":"string","description":"Nome do tema (light, dark, custom)"}, "colors":{"type":"object","description":"Cores personalizadas: background, foreground, accent, primary, secondary, warning, error, success"}, "fonts":{"type":"object","description":"Fontes: body, monospace, header"}, "layout":{"type":"string","description":"Layout: compact, spacious, grid, list"}, "widgets":{"type":"array","items":{"type":"string","description":"Widgets: statusbar, toolbar, sidebar, panels, tabs"}},"required":[]}"#),
     // ---------------- busca
     d("recall_history", "history", false, true, "Procura nas conversas anteriores (ou só na atual) trechos sobre um assunto. Use quando o usuário se referir a algo já conversado.",
       r#"{"type":"object","properties":{"query":{"type":"string"},"scope":{"type":"string","enum":["todas","atual"]},"limit":{"type":"integer"}},"required":["query"]}"#),
@@ -1140,4 +1143,58 @@ mod mcp_le {
             assert!(!mcp_reads(n), "{n} devia pedir confirmação");
         }
     }
+}
+
+/// Personalização da interface: temas, cores, fontes, layouts
+pub fn customize_ui(app: &App, theme: Option<String>, colors: Option<Value>, fonts: Option<Value>, layout: Option<String>, widgets: Option<Value>) -> Value {
+    let mut result = json!({
+        "status": "success",
+        "message": "Configurações da interface aplicadas",
+        "settings": {}
+    });
+
+    // Carrega configurações atuais
+    let mut ui_settings = app.config.read().unwrap().ui_settings.clone();
+
+    // Salva configurações de tema
+    if let Some(t) = theme {
+        ui_settings["theme"] = json!(t);
+        result["settings"]["theme"] = json!(t);
+    }
+
+    // Salva cores personalizadas
+    if let Some(c) = colors {
+        if let Some(colors_obj) = c.as_object() {
+            ui_settings["colors"] = json!(colors_obj);
+        }
+        result["settings"]["colors"] = c;
+    }
+
+    // Salva fontes personalizadas
+    if let Some(f) = fonts {
+        if let Some(fonts_obj) = f.as_object() {
+            ui_settings["fonts"] = json!(fonts_obj);
+        }
+        result["settings"]["fonts"] = f;
+    }
+
+    // Salva layout
+    if let Some(l) = layout {
+        ui_settings["layout"] = json!(l);
+        result["settings"]["layout"] = json!(l);
+    }
+
+    // Salva widgets personalizados
+    if let Some(w) = widgets {
+        if let Some(widgets_arr) = w.as_array() {
+            ui_settings["widgets"] = json!(widgets_arr);
+        }
+        result["settings"]["widgets"] = w;
+    }
+
+    // Salva no Config
+    app.config.write().unwrap().ui_settings = ui_settings;
+    app.save_config();
+
+    result
 }

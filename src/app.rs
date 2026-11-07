@@ -1,6 +1,7 @@
 //! Estado compartilhado, configuração e utilitários de caminho.
 
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, OnceLock, RwLock};
 
@@ -39,6 +40,8 @@ pub struct Config {
     pub use_rtk: bool,
     /// token do Hugging Face para modelos restritos
     pub hf_token: String,
+    /// Configurações de personalização da interface
+    pub ui_settings: Value,
 }
 
 impl Default for Config {
@@ -58,6 +61,26 @@ impl Default for Config {
             compact_output: true,
             use_rtk: true,
             hf_token: String::new(),
+            ui_settings: json!({
+                "theme": "dark",
+                "colors": {
+                    "background": "#1e1e1e",
+                    "foreground": "#ffffff",
+                    "accent": "#0078d4",
+                    "primary": "#0078d4",
+                    "secondary": "#6c757d",
+                    "warning": "#ffc107",
+                    "error": "#dc3545",
+                    "success": "#28a745"
+                },
+                "fonts": {
+                    "body": "Segoe UI, sans-serif",
+                    "monospace": "Consolas, monospace",
+                    "header": "Segoe UI, sans-serif"
+                },
+                "layout": "compact",
+                "widgets": ["statusbar", "toolbar", "sidebar", "panels", "tabs"]
+            }),
         }
     }
 }
