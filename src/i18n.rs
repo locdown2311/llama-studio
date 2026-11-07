@@ -16,14 +16,6 @@ pub fn set(lang: &str) {
     EN.store(lang.to_ascii_lowercase().starts_with("en"), Ordering::Relaxed);
 }
 
-pub fn code() -> &'static str {
-    if en() {
-        "en"
-    } else {
-        "pt"
-    }
-}
-
 /// Idioma escolhido no instalador (idioma.ini ao lado do executável), para a primeira vez.
 pub fn from_installer(app_dir: &std::path::Path) -> Option<String> {
     let t = std::fs::read_to_string(app_dir.join("idioma.ini")).ok()?;
