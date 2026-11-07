@@ -779,7 +779,12 @@ async fn context(State(app): S, b: Bytes) -> Res {
         return ok(json!({ "text": tools::skill_blocks(&app, &strs(&v, "skills"), v.get("lazy").and_then(Value::as_bool).unwrap_or(false)) }));
     }
     let mut text = tools::build_context(&app, &ws_of(&app, st(&v, "ws")), &strs(&v, "skills"), &groups_of(&v), &strs(&v, "refs"), st(&v, "now"), v.get("lazy").and_then(Value::as_bool).unwrap_or(false), v.get("map").and_then(Value::as_bool).unwrap_or(false));
-    let pt = crate::ponytail::section(&app, st(&v, "ponytail"));
+    // pacotes de instruções: {"packs": {"ponytail": "full", "caveman": "on"}} (ou o antigo "ponytail": "full")
+    let mut levels = v.get("packs").cloned().unwrap_or_else(|| json!({}));
+    if levels.get("ponytail").is_none() && !st(&v, "ponytail").is_empty() {
+        levels["ponytail"] = json!(st(&v, "ponytail"));
+    }
+    let pt = crate::packs::sections(&app, &levels);
     if !pt.is_empty() {
         text = format!("{text}\n\n{pt}");
     }

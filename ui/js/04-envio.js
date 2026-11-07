@@ -420,7 +420,7 @@ function apiMessages(conv, system) {
       continue;
     }
     if (m.role === 'user') {
-      const text = userContent(m) + (m.use?.length && !m.auto?.undone ? L('\n\n(Use {0} para isso.)', m.use.join(' e ')) : '') + (m.plan ? PLAN_NOTE : '') + (m.skillNote ? '\n\n' + m.skillNote : '');
+      const text = userContent(m) + (m.use?.length && !m.auto?.undone ? L('\n\n(Use {0} para isso.)', m.use.join(' e ')) : '') + (m.plan ? PLAN_NOTE : '') + (m.skillNote ? '\n\n' + m.skillNote : '') + (m.catalogNote ? '\n\n' + m.catalogNote : '');
       const imgs = m.__i === lastUserIdx && visionOn() ? (m.refs || []).filter(isImgRef).map((r) => S.imgData.get(r.path)).filter(Boolean) : [];
       out.push({ role: 'user', content: imgs.length ? [{ type: 'text', text }, ...imgs.map((url) => ({ type: 'image_url', image_url: { url } }))] : text });
     }
@@ -457,16 +457,29 @@ function strHash(s) { let x = 5381; for (let i = 0; i < s.length; i++) x = ((x <
 function reqPrint(conv, system, tools, msgs) {
   return { sys: system || '', tools: (tools || []).map((t) => t.function?.name || ''), toolsHash: strHash(JSON.stringify(tools || [])), msgs: msgs.map((m) => strHash(JSON.stringify(m))), roles: msgs.map((m) => m.role), imgs: msgs.map((m) => Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url')), cut: conv.compactCut || 0, compactions: conv.compactions || 0, slot: conv._slot, started: S.llama?.startedAt || 0, side: S.sideShared || 0 };
 }
+/** Qual parte do prompt de sistema mudou, em palavras. */
+const SYS_PARTS = [
+  [['Catálogo de ferramentas dos conectores', 'Catalog of the active connectors'], 'a lista de conectores mudou'],
+  [['O usuário ativou as skills', 'The user turned on the skills'], 'as habilidades ligadas mudaram'],
+  [['# Modo Ponytail', '# Ponytail mode', '# Modo Caveman', '# Caveman mode'], 'o nível do Ponytail ou do Caveman mudou'],
+  [['Mapa da pasta de trabalho', 'Workspace map'], 'o mapa da pasta mudou'],
+  [['Pasta de trabalho:', 'Workspace:'], 'a pasta de trabalho ou as ferramentas ligadas mudaram'],
+  [['Data de hoje:', "Today's date:"], 'o dia mudou'],
+  [['# Personalidade:', '# Personality:'], 'a personalidade mudou'],
+  [['# Instruções do projeto', '# Instructions for the project'], 'as instruções do projeto mudaram'],
+];
+function sysWhy(a, b) {
+  let p = 0; while (p < a.length && p < b.length && a[p] === b[p]) p++;
+  let best = null, at = -1;
+  for (const [marks, why] of SYS_PARTS) for (const t of [b, a]) for (const m of marks) { const i = t.lastIndexOf(m, p); if (i > at) { at = i; best = why; } }
+  return best ? L(best) : (p < 80 ? L('as suas instruções nas configurações mudaram') : L('as instruções do sistema mudaram'));
+}
+
 function cacheWhy(prev, now) {
   if (!prev) return { why: L('é o primeiro pedido desta conversa desde que o studio abriu'), start: 0 };
   if (prev.started !== now.started) return { why: L('o llama-server reiniciou ou trocou de modelo'), start: 0 };
   if (prev.compactions !== now.compactions || prev.cut !== now.cut) return { why: L('a conversa foi compactada'), start: 1 };
-  if (prev.sys !== now.sys) {
-    const a = prev.sys.split('\n'); const b = now.sys.split('\n'); let i = 0;
-    while (i < a.length && i < b.length && a[i] === b[i]) i++;
-    const line = (b[i] || a[i] || '').trim();
-    return { why: L('as instruções mudaram') + (line ? L(' (a partir de "{0}{1}")', line.slice(0, 50), line.length > 50 ? '…' : '') : ''), start: 0 };
-  }
+  if (prev.sys !== now.sys) return { why: sysWhy(prev.sys, now.sys), start: 0 };
   if (prev.toolsHash !== now.toolsHash) {
     const add = now.tools.filter((t) => !prev.tools.includes(t)); const del = prev.tools.filter((t) => !now.tools.includes(t));
     const list = (xs, sign) => xs.length ? `${sign}${xs.length}: ${xs.slice(0, 2).join(', ')}${xs.length > 2 ? '…' : ''}` : '';

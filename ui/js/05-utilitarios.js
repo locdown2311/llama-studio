@@ -2,9 +2,20 @@
 'use strict';
 
 /* ============================================================ utilitários (uv, rg, fd, rtk...) */
-const BIN_ICONS = { rtk: 'archive', ripgrep: 'search', fd: 'file', uv: 'terminal', bun: 'braces', ponytail: 'sparkles' };
-// Ponytail: nível das regras no prompt de sistema (off, lite, full, ultra)
-const PONYTAIL_LEVELS = [['off', L('Desligado'), L('Instalado, mas fora do prompt.')], ['lite', L('Leve'), L('Faz o que foi pedido e só cita, numa linha, a opção mais simples.')], ['full', L('Completo'), L('A menor mudança completa, com verificação quando a lógica pede e o que ficou de fora no fim. Padrão.')], ['ultra', L('Ultra'), L('Também questiona o pedido e contesta o que não for necessário antes de construir.')]];
+const BIN_ICONS = { rtk: 'archive', ripgrep: 'search', fd: 'file', uv: 'terminal', bun: 'braces', ponytail: 'sparkles', caveman: 'zap' };
+// pacotes de instruções: nível das regras no prompt de sistema (o primeiro é desligado)
+const PACK_LEVELS = {
+  ponytail: [['off', L('Desligado'), L('Instalado, mas fora do prompt.')], ['lite', L('Leve'), L('Faz o que foi pedido e só cita, numa linha, a opção mais simples.')], ['full', L('Completo'), L('A menor mudança completa, com verificação quando a lógica pede e o que ficou de fora no fim. Padrão.')], ['ultra', L('Ultra'), L('Também questiona o pedido e contesta o que não for necessário antes de construir.')]],
+  caveman: [['off', L('Desligado'), L('Instalado, mas fora do prompt.')], ['on', L('Normal'), L('Resposta primeiro, sem cerimônia nem resumo no fim; frases curtas e completas. Padrão.')], ['ultra', L('Ultra'), L('Fragmentos, uma palavra quando basta, cada fato uma vez. Economiza mais, lê-se pior.')]],
+};
+const PACK_DEFAULT = { ponytail: 'full', caveman: 'on' };
+/** Níveis escolhidos ({ponytail: 'full', caveman: 'on'}); lê o formato antigo (settings.ponytail). */
+function packLevels() {
+  const p = { ...(S.settings.packs || {}) };
+  if (!p.ponytail && S.settings.ponytail) p.ponytail = S.settings.ponytail;
+  return p;
+}
+function setPackLevel(id, v) { S.settings.packs = { ...packLevels(), [id]: v }; delete S.settings.ponytail; store.set('settings', S.settings); }
 S.bins = null; S.binsBusy = new Set();
 
 function fmtBytes(n) { return n >= 1048576 ? (n / 1048576).toFixed(1).replace('.', ',') + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'; }
@@ -410,7 +421,7 @@ function drawBins() {
         h('div.skill-name', null, b.name, h('span.bin-cmd', null, b.cmd)), b.tag === 'contexto' ? h('span.tag.ctx', null, L('economiza contexto')) : null),
       h('div.bin-tags', null, tags.length ? tags : h('span.tag.off', null, L('não instalado'))),
       h('div.skill-desc', null, b.desc),
-      b.kind === 'pack' && b.source === 'studio' ? ponytailLevel() : null,
+      b.kind === 'pack' && b.source === 'studio' && PACK_LEVELS[b.id] ? packLevel(b) : null,
       h('div.skill-foot', null,
         h('a.bin-link', { href: 'https://github.com/' + b.repo, target: '_blank', rel: 'noopener', title: b.repo }, ic('external'), L('GitHub')),
         b.site ? h('a.bin-link', { href: b.site, target: '_blank', rel: 'noopener' }, ic('globe'), 'site') : null,
@@ -419,14 +430,15 @@ function drawBins() {
   grid.append(h('div.bin-dir', null, ic('folder'), L('Pasta: '), h('code', null, S.bins.dir)));
 }
 
-function ponytailLevel() {
-  const cur0 = S.settings.ponytail || 'off';
+function packLevel(b) {
+  const levels = PACK_LEVELS[b.id];
+  const cur0 = packLevels()[b.id] || 'off';
   const desc = h('div.pt-desc');
-  const show = (v) => { desc.textContent = (PONYTAIL_LEVELS.find((x) => x[0] === v) || PONYTAIL_LEVELS[0])[2]; };
-  const el = h('div.seg.sm', null, PONYTAIL_LEVELS.map(([v, l]) => h('button', { type: 'button', class: cur0 === v ? 'on' : '', onclick: () => {
-    S.settings.ponytail = v; store.set('settings', S.settings); show(v);
-    $$('button', el).forEach((x, i) => x.classList.toggle('on', PONYTAIL_LEVELS[i][0] === v));
-    toast(v === 'off' ? L('Ponytail fora do prompt') : L('Ponytail no nível {0}: vale a partir da próxima mensagem', PONYTAIL_LEVELS.find((x) => x[0] === v)[1]));
+  const show = (v) => { desc.textContent = (levels.find((x) => x[0] === v) || levels[0])[2]; };
+  const el = h('div.seg.sm', null, levels.map(([v, l]) => h('button', { type: 'button', class: cur0 === v ? 'on' : '', onclick: () => {
+    setPackLevel(b.id, v); show(v);
+    $$('button', el).forEach((x, i) => x.classList.toggle('on', levels[i][0] === v));
+    toast(v === 'off' ? L('{0} fora do prompt', b.name) : L('{0} no nível {1}: vale a partir da próxima conversa', b.name, levels.find((x) => x[0] === v)[1]));
   } }, l)));
   show(cur0);
   return h('div.pt-level', null, h('span.pt-label', null, L('Nível no prompt')), el, desc);
@@ -437,7 +449,7 @@ async function binInstall(b) {
   try {
     const r = await api('/api/bins/install', { id: b.id });
     toast(L('{0} {1}instalado', b.name, r.version ? (b.kind === 'pack' ? r.version : 'v' + r.version) + ' ' : ''));
-    if (b.kind === 'pack') { if (!S.settings.ponytail) { S.settings.ponytail = 'full'; store.set('settings', S.settings); } loadSkills().catch(() => {}); }
+    if (b.kind === 'pack') { if (!packLevels()[b.id]) setPackLevel(b.id, PACK_DEFAULT[b.id] || 'off'); loadSkills().catch(() => {}); }
   }
   catch (e) { toast(`${b.name}: ${e.message}`, 'err'); }
   S.binsBusy.delete(b.id); await loadBins(true);
@@ -445,6 +457,6 @@ async function binInstall(b) {
 
 async function binRemove(b) {
   if (!(await confirmBox(L('Remover {0} da pasta do studio?', b.name), L('Remover'), true))) return;
-  try { await api('/api/bins/remove', { id: b.id }); toast(L('{0} removido', b.name)); if (b.kind === 'pack') loadSkills().catch(() => {}); } catch (e) { toast(e.message, 'err'); }
+  try { await api('/api/bins/remove', { id: b.id }); toast(L('{0} removido', b.name)); if (b.kind === 'pack') { const p = packLevels(); delete p[b.id]; S.settings.packs = p; delete S.settings.ponytail; store.set('settings', S.settings); loadSkills().catch(() => {}); } } catch (e) { toast(e.message, 'err'); }
   await loadBins(true);
 }

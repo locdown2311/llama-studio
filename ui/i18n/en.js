@@ -1382,5 +1382,21 @@ const I18N_EN = {
 "Commit do repositório": "Repository commit",
 "Ponytail fora do prompt": "Ponytail left out of the prompt",
 "Ponytail no nível {0}: vale a partir da próxima mensagem": "Ponytail at level {0}: applies from the next message on",
-"Nível no prompt": "Level in the prompt"
+"Nível no prompt": "Level in the prompt",
+"Normal": "Normal",
+"Resposta primeiro, sem cerimônia nem resumo no fim; frases curtas e completas. Padrão.": "Answer first, no ceremony or recap at the end; short, complete sentences. Default.",
+"Fragmentos, uma palavra quando basta, cada fato uma vez. Economiza mais, lê-se pior.": "Fragments, one word when one is enough, each fact once. Saves more, reads worse.",
+"{0} fora do prompt": "{0} left out of the prompt",
+"{0} no nível {1}: vale a partir da próxima conversa": "{0} at level {1}: applies from the next chat on",
+"Conectores ligados agora (catálogo; carregue as ferramentas com search_tools names=[...] antes de usar):\n\n{0}": "Connectors turned on now (catalog; load the tools with search_tools names=[...] before using them):\n\n{0}",
+"a lista de conectores mudou": "the connector list changed",
+"as habilidades ligadas mudaram": "the active skills changed",
+"o nível do Ponytail ou do Caveman mudou": "the Ponytail or Caveman level changed",
+"o mapa da pasta mudou": "the folder map changed",
+"a pasta de trabalho ou as ferramentas ligadas mudaram": "the workspace or the active tools changed",
+"o dia mudou": "the day changed",
+"a personalidade mudou": "the persona changed",
+"as instruções do projeto mudaram": "the project instructions changed",
+"as suas instruções nas configurações mudaram": "your instructions in Settings changed",
+"as instruções do sistema mudaram": "the system instructions changed"
 };

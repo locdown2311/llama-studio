@@ -297,19 +297,34 @@ async function runAgent(conv) {
       fetchTools(),
       // o prompt de sistema precisa ficar idêntico entre mensagens para o llama-server reaproveitar o cache:
       // só a data (sem hora) e sem a lista de arquivos referenciados (eles já vão na própria mensagem)
-      (S.settings.projMap === true ? ensureMap(conv) : Promise.resolve()).then(() => api('/api/context', { ws: wsOf(conv), skills: base, groups, refs: [], lazy, map: S.settings.projMap === true, ponytail: S.settings.ponytail || 'off', now: new Date().toLocaleDateString(LOCALE, { dateStyle: 'full' }) })),
+      (S.settings.projMap === true ? ensureMap(conv) : Promise.resolve()).then(() => api('/api/context', { ws: wsOf(conv), skills: base, groups, refs: [], lazy, map: S.settings.projMap === true, packs: packLevels(), now: new Date().toLocaleDateString(LOCALE, { dateStyle: 'full' }) })),
     ]);
+    // o catálogo dos conectores também fica congelado por conversa: conector ligado depois entra como nota
+    // na mensagem; desligado continua listado (a chamada só falha) em vez de fazer o servidor reler tudo
+    let catalogSys = catalog || '';
+    if (started && typeof conv.catalogBase === 'string') {
+      const secs = (t) => new Map((t || '').split('\n\n').filter((x) => x.startsWith('## ')).map((x) => [x.slice(3).split(/[\s(]/)[0], x]));
+      const old = secs(conv.catalogBase); const now = secs(catalog);
+      const seen = new Set(conv.messages.flatMap((m) => m.catalogIds || []));
+      const fresh = [...now.keys()].filter((k) => !old.has(k) && !seen.has(k));
+      catalogSys = conv.catalogBase;
+      if (fresh.length && askMsg) {
+        askMsg.catalogNote = L('Conectores ligados agora (catálogo; carregue as ferramentas com search_tools names=[...] antes de usar):\n\n{0}', fresh.map((k) => now.get(k)).join('\n\n'));
+        askMsg.catalogIds = fresh;
+      }
+    } else conv.catalogBase = catalogSys;
     const tctx = { signal: ac.signal, conv, refs, groups, ctxText: ctx.text, ws: wsOf(conv) };
     const persona = personaOf(conv); const proj = projectOf(conv);
     const system = [
       S.settings.systemPrompt.trim(),
-      S.settings.concise !== false ? CONCISE_NOTE : '',
+      // o Caveman já cobre (e aperta mais) a instrução de respostas enxutas
+      S.settings.concise !== false && !['on', 'ultra'].includes(packLevels().caveman) ? CONCISE_NOTE : '',
       persona?.prompt?.trim() ? L('# Personalidade: {0}\n{1}', persona.name, persona.prompt.trim()) : '',
       proj?.instructions?.trim() ? L('# Instruções do projeto "{0}"\n{1}', proj.name, proj.instructions.trim()) : '',
       ctx.text,
-      catalog || '',
+      catalogSys,
     ].filter(Boolean).join('\n\n');
-    conv.ctxParts = ctxBreakdown(system, ctx.text, catalog, tools, meta);
+    conv.ctxParts = ctxBreakdown(system, ctx.text, catalogSys, tools, meta);
     const g = stepGuard(Math.max(1, Number(S.settings.maxSteps) || 40));
     const lastAsk = [...conv.messages].reverse().find((m) => m.role === 'user' && !m.hidden);
     const planTurn = !!lastAsk?.plan;
@@ -435,7 +450,7 @@ async function runAgent(conv) {
       if (urgent.length) { saveConvs(); scheduleRender(); g.stop = ''; g.seen.clear(); g.errs.clear(); g.warned.clear(); }
       if (g.stop) { conv.messages.push({ role: 'error', loop: true, content: L('Parei: {0}. Diga como prefere seguir, ou continue mesmo assim.', g.stop) }); break; }
       guardBudget(conv, msg, g, step);
-      if (refetch) { ({ tools, meta } = await fetchTools()); conv.ctxParts = ctxBreakdown(system, ctx.text, catalog, tools, meta); }
+      if (refetch) { ({ tools, meta } = await fetchTools()); conv.ctxParts = ctxBreakdown(system, ctx.text, catalogSys, tools, meta); }
       if (step === g.limit - 1) conv.messages.push({ role: 'error', limit: true, content: g.limit > g.base ? L('Parei depois de {0} passos com ferramentas (o limite de {1} foi esticado porque a tarefa estava avançando).', g.limit, g.base) : L('Parei depois de {0} passos com ferramentas.', g.limit) });
     }
   } catch (e) {
