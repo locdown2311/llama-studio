@@ -1367,5 +1367,8 @@ const I18N_EN = {
 "Parei depois de {0} passos com ferramentas.": "Stopped after {0} tool steps.",
 "Continuar mesmo assim": "Continue anyway",
 "Continuar": "Continue",
-"Limite base. Se a tarefa está avançando (lista de tarefas, arquivos alterados), o studio dá mais passos sozinho, até 3 vezes isso. Repetições sem resultado novo são interrompidas antes.": "Base limit. If the task is moving forward (task list, changed files), the studio gives more steps on its own, up to 3 times this. Repetitions with no new result are stopped earlier."
+"Limite base. Se a tarefa está avançando (lista de tarefas, arquivos alterados), o studio dá mais passos sozinho, até 3 vezes isso. Repetições sem resultado novo são interrompidas antes.": "Base limit. If the task is moving forward (task list, changed files), the studio gives more steps on its own, up to 3 times this. Repetitions with no new result are stopped earlier.",
+"Interface": "Interface",
+"Personalizar a interface": "Customize the interface",
+"Temas, cores, fontes e layout do studio, pedidos ao modelo.": "The studio's themes, colors, fonts and layout, requested from the model."
 };

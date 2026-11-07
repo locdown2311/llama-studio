@@ -1173,7 +1173,6 @@ mod mcp_le {
 }
 
 /// Personalização da interface: temas, cores, fontes, layouts
-#[allow(dead_code)]
 pub fn customize_ui(app: &App, theme: Option<String>, colors: Option<Value>, fonts: Option<Value>, layout: Option<String>, widgets: Option<Value>) -> Value {
     let mut result = json!({
         "status": "success",

@@ -36,7 +36,7 @@ function dedupeResults(conv, results) {
    Com um slot livre, vai nele. Com um slot só, o cache da conversa vai para o disco antes e volta depois:
    segundos de disco em vez de reler a conversa inteira no próximo passo. */
 async function sideRun(conv, extra, fn) {
-  const slot = conv ? sideSlot(conv) : null;
+  const slot = conv ? await sideSlot(conv) : null;
   if (slot != null) { extra.id_slot = slot; return fn(); }
   const own = conv?._slot;
   // conversa curta relê rápido; só vale guardar no disco quando há bastante contexto
@@ -57,7 +57,7 @@ async function sideRun(conv, extra, fn) {
   return fn();
 }
 
-function sideSlot(conv) {
+async function sideSlot(conv) {
   if (!S.nSlots || S.nSlots < 2 || S.settings.kvSave === false) return null;
   const sl = S.slots;
   const busy = new Set([...S.runs.keys()].map((id) => S.convs.find((c) => c.id === id)?._slot).filter((x) => x != null));
@@ -69,7 +69,17 @@ function sideSlot(conv) {
     if (best < 0 || (sl.used[k] || 0) < (sl.used[best] || 0)) best = k;
   }
   if (best < 0) return null;
-  sl.owner[best] = null; // o dono antigo volta pelo disco (ou relê)
+  // o slot guarda o cache de outra conversa parada: vai para o disco antes, senão ela relê tudo ao voltar
+  const prev = sl.owner[best] ? S.convs.find((c) => c.id === sl.owner[best]) : null;
+  sl.owner[best] = '__lateral'; sl.used[best] = Date.now(); // ninguém escolhe este slot enquanto salva
+  if (prev && (prev.ctx?.tokens || prev.cacheLast?.total || 0) >= 3000 && sl.ok) {
+    try {
+      await api(`/slots/${best}?action=save`, { filename: kvFile(prev) });
+      (prev.kv ||= {})[kvKey()] = Date.now();
+      api('/api/kvcache/prune', { keep: 6 }).catch(() => {});
+    } catch { /* sem --slot-save-path: ela relê */ }
+  }
+  sl.owner[best] = null;
   return best;
 }
 

@@ -60,7 +60,7 @@ pub fn def_en(name: &str) -> Option<(&'static str, &'static str)> {
         "read_skill_file" => ("Reads a helper file of an active skill (scripts, templates, references cited in SKILL.md). A large file comes back as an outline; read parts with offset/limit.",
             r#"{"type":"object","properties":{"skill":{"type":"string","description":"skill id"},"path":{"type":"string"},"offset":{"type":"integer"},"limit":{"type":"integer"}},"required":["skill","path"]}"#),
         "customize_ui" => ("Personalize the interface: themes (colors, fonts), layouts, and custom widgets. Creates and applies visualization settings.",
-            r#"{"type":"object","properties":{"theme":{"type":"string","description":"Theme name (light, dark, custom)"}, "colors":{"type":"object","description":"Custom colors: background, foreground, accent, primary, secondary, warning, error, success"}, "fonts":{"type":"object","description":"Fonts: body, monospace, header"}, "layout":{"type":"string","description":"Layout: compact, spacious, grid, list"}, "widgets":{"type":"array","items":{"type":"string","description":"Widgets: statusbar, toolbar, sidebar, panels, tabs"}},"required":[]}}"#),
+            r#"{"type":"object","properties":{"theme":{"type":"string","description":"Theme name (light, dark, custom)"}, "colors":{"type":"object","description":"Custom colors: background, foreground, accent, primary, secondary, warning, error, success"}, "fonts":{"type":"object","description":"Fonts: body, monospace, header"}, "layout":{"type":"string","description":"Layout: compact, spacious, grid, list"}, "widgets":{"type":"array","items":{"type":"string","description":"Widgets: statusbar, toolbar, sidebar, panels, tabs"}}},"required":[]}"#),
         _ => return None,
     })
 }
