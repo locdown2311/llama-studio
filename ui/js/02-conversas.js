@@ -610,7 +610,8 @@ function renderBlock(b, conv, isLast) {
   if (b.type === 'user') return renderUser(b.msgs[0], b.start, conv);
   if (b.type === 'error') {
     return h('div.err-box', { dataset: { start: b.start } }, ic('alert'), h('div', null, b.msgs[0].content),
-      isLast && !running(conv) ? h('button.btn.sm', { onclick: () => { conv.messages.splice(b.start, 1); runAgent(conv); } }, ic('refresh'), L('Tentar de novo')) : null);
+      isLast && !running(conv) ? h('button.btn.sm', { onclick: () => { conv.messages.splice(b.start, 1); runAgent(conv); } },
+        ...(b.msgs[0].limit || b.msgs[0].loop ? [ic('play'), b.msgs[0].loop ? L('Continuar mesmo assim') : L('Continuar')] : [ic('refresh'), L('Tentar de novo')])) : null);
   }
   if (b.type === 'notice') return h('div.notice-line', { dataset: { start: b.start } }, ic(b.msgs[0].icon || 'arrowUp'), h('span', null, b.msgs[0].content));
   return renderAI(b, conv, isLast);

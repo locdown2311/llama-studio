@@ -442,6 +442,7 @@ function apiMessages(conv, system) {
         let c = r && (r.apiContent || r.content) ? (r.apiContent || r.content) : L('Execução cancelada pelo usuário.');
         if (broken.has(t.id)) c = L('A chamada foi interrompida antes de os argumentos terminarem de ser gerados (JSON incompleto) e não foi executada.') + (r?.content ? '\n' + r.content : '');
         if (r?.short && c.length > 1500) c = c.slice(0, 1500) + L('\n[... resultado antigo encurtado pela compactação]');
+        if (r?.studioNote) c += '\n\n' + r.studioNote;
         out.push({ role: 'tool', tool_call_id: t.id, content: c });
       }
     }
