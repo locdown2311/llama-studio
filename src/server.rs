@@ -123,6 +123,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/hf/download", post(hf_download))
         .route("/api/hf/downloads", get(hf_downloads))
         .route("/api/hf/cancel", post(hf_cancel))
+        .route("/remote/v1/chat/completions", post(remote_chat))
+        .route("/api/remote/models", get(remote_models))
         .route("/v1/{*rest}", any(proxy))
         .route("/props", any(proxy))
         .route("/health", any(proxy))
@@ -251,6 +253,17 @@ async fn proxy(State(app): S, req: Request) -> Response {
     }
 }
 
+async fn remote_chat(State(app): S, b: Bytes) -> Response {
+    crate::remote::chat(&app, b).await
+}
+
+async fn remote_models(State(app): S) -> Res {
+    match crate::remote::models(&app).await {
+        Ok(m) => ok(json!({ "models": m })),
+        Err(e) => Err(bad(e)),
+    }
+}
+
 // ---------------------------------------------------------------- estado e config
 
 async fn state(State(app): S) -> Res {
@@ -274,6 +287,7 @@ async fn state(State(app): S) -> Res {
         "compactOutput": c.compact_output,
         "useRtk": c.use_rtk,
         "lang": c.lang,
+        "api": { "base": c.api_base, "model": c.api_model, "hasKey": !c.api_key.trim().is_empty(), "ready": crate::remote::configured(&app) },
     }))
 }
 
@@ -298,6 +312,16 @@ async fn set_config(State(app): S, b: Bytes) -> Res {
         }
         if let Some(g) = v.get("useRtk").and_then(Value::as_bool) {
             c.use_rtk = g;
+        }
+        if let Some(x) = v.get("apiBase").and_then(Value::as_str) {
+            c.api_base = x.trim().to_string();
+        }
+        if let Some(x) = v.get("apiModel").and_then(Value::as_str) {
+            c.api_model = x.trim().to_string();
+        }
+        // chave: só troca quando vem (string vazia apaga)
+        if let Some(x) = v.get("apiKey").and_then(Value::as_str) {
+            c.api_key = x.trim().to_string();
         }
         if let Some(l) = v.get("lang").and_then(Value::as_str).filter(|l| !l.is_empty()) {
             c.lang = if l.starts_with("en") { "en".into() } else { "pt".into() };

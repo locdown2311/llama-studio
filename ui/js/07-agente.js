@@ -191,7 +191,24 @@ async function auditCall(tc, info, conv, signal) {
   const schema = { type: 'object', properties: { motivo: { type: 'string' }, risco: { enum: ['baixo', 'medio', 'alto'] }, decisao: { enum: ['aprovar', 'usuario'] } }, required: ['motivo', 'risco', 'decisao'] };
   const extra = { chat_template_kwargs: { enable_thinking: false }, reasoning_budget: 0, temperature: 0, max_tokens: 400, _fixed: true };
   let m = { content: '', reasoning: '', tool_calls: [] };
-  try {
+  let via = null, apiErr = '';
+  if (apiFor('auditor')) {
+    // fora do llama-server: não ocupa slot nem mexe no cache de ninguém
+    const ex = { temperature: 0, max_tokens: 400 };
+    try {
+      try { await streamApi(msgs, [], m, signal, null, { ...ex, response_format: { type: 'json_schema', json_schema: { name: 'veredito', schema } } }); }
+      catch (e) {
+        if (signal.aborted || !/response_format|json_schema|schema|400|422/i.test(e.message)) throw e;
+        m = { content: '', reasoning: '', tool_calls: [] };
+        await streamApi(msgs, [], m, signal, null, ex);
+      }
+      via = m.via;
+    } catch (e) {
+      if (signal.aborted) throw e;
+      apiErr = e.message || String(e); m = { content: '', reasoning: '', tool_calls: [] };
+    }
+  }
+  if (!via) try {
     await sideRun(conv, extra, async () => {
       try { await streamRaw(msgs, [], m, signal, null, { ...extra, response_format: { type: 'json_schema', json_schema: { name: 'veredito', schema } } }); }
       catch (e) {
@@ -212,7 +229,7 @@ async function auditCall(tc, info, conv, signal) {
   const risk = RISK_RANK[String(v.risco || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()] != null ? String(v.risco).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase() : 'alto';
   const max = RISK_RANK[S.settings.auditMax || 'baixo'] ?? 0;
   const approve = /^aprov/i.test(String(v.decisao || '')) && RISK_RANK[risk] <= max;
-  const out = { risk, approve, reason: String(v.motivo || '').trim().slice(0, 400) || (approve ? L('Sem observações.') : L('Sem motivo informado.')), slot: extra.id_slot == null ? undefined : extra.id_slot !== conv._slot ? extra.id_slot : null };
+  const out = { risk, approve, reason: String(v.motivo || '').trim().slice(0, 400) || (approve ? L('Sem observações.') : L('Sem motivo informado.')), slot: via || extra.id_slot == null ? undefined : extra.id_slot !== conv._slot ? extra.id_slot : null, via: via || undefined, apiErr: apiErr ? apiErr.slice(0, 200) : undefined };
   if (approve) AUDITS.get(conv).set(key, out);
   if (approve && risk === 'baixo') AUDIT_OK.get(conv).set(name, okN + 1);
   return done(out);
@@ -550,8 +567,14 @@ async function maybeCompact(conv, system, tools, signal, force = false) {
   toast(L('Compactando a conversa para caber no contexto...'));
   conv._compacting = true; scheduleRender();
   try {
-    const m = { content: '', reasoning: '', tool_calls: [] };
-    await streamRaw([{ role: 'system', content: SUMMARY_PROMPT }, { role: 'user', content: transcript }], [], m, signal, null);
+    let m = { content: '', reasoning: '', tool_calls: [] };
+    const sm = [{ role: 'system', content: SUMMARY_PROMPT }, { role: 'user', content: transcript }];
+    let done = false;
+    if (apiFor('compact')) {
+      try { await streamApi(sm, [], m, signal, null); done = true; }
+      catch (e) { if (signal?.aborted) throw e; m = { content: '', reasoning: '', tool_calls: [] }; }
+    }
+    if (!done) await streamRaw(sm, [], m, signal, null);
     const summary = splitThink(m.content).text.trim();
     if (!summary) return false;
     conv.summary = summary;

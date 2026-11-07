@@ -509,6 +509,24 @@ async function streamCompletion(conv, system, tools, msg, signal) {
     const read = Math.max(0, msg._pp.total - msg._pp.cache);
     conv.cacheLast = { total: msg._pp.total, cache: msg._pp.cache, read, ms: msg._pp.time_ms || 0, why: read > Math.max(2000, msg._pp.total * 0.3) ? (msg._why || L('o servidor não tinha esse trecho guardado (modelos com camadas recorrentes, como Qwen3.5/3.6, só voltam até o último ponto salvo)')) : '' };
     drawCtxMeter();
+    // causa desconhecida: o log do llama-server mostra onde o pedido divergiu do que o slot tinha
+    if (conv.cacheLast.why && !msg._why) serverDiff(conv._slot).then((d) => { if (d) { conv.cacheLast.why = d; conv.cacheLast.diff = true; drawCtxMeter(); saveConvs(); } }).catch(() => {});
   }
   return r;
+}
+
+/** Último "old/new" do log do llama-server (LLAMA_SERVER_SLOTS_DEBUG) para este slot, em palavras.
+   Os pedaços de texto podem ter quebras de linha, então a linha "old" pode continuar nas seguintes. */
+async function serverDiff(slot) {
+  const { next } = await api('/api/llama/log?since=999999999');
+  const r = await api('/api/llama/log?since=' + Math.max(0, next - 300));
+  const text = (r.lines || []).join('\n');
+  const id = slot == null ? '\\d+' : String(slot);
+  const re = new RegExp('id +' + id + ' \\| task (\\d+) \\| old: \\.\\.\\. ([\\s\\S]*?)\\n[^\\n]*?id +' + id + ' \\| task \\1 \\| new: \\.\\.\\. ([\\s\\S]*?)\\n[^\\n]*?id +' + id + ' \\| task \\1 \\|', 'g');
+  let m, last = null;
+  while ((m = re.exec(text))) last = m;
+  if (!last) return '';
+  const show = (t) => t.replace(/\n/g, '⏎').replace(/\s+/g, ' ').trim();
+  const [oa, ob = ''] = last[2].split(' | '); const [, nb = ''] = last[3].split(' | ');
+  return L('o pedido divergiu do que o servidor tinha guardado logo depois de «{0}»: antes vinha «{1}», agora «{2}»', show(oa).slice(-60), show(ob).slice(0, 60) || '∅', show(nb).slice(0, 60) || '∅');
 }

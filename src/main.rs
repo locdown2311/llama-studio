@@ -27,6 +27,7 @@ mod pe;
 mod packs;
 mod procmem;
 mod projmap;
+mod remote;
 mod share;
 mod server;
 mod skills;

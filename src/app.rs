@@ -44,6 +44,11 @@ pub struct Config {
     pub ui_settings: Value,
     /// idioma da interface e do que o modelo recebe: "pt" ou "en" (vazio = ainda não escolhido)
     pub lang: String,
+    /// API externa compatível com OpenAI para auditor, exploradores e tarefas de fundo (vazio = não usa)
+    pub api_base: String,
+    /// a chave nunca volta para a interface (só "tem chave") nem sai no pacote de compartilhar
+    pub api_key: String,
+    pub api_model: String,
 }
 
 impl Default for Config {
@@ -63,6 +68,9 @@ impl Default for Config {
             compact_output: true,
             use_rtk: true,
             hf_token: String::new(),
+            api_base: String::new(),
+            api_key: String::new(),
+            api_model: String::new(),
             ui_settings: json!({
                 "theme": "dark",
                 "colors": {

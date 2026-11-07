@@ -908,7 +908,7 @@ function renderTool(tc, res, live) {
       h('span.audit-ico', { html: svg('shield') }),
       h('span.audit-main', null,
         h('b', null, a.approve ? L('Aprovado pelo auditor · {0}', RISK_LABEL[a.risk]) : a.failed ? L('Auditor indisponível') : L('O auditor pediu sua análise · {0}', RISK_LABEL[a.risk])),
-        h('span', null, a.reason + (a.ms ? ` (${fmtMs(a.ms)}${a.slot != null ? L(', slot {0}', a.slot) : a.slot === null ? L(', slot da conversa') : ''})` : '')))));
+        h('span', null, a.reason + (a.ms ? ` (${fmtMs(a.ms)}${a.via ? L(', via API: {0}', a.via) : a.slot != null ? L(', slot {0}', a.slot) : a.slot === null ? L(', slot da conversa') : ''}${a.apiErr ? L('; a API falhou e usou o modelo local') : ''})` : '')))));
   }
   if (status === 'approval') {
     const answer = (a) => { const fn = S.approvals.get(tc.id); if (fn) { S.approvals.delete(tc.id); fn(a); } };

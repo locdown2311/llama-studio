@@ -84,6 +84,8 @@ function renderSettings() {
     sw(L('Usar a placa de vídeo para desenhar a janela'), L('Desligado, a janela não ocupa VRAM do modelo. Vale na próxima vez que a janela abrir.'), S.info.windowGpu, async (v) => { await api('/api/config', { windowGpu: v }); S.info.windowGpu = v; saved(); }),
     sw(L('Fechar a janela deixa o studio na bandeja'), L('A janela é destruída e a memória dela volta para o sistema.'), S.info.closeToTray !== false, async (v) => { await api('/api/config', { closeToTray: v }); S.info.closeToTray = v; saved(); }));
 
+  section('api', L('API externa'), 'globe', L('Um provedor de IA na internet para tirar trabalho do modelo local. Auditor e exploradores pela API não ocupam slot do llama-server, então a conversa nunca perde o cache por causa deles. Se a API falhar (sem internet, limite do plano grátis), volta para o modelo local.'), apiSection(put, field, saved));
+
   section('share', L('Compartilhar'), 'share', L('Exporte suas configurações num arquivo para outra pessoa (ou outro PC) importar. Tokens e chaves dos conectores nunca saem: quem importa preenche os dele.'),
     h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
       h('button.btn', { type: 'button', onclick: exportDialog }, ic('download'), L('Exportar configurações')),
@@ -123,7 +125,7 @@ function renderSettings() {
 /* As configurações são um painel só: as subpáginas de ajuste e as páginas de recursos (servidor,
    conectores, habilidades...) ficam no mesmo menu. Os itens da barra lateral são atalhos para elas. */
 const SET_EMBED = [['server', L('Servidor'), 'server'], ['mcp', L('Conectores'), 'plug'], ['skills', L('Habilidades'), 'sparkles'], ['personas', L('Personalidades'), 'user'], ['tools', L('Utilitários'), 'wrench']];
-const SET_GROUPS = [[L('Geral'), ['set:model', 'set:tools', 'set:auto', 'set:context']], [L('Recursos'), ['v:server', 'v:mcp', 'v:skills', 'v:personas', 'v:tools']], [L('Segurança'), ['set:safety', 'set:auditor']], [L('Sistema'), ['set:look', 'set:window', 'set:share', 'set:updates', 'set:advanced', 'set:tests']]];
+const SET_GROUPS = [[L('Geral'), ['set:model', 'set:tools', 'set:auto', 'set:context', 'set:api']], [L('Recursos'), ['v:server', 'v:mcp', 'v:skills', 'v:personas', 'v:tools']], [L('Segurança'), ['set:safety', 'set:auditor']], [L('Sistema'), ['set:look', 'set:window', 'set:share', 'set:updates', 'set:advanced', 'set:tests']]];
 let SET_PAGES = [];
 let setPage = null;
 function openSettings(page) { setPage = page; setView('settings'); }
@@ -149,4 +151,83 @@ function drawSetNav(active) {
     for (const it of items) nav.append(h('button', { type: 'button', class: it.key === active ? 'on' : '', dataset: { id: it.key }, onclick: it.go }, ic(it.icon), h('span', null, it.t)));
   }
   $('button.on', nav)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
+/* ------------------------------------------------------------ API externa */
+// Provedores compatíveis com OpenAI com plano grátis; o endereço vem pronto e o modelo sai da lista do provedor
+const API_PRESETS = [
+  ['groq', 'Groq', 'https://api.groq.com/openai/v1', 'https://console.groq.com/keys'],
+  ['gemini', 'Google Gemini', 'https://generativelanguage.googleapis.com/v1beta/openai', 'https://aistudio.google.com/apikey'],
+  ['cerebras', 'Cerebras', 'https://api.cerebras.ai/v1', 'https://cloud.cerebras.ai'],
+  ['openrouter', 'OpenRouter', 'https://openrouter.ai/api/v1', 'https://openrouter.ai/keys'],
+  ['custom', L('Outro (compatível com OpenAI)'), '', ''],
+];
+const API_ROLES = [
+  ['auditor', L('Auditor'), L('Manda o seu pedido, o que o agente disse e os argumentos da ação (comandos, caminhos).')],
+  ['explorer', L('Subagentes exploradores'), L('Manda a tarefa e o que eles leem: trechos de arquivos e páginas.')],
+  ['background', L('Tarefas de fundo'), L('Resumo do mapa da pasta, regras aprendidas, habilidades geradas, regras de arrumar pastas e temas de posts.')],
+  ['compact', L('Resumo da compactação'), L('Manda a conversa inteira para resumir. Rápido, mas é o que mais expõe e mais gasta.')],
+];
+function apiSection(put, field, saved) {
+  const info = () => S.info.api || {};
+  const box = h('div');
+  let forced = false;
+  const draw = () => {
+    box.innerHTML = '';
+    const a = info();
+    const preset = API_PRESETS.find((p) => p[2] && a.base && a.base.replace(/\/+$/, '') === p[2]) || (a.base || forced ? API_PRESETS[4] : null);
+    const save = async (patch) => {
+      try { await api('/api/config', patch); S.info = await api('/api/state'); saved(); draw(); } catch (e) { toast(e.message, 'err'); }
+    };
+    const prov = h('select.select', null, h('option', { value: '' }, L('Nenhum (tudo no modelo local)')), API_PRESETS.map(([id, name]) => h('option', { value: id }, name)));
+    prov.value = preset ? preset[0] : '';
+    prov.addEventListener('change', () => {
+      const p = API_PRESETS.find((x) => x[0] === prov.value);
+      if (!p) { forced = false; return save({ apiBase: '', apiModel: '' }); }
+      if (p[0] === 'custom') { draw2(); return; }
+      forced = false;
+      save({ apiBase: p[2], apiModel: '' });
+    });
+    const base = h('input.input.mono', { value: a.base || '', placeholder: 'https://.../v1' });
+    base.addEventListener('change', () => save({ apiBase: base.value.trim() }));
+    const key = h('input.input.mono', { type: 'password', autocomplete: 'off', placeholder: a.hasKey ? L('Chave salva (digite para trocar)') : L('Cole a chave da API') });
+    key.addEventListener('change', () => { if (key.value.trim()) save({ apiKey: key.value.trim() }); });
+    const model = h('input.input.mono', { value: a.model || '', placeholder: L('ex.: o id do modelo'), list: 'api-models' });
+    const dl = h('datalist#api-models');
+    model.addEventListener('change', () => save({ apiModel: model.value.trim() }));
+    const listBtn = h('button.btn.sm', { type: 'button', onclick: async () => {
+      listBtn.disabled = true;
+      try { const r = await api('/api/remote/models'); dl.innerHTML = ''; r.models.forEach((m) => dl.append(h('option', { value: m }))); toast(L('{0} modelos', r.models.length)); model.focus(); }
+      catch (e) { toast(e.message, 'err'); }
+      listBtn.disabled = false;
+    } }, ic('list'), L('Listar modelos'));
+    const test = h('button.btn.sm', { type: 'button', disabled: !a.ready, onclick: async () => {
+      test.disabled = true; const t0 = performance.now();
+      const m = { content: '', reasoning: '', tool_calls: [] };
+      try { await streamApi([{ role: 'user', content: L('Responda só: ok') }], [], m, new AbortController().signal, null, { max_tokens: 20, temperature: 0 }); toast(L('Respondeu em {0}: {1}', fmtMs(performance.now() - t0), (m.content || '').trim().slice(0, 40) || L('(vazio)'))); }
+      catch (e) { toast(e.message, 'err'); }
+      test.disabled = false;
+    } }, ic('zap'), L('Testar'));
+    const roles = S.settings.apiRoles || {};
+    const roleRows = API_ROLES.map(([id, title, desc]) => {
+      const i = h('input', { type: 'checkbox', checked: !!roles[id], disabled: !a.ready });
+      i.addEventListener('change', () => put({ apiRoles: { ...(S.settings.apiRoles || {}), [id]: i.checked } }));
+      return h('label.tcard', null, h('span.tc-main', null, h('span.tc-title', null, title), h('span.tc-desc', null, desc)), h('span.switch', null, i, h('span')));
+    });
+    const u = apiUse();
+    const link = preset?.[3] ? h('a', { href: preset[3], target: '_blank', rel: 'noopener' }, ic('external'), L('Pegar uma chave grátis')) : null;
+    box.append(
+      field(L('Provedor'), prov, link),
+      ...(prov.value ? [
+        prov.value === 'custom' ? field(L('Endereço'), base, L('O que vem antes de /chat/completions.')) : null,
+        field(L('Chave'), key, L('Fica só no config.json deste PC e nunca sai no pacote de compartilhar.')),
+        field(L('Modelo'), h('div.row', null, model, dl, listBtn, test)),
+        h('div.field', null, h('label', null, L('O que vai pela API')), ...roleRows,
+          h('small', null, L('Planos grátis costumam poder usar o que você manda para treinar modelos (o Gemini grátis avisa isso). Deixe desligado o que tiver dado sensível.'))),
+        h('small.muted', null, L('Hoje: {0} pedidos, {1} tokens, {2} falhas (voltaram para o modelo local).', u.calls, u.tokens.toLocaleString(LOCALE), u.fails)),
+      ] : []));
+  };
+  const draw2 = () => { forced = true; draw(); $('input.input.mono', box)?.focus(); };
+  draw();
+  return box;
 }

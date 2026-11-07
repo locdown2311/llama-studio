@@ -1,0 +1,95 @@
+//! API externa compatível com OpenAI (Groq, Gemini, Cerebras, OpenRouter, outro llama-server...).
+//! A interface manda o pedido para /remote/v1/chat/completions; aqui entram o endereço, a chave e o modelo
+//! guardados no config.json, e saem os campos que só o llama.cpp entende. A chave nunca vai para a página.
+
+use axum::body::{Body, Bytes};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use axum::Json;
+use serde_json::{json, Value};
+use std::time::Duration;
+
+use crate::app::App;
+
+/// Campos do llama.cpp que outros servidores recusam.
+const LLAMA_ONLY: &[&str] = &["id_slot", "cache_prompt", "return_progress", "chat_template_kwargs", "reasoning_budget", "n_probs", "samplers", "timings_per_token", "_fixed", "_remote"];
+
+fn err(status: StatusCode, msg: String) -> Response {
+    (status, Json(json!({ "error": { "message": msg } }))).into_response()
+}
+
+pub fn configured(app: &App) -> bool {
+    let c = app.cfg();
+    !c.api_base.trim().is_empty() && !c.api_model.trim().is_empty()
+}
+
+fn endpoint(base: &str, path: &str) -> String {
+    format!("{}/{}", base.trim().trim_end_matches('/'), path)
+}
+
+pub async fn chat(app: &App, body: Bytes) -> Response {
+    let c = app.cfg();
+    if c.api_base.trim().is_empty() || c.api_model.trim().is_empty() {
+        return err(StatusCode::BAD_REQUEST, L!("A API externa não está configurada.", "The external API is not configured.").into());
+    }
+    let Ok(mut v) = serde_json::from_slice::<Value>(&body) else {
+        return err(StatusCode::BAD_REQUEST, L!("Pedido inválido.", "Invalid request.").into());
+    };
+    if let Some(o) = v.as_object_mut() {
+        for k in LLAMA_ONLY {
+            o.remove(*k);
+        }
+        o.insert("model".into(), json!(c.api_model.trim()));
+        if o.get("stream").and_then(Value::as_bool).unwrap_or(false) {
+            // o uso de tokens chega no último pedaço
+            o.insert("stream_options".into(), json!({ "include_usage": true }));
+        }
+    }
+    let mut rb = app.http.post(endpoint(&c.api_base, "chat/completions")).timeout(Duration::from_secs(300)).header("Content-Type", "application/json").header("User-Agent", "llama-studio");
+    if !c.api_key.trim().is_empty() {
+        rb = rb.bearer_auth(c.api_key.trim());
+    }
+    if c.api_base.contains("openrouter.ai") {
+        rb = rb.header("X-Title", "Llama Studio");
+    }
+    match rb.body(v.to_string()).send().await {
+        Ok(resp) => {
+            let status = resp.status().as_u16();
+            let mut out = Response::builder().status(status);
+            for (k, val) in resp.headers() {
+                if matches!(k.as_str(), "content-type" | "retry-after" | "x-ratelimit-remaining-requests" | "x-ratelimit-remaining-tokens") {
+                    out = out.header(k, val);
+                }
+            }
+            out.body(Body::from_stream(resp.bytes_stream())).unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response())
+        }
+        Err(e) => err(StatusCode::BAD_GATEWAY, LF!("API externa indisponível ({}).", "External API unavailable ({}).", e.without_url())),
+    }
+}
+
+/// Lista os modelos do provedor (GET /models), para escolher sem digitar.
+pub async fn models(app: &App) -> Result<Vec<String>, String> {
+    let c = app.cfg();
+    if c.api_base.trim().is_empty() {
+        return Err(L!("Informe o endereço da API.", "Enter the API address.").into());
+    }
+    let mut rb = app.http.get(endpoint(&c.api_base, "models")).timeout(Duration::from_secs(20)).header("User-Agent", "llama-studio");
+    if !c.api_key.trim().is_empty() {
+        rb = rb.bearer_auth(c.api_key.trim());
+    }
+    let resp = rb.send().await.map_err(|e| e.without_url().to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!("HTTP {}: {}", status.as_u16(), text.chars().take(300).collect::<String>()));
+    }
+    let v: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    let mut ids: Vec<String> = v["data"]
+        .as_array()
+        .or_else(|| v["models"].as_array())
+        .map(|a| a.iter().filter_map(|m| m["id"].as_str().or_else(|| m["name"].as_str()).map(|s| s.trim_start_matches("models/").to_string())).collect())
+        .unwrap_or_default();
+    ids.sort();
+    ids.dedup();
+    Ok(ids)
+}

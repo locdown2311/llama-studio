@@ -202,15 +202,26 @@ async function runExplorer(args, tctx, tmsg) {
   const msgs = [{ role: 'system', content: sys }, { role: 'user', content: args.task + (args.where ? L('\n\nComece por: {0}', args.where) : '') }];
   tmsg._sub = [];
   // fora do slot da conversa (ela fica esperando o relatório e não pode perder o cache)
-  const slot = await sideSlot(tctx.conv);
-  const extra = slot != null ? { id_slot: slot } : undefined;
+  let remote = apiFor('explorer');
+  const slot = remote ? null : await sideSlot(tctx.conv);
+  let extra = slot != null ? { id_slot: slot } : undefined;
   const max = Math.max(3, Number(S.settings.explorerSteps) || 20);
   for (let step = 0; step <= max; step++) {
     if (tctx.signal.aborted) return { content: 'Cancelado.', isError: true };
     const last = step === max;
     if (last) msgs.push({ role: 'user', content: L('Limite de passos atingido. Escreva agora o relatório final com o que já encontrou.') });
     const m = { content: '', reasoning: '', tool_calls: [] };
-    await streamRaw(msgs, last ? [] : tools, m, tctx.signal, null, extra);
+    if (remote) {
+      try { await streamApi(msgs, last ? [] : tools, m, tctx.signal, null); tmsg.via = m.via; }
+      catch (e) {
+        if (tctx.signal.aborted) throw e;
+        // API fora (limite do plano grátis, sem internet): segue no modelo local daqui em diante
+        remote = false; tmsg.apiErr = String(e.message || e).slice(0, 200);
+        const s2 = await sideSlot(tctx.conv); extra = s2 != null ? { id_slot: s2 } : undefined;
+        m.content = ''; m.reasoning = ''; m.tool_calls = [];
+        await streamRaw(msgs, last ? [] : tools, m, tctx.signal, null, extra);
+      }
+    } else await streamRaw(msgs, last ? [] : tools, m, tctx.signal, null, extra);
     const calls = m.tool_calls.filter((t) => t && t.function?.name);
     calls.forEach((t) => { if (!t.id) t.id = 'call_' + uid(); });
     const text = splitThink(m.content).text;

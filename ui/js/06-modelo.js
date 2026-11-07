@@ -201,11 +201,35 @@ function fillCtxPop() {
 
 
 let noProgress = false;
+/* ---- API externa (auditor, exploradores, tarefas de fundo) ---- */
+/** Esta função vai pela API externa? (configurada em Configurações › API externa) */
+function apiFor(role) { return !!(S.info?.api?.ready && S.settings.apiRoles?.[role]); }
+/** Contagem do dia: pedidos, tokens e falhas (só neste navegador). */
+function apiUse(add) {
+  const today = new Date().toISOString().slice(0, 10);
+  let u = store.get('apiUse', null);
+  if (!u || u.day !== today) u = { day: today, calls: 0, tokens: 0, fails: 0 };
+  if (add) { u.calls += add.calls || 0; u.tokens += add.tokens || 0; u.fails += add.fails || 0; store.set('apiUse', u); }
+  return u;
+}
+/** Pede pela API externa; se ela falhar (sem internet, limite do plano grátis...), o chamador volta ao modelo local. */
+async function streamApi(messages, tools, msg, signal, onDelta, extra = {}) {
+  try {
+    await streamRaw(messages, tools, msg, signal, onDelta, { ...extra, _remote: true });
+    apiUse({ calls: 1, tokens: msg.usage?.total_tokens || 0 });
+    msg.via = S.info.api.model;
+  } catch (e) {
+    if (signal?.aborted) throw e;
+    apiUse({ fails: 1 });
+    throw e;
+  }
+}
+
 async function streamRaw(messages, tools, msg, signal, onDelta, extra = {}) {
-  const { _fixed, ...rest } = extra;
+  const { _fixed, _remote, ...rest } = extra;
   // return_progress: o llama-server conta quanto do prompt já leu (barra de progresso antes da 1ª palavra)
-  const body = { messages, stream: true, cache_prompt: true, ...rest };
-  if (!noProgress) body.return_progress = true;
+  const body = { messages, stream: true, ...(_remote ? {} : { cache_prompt: true }), ...rest };
+  if (!noProgress && !_remote) body.return_progress = true;
   msg._t0 = Date.now(); msg._pp = null;
   if (tools.length) body.tools = tools;
   const st = S.settings;
@@ -215,7 +239,7 @@ async function streamRaw(messages, tools, msg, signal, onDelta, extra = {}) {
     if (st.maxTokens !== '' && st.maxTokens != null) body.max_tokens = Number(st.maxTokens);
   }
 
-  const post = () => fetch('/v1/chat/completions', {
+  const post = () => fetch(_remote ? '/remote/v1/chat/completions' : '/v1/chat/completions', {
     method: 'POST', signal,
     headers: { 'Content-Type': 'application/json', 'X-Studio': '1' },
     body: JSON.stringify(body),
@@ -231,7 +255,7 @@ async function streamRaw(messages, tools, msg, signal, onDelta, extra = {}) {
     }
     if (t != null) {
       let m = t; try { const j = JSON.parse(t); m = j.error?.message || j.error || t; } catch { /* texto */ }
-      throw new Error(L('llama-server respondeu {0}: {1}', res.status, String(m).slice(0, 600)));
+      throw new Error(_remote ? L('API externa respondeu {0}: {1}', res.status, String(m).slice(0, 600)) : L('llama-server respondeu {0}: {1}', res.status, String(m).slice(0, 600)));
     }
   }
   const reader = res.body.getReader();
@@ -253,6 +277,7 @@ async function streamRaw(messages, tools, msg, signal, onDelta, extra = {}) {
       const d = j.choices?.[0]?.delta;
       if (d) {
         if (d.reasoning_content) msg.reasoning += d.reasoning_content;
+        else if (typeof d.reasoning === 'string') msg.reasoning += d.reasoning; // OpenRouter, Groq
         if (d.content) msg.content += d.content;
         for (const tc of d.tool_calls || []) {
           const idx = tc.index ?? 0;
@@ -262,6 +287,7 @@ async function streamRaw(messages, tools, msg, signal, onDelta, extra = {}) {
           if (tc.function?.arguments) slot.function.arguments += tc.function.arguments;
         }
       }
+      if (j.usage) msg.usage = j.usage;
       if (j.timings) { msg.tps = j.timings.predicted_per_second; msg.tokens = j.timings.predicted_n; msg.ctxTokens = (j.timings.prompt_n || 0) + (j.timings.cache_n || 0) + (j.timings.predicted_n || 0); }
       onDelta?.();
     }

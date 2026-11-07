@@ -263,6 +263,10 @@ impl Llama {
         if !c.hip_devices.trim().is_empty() {
             cmd.env("HIP_VISIBLE_DEVICES", c.hip_devices.trim());
         }
+        // quando o pedido novo diverge do que o slot tinha, o servidor escreve no log os tokens em volta da
+        // diferença ("old: ... | ..." e "new: ... | ..."): é assim que o studio diz o que fez ele reler
+        cmd.env("LLAMA_SERVER_SLOTS_DEBUG", "1");
+        cmd.env("LLAMA_SERVER_SLOTS_N_DIFF", "16");
         cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).kill_on_drop(true);
         let mut child = cmd.spawn().map_err(|e| LF!("Erro ao iniciar: {e}", "Error starting: {e}"))?;
         self.pid.store(child.id().unwrap_or(0), Ordering::SeqCst);
