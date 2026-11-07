@@ -75,12 +75,15 @@ function kvKey() {
 function kvFile(c) { return L('{0}-{1}.bin', c.id, kvKey()); }
 
 /** Slot reservado para o auditor e outros pedidos laterais (-1 se não houver). */
-function auditSlot() { return S.settings.auditor && S.nSlots >= 2 && S.settings.kvSave !== false ? S.nSlots - 1 : -1; }
+function auditSlot() { return S.settings.auditor && S.nSlots >= 2 ? S.nSlots - 1 : -1; }
 
 async function assignSlot(conv) {
   conv._slot = null;
   const sl = S.slots;
-  if (S.settings.kvSave === false || !sl.ok || !S.nSlots || !S.model) return;
+  // cada conversa fica presa a um slot mesmo sem guardar cache no disco: sem isso o servidor escolhe o slot
+  // e o auditor (ou outra conversa) pode cair em cima do cache dela
+  if (!S.nSlots) return;
+  const disk = S.settings.kvSave !== false && sl.ok;
   const key = kvKey();
   const started = S.llama?.startedAt || 0;
   if (sl.key !== key || sl.started !== started) { sl.key = key; sl.started = started; sl.owner = []; sl.used = []; }
@@ -103,13 +106,13 @@ async function assignSlot(conv) {
   if (best < 0) return;
   const prev = sl.owner[best] && sl.owner[best] !== conv.id ? S.convs.find((c) => c.id === sl.owner[best]) : null;
   try {
-    if (prev && (prev.ctx?.tokens || 0) >= 3000) {
+    if (disk && prev && (prev.ctx?.tokens || 0) >= 3000) {
       conv._waitingModel = true; conv._waitText = L('Guardando o cache da outra conversa...'); scheduleRender();
       await api(`/slots/${best}?action=save`, { filename: kvFile(prev) });
       (prev.kv ||= {})[key] = Date.now();
       api('/api/kvcache/prune', { keep: 6 }).catch(() => {});
     }
-    if (conv.kv?.[key]) {
+    if (disk && conv.kv?.[key]) {
       conv._waitingModel = true; conv._waitText = L('Recuperando o cache desta conversa...'); scheduleRender();
       try { await api(`/slots/${best}?action=restore`, { filename: kvFile(conv) }); }
       catch { delete conv.kv[key]; }

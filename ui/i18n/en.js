@@ -1403,5 +1403,10 @@ const I18N_EN = {
 "Na mesma conversa, uma ferramenta que o auditor já aprovou 3 vezes com risco baixo passa direto, a não ser que os argumentos tenham algo perigoso (apagar, formatar, matar processo...).": "In the same chat, a tool the auditor has already approved 3 times as low risk goes through directly, unless the arguments have something dangerous (delete, format, kill a process...).",
 "Debuggers, bancos de dados e APIs também passam por ele. As que só leem passam direto.": "Debuggers, databases and APIs go through it too. The ones that only read go through directly.",
 "Ferramenta de conector que só lê.": "Connector tool that only reads.",
-"{0} já foi aprovada {1} vezes nesta conversa com risco baixo.": "{0} was already approved {1} times in this chat as low risk."
+"{0} já foi aprovada {1} vezes nesta conversa com risco baixo.": "{0} was already approved {1} times in this chat as low risk.",
+"Memória em uso pelo processo do conector e pelos que ele abriu": "Memory used by the connector's process and the ones it started",
+"{0} de RAM": "{0} of RAM",
+"Conectores locais rodando: {0}, usando {1} de RAM no total.": "Local connectors running: {0}, using {1} of RAM in total.",
+", slot {0}": ", slot {0}",
+", slot da conversa": ", the chat's slot"
 };

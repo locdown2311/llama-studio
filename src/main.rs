@@ -25,6 +25,7 @@ mod mcp;
 mod models;
 mod pe;
 mod packs;
+mod procmem;
 mod projmap;
 mod share;
 mod server;

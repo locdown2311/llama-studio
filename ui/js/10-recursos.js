@@ -178,6 +178,8 @@ function cmdLine(c) {
 function drawMcpList() {
   const list = $('#mcp-list'); list.innerHTML = '';
   if (!S.mcp.length) { list.append(h('div.empty-card', null, L('Nenhum conector ainda. Escolha um da lista acima ou adicione o seu.'))); return; }
+  const local = S.mcp.filter((s) => s.mem);
+  if (local.length) list.append(h('div.srv-memsum', null, ic('cpu'), L('Conectores locais rodando: {0}, usando {1} de RAM no total.', local.length, fmtBytes(local.reduce((n, s) => n + s.mem, 0)))));
   for (const s of S.mcp) {
     const st = statusInfo(s.status);
     const sw = h('input', { type: 'checkbox', checked: s.status !== 'disabled' });
@@ -186,7 +188,8 @@ function drawMcpList() {
       h('div.srv-head', null,
         h('div.srv-ico', { html: svg(s.config?.url ? 'globe' : 'terminal') }),
         h('div.srv-main', null,
-          h('div.srv-name', null, s.name, h('span.tag', null, s.kind === 'stdio' ? 'local' : s.kind === 'sse' ? 'SSE' : 'HTTP')),
+          h('div.srv-name', null, s.name, h('span.tag', null, s.kind === 'stdio' ? 'local' : s.kind === 'sse' ? 'SSE' : 'HTTP'),
+            s.mem ? h('span.tag', { title: L('Memória em uso pelo processo do conector e pelos que ele abriu') }, L('{0} de RAM', fmtBytes(s.mem))) : null),
           h('div.srv-cmd', { title: cmdLine(s.config || {}) }, cmdLine(s.config || {}))),
         h('div.srv-status', null, h('span.dot.' + st.dot), s.status === 'connected' ? (s.hidden?.length ? L('{0} de {1} ferramentas', s.tools.length - s.tools.filter((t) => s.hidden.includes(t.name)).length, s.tools.length) : L('{0} ferramentas', s.tools.length)) : s.status === 'connecting' && s.since ? L('conectando... {0} s', Math.max(0, Math.round((Date.now() - s.since) / 1000))) : st.label),
         h('div.srv-actions', null,

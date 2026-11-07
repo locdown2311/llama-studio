@@ -201,13 +201,16 @@ async function runExplorer(args, tctx, tmsg) {
     + L('o que encontrou, com caminhos de arquivo, trechos curtos relevantes e URLs. Se algo não existir, diga.\n\n') + tctx.ctxText.split('\n\n').filter((p) => !p.startsWith('The user turned on the sk') && !p.startsWith('O usuário ativou as skills')).join('\n\n');
   const msgs = [{ role: 'system', content: sys }, { role: 'user', content: args.task + (args.where ? L('\n\nComece por: {0}', args.where) : '') }];
   tmsg._sub = [];
+  // fora do slot da conversa (ela fica esperando o relatório e não pode perder o cache)
+  const slot = await sideSlot(tctx.conv);
+  const extra = slot != null ? { id_slot: slot } : undefined;
   const max = Math.max(3, Number(S.settings.explorerSteps) || 20);
   for (let step = 0; step <= max; step++) {
     if (tctx.signal.aborted) return { content: 'Cancelado.', isError: true };
     const last = step === max;
     if (last) msgs.push({ role: 'user', content: L('Limite de passos atingido. Escreva agora o relatório final com o que já encontrou.') });
     const m = { content: '', reasoning: '', tool_calls: [] };
-    await streamRaw(msgs, last ? [] : tools, m, tctx.signal, null);
+    await streamRaw(msgs, last ? [] : tools, m, tctx.signal, null, extra);
     const calls = m.tool_calls.filter((t) => t && t.function?.name);
     calls.forEach((t) => { if (!t.id) t.id = 'call_' + uid(); });
     const text = splitThink(m.content).text;

@@ -646,7 +646,7 @@ fn write_mcp(app: &App, cfg: &Value) -> Result<(), ApiErr> {
 }
 
 async fn mcp_list(State(app): S) -> Res {
-    ok(json!({"servers": app.mcp.status_json(), "file": app.mcp_file()}))
+    ok(json!({"servers": app.mcp.status_json_mem(), "file": app.mcp_file()}))
 }
 
 async fn mcp_config_get(State(app): S) -> Res {

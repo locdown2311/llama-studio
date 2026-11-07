@@ -58,7 +58,8 @@ async function sideRun(conv, extra, fn) {
 }
 
 async function sideSlot(conv) {
-  if (!S.nSlots || S.nSlots < 2 || S.settings.kvSave === false) return null;
+  // sem slot fixo da conversa não dá para escolher um que não seja o dela
+  if (!S.nSlots || S.nSlots < 2 || conv._slot == null) return null;
   const sl = S.slots;
   const busy = new Set([...S.runs.keys()].map((id) => S.convs.find((c) => c.id === id)?._slot).filter((x) => x != null));
   busy.add(conv._slot);
@@ -78,7 +79,7 @@ async function sideSlot(conv) {
   // o slot guarda o cache de outra conversa parada: vai para o disco antes, senão ela relê tudo ao voltar
   const prev = sl.owner[best] ? S.convs.find((c) => c.id === sl.owner[best]) : null;
   sl.owner[best] = '__lateral'; sl.used[best] = Date.now(); // fica para os próximos pedidos laterais
-  if (prev && (prev.ctx?.tokens || prev.cacheLast?.total || 0) >= 3000 && sl.ok) {
+  if (prev && (prev.ctx?.tokens || prev.cacheLast?.total || 0) >= 3000 && sl.ok && S.settings.kvSave !== false) {
     try {
       await api(`/slots/${best}?action=save`, { filename: kvFile(prev) });
       (prev.kv ||= {})[kvKey()] = Date.now();
@@ -211,7 +212,7 @@ async function auditCall(tc, info, conv, signal) {
   const risk = RISK_RANK[String(v.risco || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()] != null ? String(v.risco).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase() : 'alto';
   const max = RISK_RANK[S.settings.auditMax || 'baixo'] ?? 0;
   const approve = /^aprov/i.test(String(v.decisao || '')) && RISK_RANK[risk] <= max;
-  const out = { risk, approve, reason: String(v.motivo || '').trim().slice(0, 400) || (approve ? L('Sem observações.') : L('Sem motivo informado.')) };
+  const out = { risk, approve, reason: String(v.motivo || '').trim().slice(0, 400) || (approve ? L('Sem observações.') : L('Sem motivo informado.')), slot: extra.id_slot == null ? undefined : extra.id_slot !== conv._slot ? extra.id_slot : null };
   if (approve) AUDITS.get(conv).set(key, out);
   if (approve && risk === 'baixo') AUDIT_OK.get(conv).set(name, okN + 1);
   return done(out);

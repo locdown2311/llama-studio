@@ -353,6 +353,14 @@ impl Entry {
         *self.status.lock().unwrap() = status.to_string();
         *self.error.lock().unwrap() = err;
     }
+    /// pid do processo do conector local (None para conectores por URL ou desconectados).
+    fn pid(&self) -> Option<u32> {
+        let conn = self.conn.lock().unwrap();
+        let c = conn.as_ref()?;
+        let child = c._child.lock().unwrap();
+        child.as_ref()?.id()
+    }
+
     pub fn to_json(&self) -> Value {
         json!({
             "name": self.name,
@@ -400,6 +408,22 @@ impl Mcp {
 
     pub fn status_json(&self) -> Vec<Value> {
         self.servers.read().unwrap().values().map(|e| e.to_json()).collect()
+    }
+
+    /// Como status_json, com a memória de cada conector local (processo e filhos), em bytes.
+    pub fn status_json_mem(&self) -> Vec<Value> {
+        let map = self.servers.read().unwrap();
+        let pids: Vec<(String, u32)> = map.values().filter_map(|e| e.pid().map(|p| (e.name.clone(), p))).collect();
+        let mem = crate::procmem::trees(&pids.iter().map(|x| x.1).collect::<Vec<_>>());
+        map.values()
+            .map(|e| {
+                let mut v = e.to_json();
+                if let Some((_, pid)) = pids.iter().find(|x| x.0 == e.name) {
+                    v["mem"] = json!(mem.get(pid).copied().unwrap_or(0));
+                }
+                v
+            })
+            .collect()
     }
 
     pub fn set_index(&self, idx: HashMap<String, (String, String)>) {
