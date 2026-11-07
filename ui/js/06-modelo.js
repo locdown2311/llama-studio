@@ -202,31 +202,39 @@ function fillCtxPop() {
 
 let noProgress = false;
 /* ---- API externa (auditor, exploradores, tarefas de fundo) ---- */
-/** Esta função vai pela API externa? (configurada em Configurações › API externa) */
-function apiFor(role) { return !!(S.info?.api?.ready && S.settings.apiRoles?.[role]); }
+/** Por qual API externa esta função vai (id do provedor), ou null para o modelo local.
+   Configurações › API externa: cada função escolhe um provedor (true, do formato antigo, = o primeiro). */
+function apiFor(role) {
+  const apis = (S.info?.apis || []).filter((a) => a.ready);
+  const v = S.settings.apiRoles?.[role];
+  if (!v || !apis.length) return null;
+  return (v === true ? apis[0] : apis.find((a) => a.id === v))?.id || null;
+}
+function apiById(id) { return (S.info?.apis || []).find((a) => a.id === id); }
 /** Contagem do dia: pedidos, tokens e falhas (só neste navegador). */
-function apiUse(add) {
+function apiUse(add, pid) {
   const today = new Date().toISOString().slice(0, 10);
-  let u = store.get('apiUse', null);
-  if (!u || u.day !== today) u = { day: today, calls: 0, tokens: 0, fails: 0 };
-  if (add) { u.calls += add.calls || 0; u.tokens += add.tokens || 0; u.fails += add.fails || 0; store.set('apiUse', u); }
+  let all = store.get('apiUse2', null);
+  if (!all || all.day !== today) all = { day: today, by: {} };
+  const u = all.by[pid || '_'] ||= { calls: 0, tokens: 0, fails: 0 };
+  if (add) { u.calls += add.calls || 0; u.tokens += add.tokens || 0; u.fails += add.fails || 0; store.set('apiUse2', all); }
   return u;
 }
 /** Pede pela API externa; se ela falhar (sem internet, limite do plano grátis...), o chamador volta ao modelo local. */
 async function streamApi(messages, tools, msg, signal, onDelta, extra = {}) {
   try {
     await streamRaw(messages, tools, msg, signal, onDelta, { ...extra, _remote: true });
-    apiUse({ calls: 1, tokens: msg.usage?.total_tokens || 0 });
-    msg.via = S.info.api.model;
+    apiUse({ calls: 1, tokens: msg.usage?.total_tokens || 0 }, extra._p);
+    msg.via = apiById(extra._p)?.model || '';
   } catch (e) {
     if (signal?.aborted) throw e;
-    apiUse({ fails: 1 });
+    apiUse({ fails: 1 }, extra._p);
     throw e;
   }
 }
 
 async function streamRaw(messages, tools, msg, signal, onDelta, extra = {}) {
-  const { _fixed, _remote, ...rest } = extra;
+  const { _fixed, _remote, _p, ...rest } = extra;
   // return_progress: o llama-server conta quanto do prompt já leu (barra de progresso antes da 1ª palavra)
   const body = { messages, stream: true, ...(_remote ? {} : { cache_prompt: true }), ...rest };
   if (!noProgress && !_remote) body.return_progress = true;
@@ -239,7 +247,7 @@ async function streamRaw(messages, tools, msg, signal, onDelta, extra = {}) {
     if (st.maxTokens !== '' && st.maxTokens != null) body.max_tokens = Number(st.maxTokens);
   }
 
-  const post = () => fetch(_remote ? '/remote/v1/chat/completions' : '/v1/chat/completions', {
+  const post = () => fetch(_remote ? '/remote/v1/chat/completions?p=' + encodeURIComponent(_p || '') : '/v1/chat/completions', {
     method: 'POST', signal,
     headers: { 'Content-Type': 'application/json', 'X-Studio': '1' },
     body: JSON.stringify(body),

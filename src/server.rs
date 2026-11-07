@@ -253,12 +253,12 @@ async fn proxy(State(app): S, req: Request) -> Response {
     }
 }
 
-async fn remote_chat(State(app): S, b: Bytes) -> Response {
-    crate::remote::chat(&app, b).await
+async fn remote_chat(State(app): S, Query(qs): Q, b: Bytes) -> Response {
+    crate::remote::chat(&app, q(&qs, "p"), b).await
 }
 
-async fn remote_models(State(app): S) -> Res {
-    match crate::remote::models(&app).await {
+async fn remote_models(State(app): S, Query(qs): Q) -> Res {
+    match crate::remote::models(&app, q(&qs, "p")).await {
         Ok(m) => ok(json!({ "models": m })),
         Err(e) => Err(bad(e)),
     }
@@ -287,7 +287,7 @@ async fn state(State(app): S) -> Res {
         "compactOutput": c.compact_output,
         "useRtk": c.use_rtk,
         "lang": c.lang,
-        "api": { "base": c.api_base, "model": c.api_model, "hasKey": !c.api_key.trim().is_empty(), "ready": crate::remote::configured(&app) },
+        "apis": crate::remote::public(&app),
     }))
 }
 
@@ -313,15 +313,27 @@ async fn set_config(State(app): S, b: Bytes) -> Res {
         if let Some(g) = v.get("useRtk").and_then(Value::as_bool) {
             c.use_rtk = g;
         }
-        if let Some(x) = v.get("apiBase").and_then(Value::as_str) {
-            c.api_base = x.trim().to_string();
+        // {"apiProvider": {"id", "name"?, "base"?, "model"?, "key"?}}: cria ou atualiza (chave só troca quando vem)
+        if let Some(p) = v.get("apiProvider").filter(|p| p.is_object()) {
+            let id = p["id"].as_str().unwrap_or("").trim().to_string();
+            if !id.is_empty() {
+                let i = match c.api_providers.iter().position(|x| x.id == id) {
+                    Some(i) => i,
+                    None => {
+                        c.api_providers.push(crate::app::ApiProvider { id: id.clone(), ..Default::default() });
+                        c.api_providers.len() - 1
+                    }
+                };
+                let e = &mut c.api_providers[i];
+                for (k, f) in [("name", &mut e.name), ("base", &mut e.base), ("model", &mut e.model), ("key", &mut e.key)] {
+                    if let Some(x) = p.get(k).and_then(Value::as_str) {
+                        *f = x.trim().to_string();
+                    }
+                }
+            }
         }
-        if let Some(x) = v.get("apiModel").and_then(Value::as_str) {
-            c.api_model = x.trim().to_string();
-        }
-        // chave: só troca quando vem (string vazia apaga)
-        if let Some(x) = v.get("apiKey").and_then(Value::as_str) {
-            c.api_key = x.trim().to_string();
+        if let Some(id) = v.get("apiProviderDelete").and_then(Value::as_str) {
+            c.api_providers.retain(|x| x.id != id);
         }
         if let Some(l) = v.get("lang").and_then(Value::as_str).filter(|l| !l.is_empty()) {
             c.lang = if l.starts_with("en") { "en".into() } else { "pt".into() };

@@ -38,8 +38,9 @@ async function sideAsk(conv, system, user, { maxTokens = 300, temperature = 0, s
   let m = { content: '', reasoning: '', tool_calls: [] };
   const msgs = [{ role: 'system', content: system }, { role: 'user', content: user }];
   const sig = signal || new AbortController().signal;
-  if (apiFor('background')) {
-    try { await streamApi(msgs, [], m, sig, null, { temperature, max_tokens: maxTokens }); return splitThink(m.content || '').text.trim(); }
+  const bgApi = apiFor('background');
+  if (bgApi) {
+    try { await streamApi(msgs, [], m, sig, null, { _p: bgApi, temperature, max_tokens: maxTokens }); return splitThink(m.content || '').text.trim(); }
     catch (e) { if (sig.aborted) throw e; m = { content: '', reasoning: '', tool_calls: [] }; } // cai para o local
   }
   await sideRun(conv, extra, () => streamRaw(msgs, [], m, sig, null, extra));

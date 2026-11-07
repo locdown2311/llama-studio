@@ -192,16 +192,17 @@ async function auditCall(tc, info, conv, signal) {
   const extra = { chat_template_kwargs: { enable_thinking: false }, reasoning_budget: 0, temperature: 0, max_tokens: 400, _fixed: true };
   let m = { content: '', reasoning: '', tool_calls: [] };
   let via = null, apiErr = '';
-  if (apiFor('auditor')) {
+  const auditApi = apiFor('auditor');
+  if (auditApi) {
     // fora do llama-server: não ocupa slot nem mexe no cache de ninguém
     // folga para modelos que raciocinam antes (gpt-oss, qwen3 na Groq): o raciocínio também conta no limite
     const ex = { temperature: 0, max_tokens: 1500 };
     try {
-      try { await streamApi(msgs, [], m, signal, null, { ...ex, response_format: { type: 'json_schema', json_schema: { name: 'veredito', schema } } }); }
+      try { await streamApi(msgs, [], m, signal, null, { ...ex, _p: auditApi, response_format: { type: 'json_schema', json_schema: { name: 'veredito', schema } } }); }
       catch (e) {
         if (signal.aborted || !/response_format|json_schema|schema|400|422/i.test(e.message)) throw e;
         m = { content: '', reasoning: '', tool_calls: [] };
-        await streamApi(msgs, [], m, signal, null, ex);
+        await streamApi(msgs, [], m, signal, null, { ...ex, _p: auditApi });
       }
       if (!/\{[\s\S]*\}/.test(splitThink(m.content || '').text)) throw new Error(L('a API respondeu sem um veredito em JSON'));
       via = m.via;
@@ -572,8 +573,9 @@ async function maybeCompact(conv, system, tools, signal, force = false) {
     let m = { content: '', reasoning: '', tool_calls: [] };
     const sm = [{ role: 'system', content: SUMMARY_PROMPT }, { role: 'user', content: transcript }];
     let done = false;
-    if (apiFor('compact')) {
-      try { await streamApi(sm, [], m, signal, null); done = true; }
+    const compactApi = apiFor('compact');
+    if (compactApi) {
+      try { await streamApi(sm, [], m, signal, null, { _p: compactApi }); done = true; }
       catch (e) { if (signal?.aborted) throw e; m = { content: '', reasoning: '', tool_calls: [] }; }
     }
     if (!done) await streamRaw(sm, [], m, signal, null);

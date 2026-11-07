@@ -84,7 +84,7 @@ function renderSettings() {
     sw(L('Usar a placa de vídeo para desenhar a janela'), L('Desligado, a janela não ocupa VRAM do modelo. Vale na próxima vez que a janela abrir.'), S.info.windowGpu, async (v) => { await api('/api/config', { windowGpu: v }); S.info.windowGpu = v; saved(); }),
     sw(L('Fechar a janela deixa o studio na bandeja'), L('A janela é destruída e a memória dela volta para o sistema.'), S.info.closeToTray !== false, async (v) => { await api('/api/config', { closeToTray: v }); S.info.closeToTray = v; saved(); }));
 
-  section('api', L('API externa'), 'globe', L('Um provedor de IA na internet para tirar trabalho do modelo local. Auditor e exploradores pela API não ocupam slot do llama-server, então a conversa nunca perde o cache por causa deles. Se a API falhar (sem internet, limite do plano grátis), volta para o modelo local.'), apiSection(put, field, saved));
+  section('api', L('API externa'), 'globe', L('Provedores de IA na internet para tirar trabalho do modelo local, cada função no que você escolher. Auditor e exploradores pela API não ocupam slot do llama-server, então a conversa nunca perde o cache por causa deles. Se a API falhar (sem internet, limite do plano grátis), volta para o modelo local.'), apiSection(put, field, saved));
 
   section('share', L('Compartilhar'), 'share', L('Exporte suas configurações num arquivo para outra pessoa (ou outro PC) importar. Tokens e chaves dos conectores nunca saem: quem importa preenche os dele.'),
     h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
@@ -168,66 +168,75 @@ const API_ROLES = [
   ['background', L('Tarefas de fundo'), L('Resumo do mapa da pasta, regras aprendidas, habilidades geradas, regras de arrumar pastas e temas de posts.')],
   ['compact', L('Resumo da compactação'), L('Manda a conversa inteira para resumir. Rápido, mas é o que mais expõe e mais gasta.')],
 ];
+const presetOf = (base) => API_PRESETS.find((p) => p[2] && base && base.replace(/\/+$/, '') === p[2]);
+const apiLabel = (a) => a.name || presetOf(a.base)?.[1] || a.base || L('API');
+
 function apiSection(put, field, saved) {
-  const info = () => S.info.api || {};
   const box = h('div');
-  let forced = false;
-  const draw = () => {
-    box.innerHTML = '';
-    const a = info();
-    const preset = API_PRESETS.find((p) => p[2] && a.base && a.base.replace(/\/+$/, '') === p[2]) || (a.base || forced ? API_PRESETS[4] : null);
-    const save = async (patch) => {
-      try { await api('/api/config', patch); S.info = await api('/api/state'); saved(); draw(); } catch (e) { toast(e.message, 'err'); }
-    };
-    const prov = h('select.select', null, h('option', { value: '' }, L('Nenhum (tudo no modelo local)')), API_PRESETS.map(([id, name]) => h('option', { value: id }, name)));
-    prov.value = preset ? preset[0] : '';
-    prov.addEventListener('change', () => {
-      const p = API_PRESETS.find((x) => x[0] === prov.value);
-      if (!p) { forced = false; return save({ apiBase: '', apiModel: '' }); }
-      if (p[0] === 'custom') { draw2(); return; }
-      forced = false;
-      save({ apiBase: p[2], apiModel: '' });
-    });
-    const base = h('input.input.mono', { value: a.base || '', placeholder: 'https://.../v1' });
-    base.addEventListener('change', () => save({ apiBase: base.value.trim() }));
+  const save = async (patch) => {
+    try { await api('/api/config', patch); S.info = await api('/api/state'); saved(); draw(); } catch (e) { toast(e.message, 'err'); }
+  };
+  const card = (a) => {
+    const pre = presetOf(a.base);
     const key = h('input.input.mono', { type: 'password', autocomplete: 'off', placeholder: a.hasKey ? L('Chave salva (digite para trocar)') : L('Cole a chave da API') });
-    key.addEventListener('change', () => { if (key.value.trim()) save({ apiKey: key.value.trim() }); });
-    const model = h('input.input.mono', { value: a.model || '', placeholder: L('ex.: o id do modelo'), list: 'api-models' });
-    const dl = h('datalist#api-models');
-    model.addEventListener('change', () => save({ apiModel: model.value.trim() }));
+    key.addEventListener('change', () => { if (key.value.trim()) save({ apiProvider: { id: a.id, key: key.value.trim() } }); });
+    const base = h('input.input.mono', { value: a.base || '', placeholder: 'https://.../v1' });
+    base.addEventListener('change', () => save({ apiProvider: { id: a.id, base: base.value.trim() } }));
+    const dl = h('datalist', { id: 'api-models-' + a.id });
+    const model = h('input.input.mono', { value: a.model || '', placeholder: L('ex.: o id do modelo'), list: 'api-models-' + a.id });
+    model.addEventListener('change', () => save({ apiProvider: { id: a.id, model: model.value.trim() } }));
     const listBtn = h('button.btn.sm', { type: 'button', onclick: async () => {
       listBtn.disabled = true;
-      try { const r = await api('/api/remote/models'); dl.innerHTML = ''; r.models.forEach((m) => dl.append(h('option', { value: m }))); toast(L('{0} modelos', r.models.length)); model.focus(); }
+      try { const r = await api('/api/remote/models?p=' + encodeURIComponent(a.id)); dl.innerHTML = ''; r.models.forEach((m) => dl.append(h('option', { value: m }))); toast(L('{0} modelos', r.models.length)); model.focus(); }
       catch (e) { toast(e.message, 'err'); }
       listBtn.disabled = false;
     } }, ic('list'), L('Listar modelos'));
     const test = h('button.btn.sm', { type: 'button', disabled: !a.ready, onclick: async () => {
       test.disabled = true; const t0 = performance.now();
       const m = { content: '', reasoning: '', tool_calls: [] };
-      try { await streamApi([{ role: 'user', content: L('Responda só: ok') }], [], m, new AbortController().signal, null, { max_tokens: 20, temperature: 0 }); toast(L('Respondeu em {0}: {1}', fmtMs(performance.now() - t0), (m.content || '').trim().slice(0, 40) || L('(vazio)'))); }
+      try { await streamApi([{ role: 'user', content: L('Responda só: ok') }], [], m, new AbortController().signal, null, { _p: a.id, max_tokens: 200, temperature: 0 }); toast(L('Respondeu em {0}: {1}', fmtMs(performance.now() - t0), (m.content || '').trim().slice(0, 40) || L('(vazio)'))); }
       catch (e) { toast(e.message, 'err'); }
       test.disabled = false;
     } }, ic('zap'), L('Testar'));
-    const roles = S.settings.apiRoles || {};
-    const roleRows = API_ROLES.map(([id, title, desc]) => {
-      const i = h('input', { type: 'checkbox', checked: !!roles[id], disabled: !a.ready });
-      i.addEventListener('change', () => put({ apiRoles: { ...(S.settings.apiRoles || {}), [id]: i.checked } }));
-      return h('label.tcard', null, h('span.tc-main', null, h('span.tc-title', null, title), h('span.tc-desc', null, desc)), h('span.switch', null, i, h('span')));
-    });
-    const u = apiUse();
-    const link = preset?.[3] ? h('a', { href: preset[3], target: '_blank', rel: 'noopener' }, ic('external'), L('Pegar uma chave grátis')) : null;
-    box.append(
-      field(L('Provedor'), prov, link),
-      ...(prov.value ? [
-        prov.value === 'custom' ? field(L('Endereço'), base, L('O que vem antes de /chat/completions.')) : null,
-        field(L('Chave'), key, L('Fica só no config.json deste PC e nunca sai no pacote de compartilhar.')),
-        field(L('Modelo'), h('div.row', null, model, dl, listBtn, test)),
-        h('div.field', null, h('label', null, L('O que vai pela API')), ...roleRows,
-          h('small', null, L('Planos grátis costumam poder usar o que você manda para treinar modelos (o Gemini grátis avisa isso). Deixe desligado o que tiver dado sensível.'))),
-        h('small.muted', null, L('Hoje: {0} pedidos, {1} tokens, {2} falhas (voltaram para o modelo local).', u.calls, u.tokens.toLocaleString(LOCALE), u.fails)),
-      ] : []));
+    const del = h('button.icon-btn.sm', { type: 'button', title: L('Remover'), 'aria-label': L('Remover'), html: svg('trash'), onclick: async () => {
+      if (!(await confirmBox(L('Remover a API {0}? As funções que usam ela voltam para o modelo local.', apiLabel(a)), L('Remover'), true))) return;
+      const roles = { ...(S.settings.apiRoles || {}) }; for (const k in roles) if (roles[k] === a.id) roles[k] = '';
+      put({ apiRoles: roles }); save({ apiProviderDelete: a.id });
+    } });
+    const u = apiUse(null, a.id);
+    return h('div.api-card', null,
+      h('div.api-head', null, h('b', null, apiLabel(a)), a.ready ? h('span.tag.ok', null, L('pronta')) : h('span.tag.off', null, L('incompleta')),
+        h('span.spacer'), pre?.[3] ? h('a.bin-link', { href: pre[3], target: '_blank', rel: 'noopener' }, ic('external'), L('Pegar uma chave grátis')) : null, del),
+      pre ? null : field(L('Endereço'), base, L('O que vem antes de /chat/completions.')),
+      field(L('Chave'), key),
+      field(L('Modelo'), h('div.row', null, model, dl, listBtn, test)),
+      h('small.muted', null, L('Hoje: {0} pedidos, {1} tokens, {2} falhas (voltaram para o modelo local).', u.calls, u.tokens.toLocaleString(LOCALE), u.fails)));
   };
-  const draw2 = () => { forced = true; draw(); $('input.input.mono', box)?.focus(); };
+  const draw = () => {
+    box.innerHTML = '';
+    const apis = S.info.apis || [];
+    const add = h('select.select', null, h('option', { value: '' }, L('Adicionar uma API...')), API_PRESETS.map(([id, name]) => h('option', { value: id }, name)));
+    add.addEventListener('change', () => {
+      const p = API_PRESETS.find((x) => x[0] === add.value); if (!p) return;
+      let n = 1; while (apis.some((a) => a.id === 'p' + n)) n++;
+      save({ apiProvider: { id: 'p' + n, base: p[2], name: p[0] === 'custom' ? '' : '' } });
+    });
+    // por função: modelo local ou uma das APIs (só as prontas)
+    const roles = S.settings.apiRoles || {};
+    const ready = apis.filter((a) => a.ready);
+    const roleRows = API_ROLES.map(([id, title, desc]) => {
+      const cur0 = roles[id] === true ? ready[0]?.id || '' : roles[id] || '';
+      const sel = h('select.select', null, h('option', { value: '' }, L('Modelo local')), ready.map((a) => h('option', { value: a.id }, `${apiLabel(a)} · ${a.model}`)));
+      sel.value = ready.some((a) => a.id === cur0) ? cur0 : '';
+      sel.addEventListener('change', () => put({ apiRoles: { ...(S.settings.apiRoles || {}), [id]: sel.value } }));
+      return h('div.api-role', null, h('div.api-role-main', null, h('b', null, title), h('small.muted', null, desc)), sel);
+    });
+    box.append(
+      ...apis.map(card),
+      field(apis.length ? L('Outra API') : L('Provedor'), add, apis.length ? L('Dá para ter várias e mandar cada função para uma, espalhando os limites dos planos grátis.') : null),
+      h('div.field', null, h('label', null, L('Quem faz cada função')), ...roleRows,
+        h('small', null, L('Planos grátis costumam poder usar o que você manda para treinar modelos (o Gemini grátis avisa isso). Deixe no modelo local o que tiver dado sensível.'))));
+  };
   draw();
   return box;
 }

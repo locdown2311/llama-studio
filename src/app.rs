@@ -44,11 +44,23 @@ pub struct Config {
     pub ui_settings: Value,
     /// idioma da interface e do que o modelo recebe: "pt" ou "en" (vazio = ainda não escolhido)
     pub lang: String,
-    /// API externa compatível com OpenAI para auditor, exploradores e tarefas de fundo (vazio = não usa)
+    /// formato antigo (v2.44): um provedor só; migra para api_providers ao abrir
     pub api_base: String,
-    /// a chave nunca volta para a interface (só "tem chave") nem sai no pacote de compartilhar
     pub api_key: String,
     pub api_model: String,
+    /// APIs externas compatíveis com OpenAI; cada função (auditor, exploradores...) escolhe uma.
+    /// A chave nunca volta para a interface (só "tem chave") nem sai no pacote de compartilhar.
+    pub api_providers: Vec<ApiProvider>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ApiProvider {
+    pub id: String,
+    pub name: String,
+    pub base: String,
+    pub key: String,
+    pub model: String,
 }
 
 impl Default for Config {
@@ -71,6 +83,7 @@ impl Default for Config {
             api_base: String::new(),
             api_key: String::new(),
             api_model: String::new(),
+            api_providers: vec![],
             ui_settings: json!({
                 "theme": "dark",
                 "colors": {
@@ -147,6 +160,12 @@ impl App {
                 config.lang = l;
             }
         }
+        if !config.api_base.trim().is_empty() && config.api_providers.is_empty() {
+            config.api_providers.push(ApiProvider { id: "p1".into(), name: String::new(), base: config.api_base.clone(), key: config.api_key.clone(), model: config.api_model.clone() });
+        }
+        config.api_base.clear();
+        config.api_key.clear();
+        config.api_model.clear();
         crate::i18n::set(&config.lang);
         if let Ok(u) = std::env::var("STUDIO_LLAMA_URL") {
             config.llama_url = u.trim_end_matches('/').to_string();

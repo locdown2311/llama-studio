@@ -1443,5 +1443,17 @@ const I18N_EN = {
 ", via API: {0}": ", via API: {0}",
 "; a API falhou e usou o modelo local": "; the API failed and the local model was used",
 "o pedido divergiu do que o servidor tinha guardado logo depois de «{0}»: antes vinha «{1}», agora «{2}»": "the request diverged from what the server had stored right after «{0}»: before it was «{1}», now «{2}»",
-"a API respondeu sem um veredito em JSON": "the API answered without a JSON verdict"
+"a API respondeu sem um veredito em JSON": "the API answered without a JSON verdict",
+"Provedores de IA na internet para tirar trabalho do modelo local, cada função no que você escolher. Auditor e exploradores pela API não ocupam slot do llama-server, então a conversa nunca perde o cache por causa deles. Se a API falhar (sem internet, limite do plano grátis), volta para o modelo local.": "AI providers on the internet to take work off the local model, each function on the one you choose. The auditor and explorers through an API do not use a llama-server slot, so the chat never loses its cache because of them. If the API fails (no internet, free plan limit), it falls back to the local model.",
+"Remover a API {0}? As funções que usam ela voltam para o modelo local.": "Remove the API {0}? The functions using it go back to the local model.",
+"pronta": "ready",
+"incompleta": "incomplete",
+"Adicionar uma API...": "Add an API...",
+"Modelo local": "Local model",
+"Outra API": "Another API",
+"Dá para ter várias e mandar cada função para uma, espalhando os limites dos planos grátis.": "You can have several and send each function to one, spreading the free plan limits.",
+"Quem faz cada função": "Who does each function",
+"Planos grátis costumam poder usar o que você manda para treinar modelos (o Gemini grátis avisa isso). Deixe no modelo local o que tiver dado sensível.": "Free plans can often use what you send to train models (free Gemini says so). Keep on the local model whatever has sensitive data.",
+"API": "API",
+"API não encontrada.": "API not found."
 };

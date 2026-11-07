@@ -212,7 +212,7 @@ async function runExplorer(args, tctx, tmsg) {
     if (last) msgs.push({ role: 'user', content: L('Limite de passos atingido. Escreva agora o relatório final com o que já encontrou.') });
     const m = { content: '', reasoning: '', tool_calls: [] };
     if (remote) {
-      try { await streamApi(msgs, last ? [] : tools, m, tctx.signal, null); tmsg.via = m.via; }
+      try { await streamApi(msgs, last ? [] : tools, m, tctx.signal, null, { _p: remote }); tmsg.via = m.via; }
       catch (e) {
         if (tctx.signal.aborted) throw e;
         // API fora (limite do plano grátis, sem internet): segue no modelo local daqui em diante
