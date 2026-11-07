@@ -35,9 +35,8 @@ function jumpTo(start, toolId) {
 /** Uma pergunta curta ao modelo, sem ferramentas nem raciocínio, num slot que não estraga o cache da conversa. */
 async function sideAsk(conv, system, user, { maxTokens = 300, temperature = 0, signal } = {}) {
   const extra = { chat_template_kwargs: { enable_thinking: false }, reasoning_budget: 0, temperature, max_tokens: maxTokens, _fixed: true };
-  const slot = conv ? sideSlot(conv) : null; if (slot != null) extra.id_slot = slot; else S.sideShared = (S.sideShared || 0) + 1;
   const m = { content: '', reasoning: '', tool_calls: [] };
-  await streamRaw([{ role: 'system', content: system }, { role: 'user', content: user }], [], m, signal || new AbortController().signal, null, extra);
+  await sideRun(conv, extra, () => streamRaw([{ role: 'system', content: system }, { role: 'user', content: user }], [], m, signal || new AbortController().signal, null, extra));
   return splitThink(m.content || '').text.trim();
 }
 const clipText = (t, n) => { t = String(t ?? ''); return t.length > n ? t.slice(0, n) + ` [... +${t.length - n}]` : t; };

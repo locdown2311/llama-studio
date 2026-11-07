@@ -45,6 +45,31 @@ function dedupeResults(conv, results) {
   }
 }
 
+/** Pedido lateral (auditor, perguntas curtas) sem estragar o cache da conversa.
+   Com um slot livre, vai nele. Com um slot só, o cache da conversa vai para o disco antes e volta depois:
+   segundos de disco em vez de reler a conversa inteira no próximo passo. */
+async function sideRun(conv, extra, fn) {
+  const slot = conv ? sideSlot(conv) : null;
+  if (slot != null) { extra.id_slot = slot; return fn(); }
+  const own = conv?._slot;
+  // conversa curta relê rápido; só vale guardar no disco quando há bastante contexto
+  const size = Math.max(conv?.ctx?.tokens || 0, conv?.cacheLast?.total || 0, conv ? JSON.stringify(conv.messages).length / 4 : 0);
+  if (own != null && S.slots.ok && S.settings.kvSave !== false && size >= 2000) {
+    let saved = false;
+    try { await api(`/slots/${own}?action=save`, { filename: kvFile(conv) }); saved = true; } catch { /* sem --slot-save-path */ }
+    if (saved) {
+      extra.id_slot = own;
+      try { return await fn(); }
+      finally {
+        try { await api(`/slots/${own}?action=restore`, { filename: kvFile(conv) }); (conv.kv ||= {})[kvKey()] = Date.now(); }
+        catch { S.sideShared = (S.sideShared || 0) + 1; }
+      }
+    }
+  }
+  S.sideShared = (S.sideShared || 0) + 1;
+  return fn();
+}
+
 function sideSlot(conv) {
   if (!S.nSlots || S.nSlots < 2 || S.settings.kvSave === false) return null;
   const sl = S.slots;
@@ -72,7 +97,8 @@ function auditorSection() {
   const st = S.settings;
   const save = () => store.set('settings', S.settings);
   const sw = (key, title, desc) => {
-    const i = h('input', { type: 'checkbox', checked: !!st[key] });
+    const on = key === 'auditReversible' ? st[key] !== false : !!st[key];
+    const i = h('input', { type: 'checkbox', checked: on });
     i.addEventListener('change', () => { S.settings[key] = i.checked; save(); if (key === 'auditor') more.hidden = !i.checked; });
     return h('label.tcard', null, h('span.tc-main', null, h('span.tc-title', null, title), h('span.tc-desc', null, desc)), h('span.switch', null, i, h('span')));
   };
@@ -83,6 +109,7 @@ function auditorSection() {
   pol.addEventListener('change', () => { S.settings.auditPolicy = pol.value.trim() === AUDIT_POLICY.trim() ? '' : pol.value; save(); });
   const reset = h('button.btn.sm', { type: 'button', onclick: () => { pol.value = AUDIT_POLICY; S.settings.auditPolicy = ''; save(); toast('Política padrão restaurada'); } }, 'Restaurar a padrão');
   const more = h('div', { hidden: !st.auditor },
+    sw('auditReversible', 'Arquivos editados na pasta passam direto', 'Criar e editar arquivos dentro da pasta de trabalho sempre guarda um ponto de restauração antes, então dá para desfazer. Sem chamar o modelo, a ação não espera e o cache da conversa não se perde.'),
     sw('auditMcp', 'Auditar também as ferramentas de conectores', 'Debuggers, bancos de dados e APIs também passam por ele.'),
     h('div.field', null, h('label', null, 'O auditor aprova sozinho'), max, h('small', null, 'Acima disso, ou se ele tiver dúvida, a ação espera você com a análise dele, mesmo em "Nunca perguntar".')),
     h('div.field', null, h('label', null, 'Política do auditor'), pol, h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', marginTop: '6px' } }, h('small', { style: { flex: 1 } }, 'Regras que ele segue para decidir. Escreva o que é seguro e o que deve sempre passar por você.'), reset)));
@@ -113,6 +140,9 @@ async function auditCall(tc, info, conv, signal) {
   if (prev) return done({ ...prev, reason: prev.reason + ' (mesma ação já aprovada nesta conversa)' });
   // leitura dentro da pasta: nem precisa perguntar ao modelo
   if (info.source === 'builtin' && !info.mutating && insideWs(args?.path, ws)) return done({ risk: 'baixo', approve: true, reason: 'Só leitura, dentro da pasta de trabalho.', rule: true });
+  // criar e editar arquivos pelas ferramentas internas só acontece dentro da pasta e sempre guarda um ponto
+  // de restauração antes: dá para desfazer, então não vale uma chamada ao modelo (nem estragar o cache)
+  if (S.settings.auditReversible !== false && info.source === 'builtin' && FILE_MUT.has(name) && insideWs(args?.path, ws)) return done({ risk: 'baixo', approve: true, reason: 'Alteração de arquivo dentro da pasta de trabalho, com ponto de restauração guardado antes (dá para desfazer).', rule: true });
 
   const lastUser = [...conv.messages].reverse().find((m) => m.role === 'user' && !m.hidden);
   const lastAsst = [...conv.messages].reverse().find((m) => m.role === 'assistant' && m.tool_calls?.some((t) => t.id === tc.id));
@@ -131,15 +161,16 @@ async function auditCall(tc, info, conv, signal) {
   const msgs = [{ role: 'system', content: AUDIT_SYS + '\n\n# Política\n' + (S.settings.auditPolicy?.trim() || AUDIT_POLICY) }, { role: 'user', content: user }];
   const schema = { type: 'object', properties: { motivo: { type: 'string' }, risco: { enum: ['baixo', 'medio', 'alto'] }, decisao: { enum: ['aprovar', 'usuario'] } }, required: ['motivo', 'risco', 'decisao'] };
   const extra = { chat_template_kwargs: { enable_thinking: false }, reasoning_budget: 0, temperature: 0, max_tokens: 400, _fixed: true };
-  const slot = sideSlot(conv); if (slot != null) extra.id_slot = slot; else S.sideShared = (S.sideShared || 0) + 1;
   let m = { content: '', reasoning: '', tool_calls: [] };
   try {
-    try { await streamRaw(msgs, [], m, signal, null, { ...extra, response_format: { type: 'json_schema', json_schema: { name: 'veredito', schema } } }); }
-    catch (e) {
-      if (signal.aborted) throw e;
-      m = { content: '', reasoning: '', tool_calls: [] };
-      await streamRaw(msgs, [], m, signal, null, extra); // motor sem gramática JSON
-    }
+    await sideRun(conv, extra, async () => {
+      try { await streamRaw(msgs, [], m, signal, null, { ...extra, response_format: { type: 'json_schema', json_schema: { name: 'veredito', schema } } }); }
+      catch (e) {
+        if (signal.aborted) throw e;
+        m = { content: '', reasoning: '', tool_calls: [] };
+        await streamRaw(msgs, [], m, signal, null, extra); // motor sem gramática JSON
+      }
+    });
   } catch (e) {
     if (signal.aborted) throw e;
     return done({ risk: 'alto', approve: false, reason: 'O auditor falhou: ' + (e.message || e), failed: true });
