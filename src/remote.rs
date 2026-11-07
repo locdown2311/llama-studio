@@ -103,18 +103,25 @@ pub async fn chat(app: &App, id: &str, body: Bytes) -> Response {
         }
         rb.body(body.clone())
     };
-    // uma conexão parada no pool pode ter sido fechada pelo provedor: falha ao mandar = tenta de novo uma vez
+    // uma conexão parada no pool pode ter sido fechada pelo provedor: falha ao mandar = tenta de novo duas vezes
     let sent = match build().send().await {
         Err(e) if e.is_connect() || e.is_request() => {
             tokio::time::sleep(Duration::from_millis(400)).await;
+            let _sent1 = build().send().await;
+            tokio::time::sleep(Duration::from_millis(400)).await;
             build().send().await
         }
-        // erro interno ou sobrecarga do provedor (o Gemma 4 no Gemini dá 500 com frequência): mais uma vez
+        // erro interno ou sobrecarga do provedor (o Gemma 4 no Gemini dá 500 com frequência): duas vezes
         Ok(r) if matches!(r.status().as_u16(), 500 | 502 | 503 | 529) => {
+            tokio::time::sleep(Duration::from_millis(1200)).await;
+            let sent1 = match build().send().await {
+                Ok(r2) => r2,
+                Err(_) => r,
+            };
             tokio::time::sleep(Duration::from_millis(1200)).await;
             match build().send().await {
                 Ok(r2) => Ok(r2),
-                Err(_) => Ok(r),
+                Err(_) => Ok(sent1),
             }
         }
         r => r,
