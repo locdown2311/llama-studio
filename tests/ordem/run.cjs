@@ -1,6 +1,6 @@
 // Confere a ordem dos arquivos da interface (ui/js): código que roda ao carregar só pode usar
 // o que foi declarado num arquivo anterior. Funções só chamadas depois (eventos, init) podem usar qualquer um.
-// Uso: npm install --prefix tests/ordem && node tests/ordem/run.cjs
+// Uso (dentro de tests/ordem): npm ci && node run.cjs
 const fs = require('fs');
 const path = require('path');
 const acorn = require('acorn');

@@ -13,6 +13,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: Get-ChildItem ui/js/*.js | ForEach-Object { node --check $_.FullName; if ($LASTEXITCODE) { exit 1 } }
       - run: node tests/rotas/run.mjs
-      - run: npm install --prefix tests/ordem --no-audit --no-fund
-      - run: node tests/ordem/run.cjs
+      - working-directory: tests/ordem
+        run: |
+          npm ci --no-audit --no-fund
+          node run.cjs
       - run: cargo check --locked
