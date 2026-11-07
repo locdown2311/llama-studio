@@ -109,6 +109,14 @@ pub async fn chat(app: &App, id: &str, body: Bytes) -> Response {
             tokio::time::sleep(Duration::from_millis(400)).await;
             build().send().await
         }
+        // erro interno ou sobrecarga do provedor (o Gemma 4 no Gemini dá 500 com frequência): mais uma vez
+        Ok(r) if matches!(r.status().as_u16(), 500 | 502 | 503 | 529) => {
+            tokio::time::sleep(Duration::from_millis(1200)).await;
+            match build().send().await {
+                Ok(r2) => Ok(r2),
+                Err(_) => Ok(r),
+            }
+        }
         r => r,
     };
     match sent {
