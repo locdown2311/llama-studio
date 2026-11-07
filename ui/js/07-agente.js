@@ -350,7 +350,7 @@ async function runAgent(conv) {
         askMsg.catalogIds = fresh;
       }
     } else conv.catalogBase = catalogSys;
-    const tctx = { signal: ac.signal, conv, refs, groups, ctxText: ctx.text, ws: wsOf(conv) };
+    const tctx = { signal: ac.signal, conv, refs, groups, ctxText: ctx.text, ws: wsOf(conv), mcp: sel.mcp || [] };
     const persona = personaOf(conv); const proj = projectOf(conv);
     const system = [
       S.settings.systemPrompt.trim(),

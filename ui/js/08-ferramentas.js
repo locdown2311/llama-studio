@@ -196,9 +196,26 @@ async function runExplorer(args, tctx, tmsg) {
   if (tctx.groups.includes('browser')) only.push('browser_navigate', 'browser_read', 'browser_click', 'browser_back');
   if (tctx.groups.includes('history')) only.push('recall_history');
   const { tools } = await api('/api/tools', { groups: ['read', 'browser', 'history'], mcp: [], skills: [], only });
+  // conectores da conversa (decompilador, debugger...): o explorador usa as ferramentas que só leem
+  const mcpMeta = {};
+  if (tctx.mcp?.length) {
+    try {
+      const r = await api('/api/tools', { groups: [], mcp: tctx.mcp, skills: [], lazy: false, eager: tctx.mcp, full: tctx.mcp });
+      let ro = r.tools.filter((t) => r.meta[t.function.name]?.source === 'mcp' && r.meta[t.function.name]?.mutating === false);
+      // no modelo local cada definição pesa no contexto: só as que a conversa já carregou, se forem muitas
+      if (!apiFor('explorer') && ro.length > 25) {
+        const used = new Set([...(tctx.conv.extraTools || []), ...tctx.conv.messages.filter((m) => m.role === 'tool').map((m) => m.name)]);
+        ro = ro.filter((t) => used.has(t.function.name));
+      }
+      for (const t of ro) { tools.push(t); only.push(t.function.name); mcpMeta[t.function.name] = r.meta[t.function.name]; }
+    } catch { /* conectores fora: segue só com as ferramentas de leitura */ }
+  }
   const sys = L('Você é um subagente explorador do llama studio. Investigue a tarefa usando só as ferramentas de leitura disponíveis. ')
     + L('Seja eficiente: procure antes de ler, leia só o necessário. Não faça perguntas. Quando terminar, responda com um relatório objetivo em português: ')
-    + L('o que encontrou, com caminhos de arquivo, trechos curtos relevantes e URLs. Se algo não existir, diga.\n\n') + tctx.ctxText.split('\n\n').filter((p) => !p.startsWith('The user turned on the sk') && !p.startsWith('O usuário ativou as skills')).join('\n\n');
+    + L('o que encontrou, com caminhos de arquivo, trechos curtos relevantes e URLs. Se algo não existir, diga.\n\n') + L('Use só as ferramentas que você recebeu (aqui não existem update_todos, search_tools nem nada que escreva).\n\n')
+    // o contexto da conversa, sem as partes que falam de ferramentas que o explorador não tem
+    + tctx.ctxText.split('\n\n').filter((p) => !p.startsWith('The user turned on the sk') && !p.startsWith('O usuário ativou as skills')
+      && !/\b(update_todos|search_tools|execute_code|run_command|edit_file|write_file|notebook|explore)\b/.test(p)).join('\n\n');
   const msgs = [{ role: 'system', content: sys }, { role: 'user', content: args.task + (args.where ? L('\n\nComece por: {0}', args.where) : '') }];
   tmsg._sub = [];
   // fora do slot da conversa (ela fica esperando o relatório e não pode perder o cache)
@@ -238,7 +255,7 @@ async function runExplorer(args, tctx, tmsg) {
       const a = parseArgs(t.function.arguments) || {};
       const st = { name: t.function.name, summary: toolSummary(t.function.name, a), status: 'running' };
       tmsg._sub.push(st); scheduleRender();
-      const run = () => (only.includes(t.function.name) ? execTool(t.function.name, a, {}, tctx, {}) : Promise.resolve({ content: L('Ferramenta não permitida para o explorador.'), isError: true }))
+      const run = () => (only.includes(t.function.name) ? execTool(t.function.name, a, mcpMeta[t.function.name] || {}, tctx, {}) : Promise.resolve({ content: L('Ferramenta não disponível para o explorador. Use uma destas: {0}', only.join(', ')), isError: true }))
         .then((r) => { results[i] = r; st.status = r.isError ? 'error' : 'ok'; scheduleRender(); });
       if (PARALLEL_READS.has(t.function.name)) pend.push(run());
       else { await Promise.all(pend); pend.length = 0; await run(); }
