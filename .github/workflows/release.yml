@@ -37,10 +37,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Conferir a interface
-        run: node --check ui/app.js
+        run: Get-ChildItem ui/js/*.js | ForEach-Object { node --check $_.FullName; if ($LASTEXITCODE) { exit 1 } }
 
       - name: Testar os recursos automáticos
         run: node tests/rotas/run.mjs
+
+      - name: Conferir a ordem dos arquivos da interface
+        run: |
+          npm install --prefix tests/ordem --no-audit --no-fund
+          node tests/ordem/run.cjs
 
       - name: Compilar
         run: cargo build --release --locked

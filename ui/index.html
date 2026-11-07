@@ -302,6 +302,22 @@
 </div>
 <div id="modal-root"></div>
 <div id="toasts" aria-live="polite"></div>
-<script src="/app.js"></script>
+<!-- a interface é dividida por assunto; os arquivos compartilham o escopo global e carregam nesta ordem -->
+<script src="/js/01-base.js"></script>
+<script src="/js/02-conversas.js"></script>
+<script src="/js/03-editor.js"></script>
+<script src="/js/04-envio.js"></script>
+<script src="/js/05-utilitarios.js"></script>
+<script src="/js/06-modelo.js"></script>
+<script src="/js/07-agente.js"></script>
+<script src="/js/08-ferramentas.js"></script>
+<script src="/js/09-arquivos.js"></script>
+<script src="/js/10-recursos.js"></script>
+<script src="/js/11-configuracoes.js"></script>
+<script src="/js/12-servidor.js"></script>
+<script src="/js/13-aprendizado.js"></script>
+<script src="/js/14-investigacao.js"></script>
+<script src="/js/15-atividade.js"></script>
+<script src="/js/16-inicio.js"></script>
 </body>
 </html>

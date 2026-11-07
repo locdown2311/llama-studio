@@ -1,0 +1,193 @@
+/* llama studio - ferramentas internas (execute_code, explorar, histórico...) */
+'use strict';
+
+/* ============================================================ ferramentas internas */
+const TOOL_INFO = {
+  browser: { sec: 'Navegador', title: 'Controlar o navegador', short: 'navegador', desc: 'Abrir sites, ler páginas, clicar e preencher numa janela própria do Edge.' },
+  computer: { sec: 'Computador', title: 'Controlar o computador', short: 'computador', desc: 'Ver janelas e elementos da tela, clicar, digitar e atalhos. Sempre pede permissão.' },
+  read: { sec: 'Arquivos', title: 'Ler arquivos', short: 'ler', desc: 'Listar pastas, ler e procurar arquivos.' },
+  edit: { sec: 'Arquivos', title: 'Editar arquivos', short: 'editar', desc: 'Trocar trechos de arquivos existentes.' },
+  write: { sec: 'Arquivos', title: 'Escrever arquivos', short: 'escrever', desc: 'Criar arquivos e pastas.' },
+  shell: { sec: 'Shell', title: 'Executar comandos', short: 'comandos', desc: 'Rodar comandos no PowerShell dentro da pasta de trabalho.' },
+  code: { sec: 'Shell', title: 'Executar código de ferramentas', short: 'código', desc: 'JavaScript que chama várias ferramentas e combina os resultados.' },
+  history: { sec: 'Busca', title: 'Lembrar conversas', short: 'histórico', desc: 'Procurar no histórico desta e das outras conversas.' },
+  toolsearch: { sec: 'Busca', title: 'Buscar ferramentas', short: 'buscar ferramentas', desc: 'Achar e ativar ferramentas de conectores sob demanda.' },
+  todo: { sec: 'Planejamento', title: 'Lista de tarefas', short: 'tarefas', desc: 'O modelo escreve um plano e vai marcando cada passo; você acompanha acima da caixa de texto.' },
+  notebook: { sec: 'Planejamento', title: 'Caderno de investigação', short: 'caderno', desc: 'O modelo registra achados (endereços, funções, hipóteses) num caderno do projeto e consulta antes de repetir trabalho.' },
+  explore: { sec: 'Subagentes', title: 'Subagentes exploradores', short: 'exploradores', desc: 'Investigação só de leitura com contexto próprio, vários em paralelo.' },
+};
+function enabledGroups() { return TOOL_GROUPS.filter((g) => S.settings.tools[g]); }
+function visionOn() { return S.settings.vision === 'on' || (S.settings.vision === 'auto' && S.vision); }
+
+/** Executa uma ferramenta: as da interface aqui, as outras no servidor. */
+const FILE_MUT = new Set(['write_file', 'edit_file', 'create_directory']);
+/** Ferramentas só de leitura que podem rodar ao mesmo tempo (no agente e nos exploradores). */
+const PARALLEL_READS = new Set(['read_file', 'list_directory', 'search_files', 'read_skill_file', 'recall_history']);
+
+/** Desfaz as alterações de arquivo das mensagens de ferramenta dadas (da mais nova para a mais antiga). */
+async function undoTools(conv, tmsgs) {
+  const ids = []; const owners = [];
+  for (const m of [...tmsgs].reverse()) {
+    if (!m.cps?.length || m.undone) continue;
+    ids.push(...[...m.cps].reverse()); owners.push(m);
+  }
+  if (!ids.length) return { done: [], errors: [] };
+  const r = await api('/api/checkpoints/undo', { conv: conv.id, ids });
+  const failed = new Set(r.errors.map((e) => e.id));
+  for (const m of owners) if (!m.cps.some((c) => failed.has(c))) m.undone = true;
+  saveConvs();
+  if (wsOf(conv) === S.ws.path) refreshTree();
+  return r;
+}
+
+async function execTool(name, args, info, tctx, tmsg) {
+  try {
+    if (['write_file', 'edit_file', 'create_directory'].includes(name) && args?.path && tctx.conv) {
+      const why = busyBlock(tctx.conv, tmsg?.tool_call_id, joinPath(tctx.ws, args.path));
+      if (why) return { content: why, isError: true };
+    }
+    if (name === 'execute_code') return await runCode(args?.code ?? '', tctx, tmsg);
+    if (name === 'recall_history') return recallHistory(args || {}, tctx.conv);
+    if (name === 'update_todos') return await updateTodos(tctx.conv, args, tctx.signal);
+    if (name === 'notebook') return await notebookTool(tctx.conv, args);
+    if (name === 'search_tools') {
+      const names = Array.isArray(args?.names) ? args.names : typeof args?.names === 'string' ? args.names.split(/[\s,]+/).filter(Boolean) : [];
+      if (!names.length && !String(args?.query || '').trim()) return { content: 'Passe query (palavras-chave) para procurar, ou names para carregar.', isError: true };
+      const r = await api('/api/tools/search', { query: names.length ? '' : args?.query || '', names });
+      if (!r.tools.length) return { content: 'Nenhuma ferramenta encontrada para essa busca.', isError: false };
+      // a busca só mostra; carregar é com names (um conector grande não entra inteiro no contexto)
+      if (!names.length) return { content: 'Encontradas (ainda não carregadas). Para usar, chame search_tools com names=[...] das que precisar:\n' + r.tools.map((t) => `- ${t.name} (${t.server}): ${t.description}`).join('\n'), isError: false };
+      tctx.conv.extraTools = [...new Set([...(tctx.conv.extraTools || []), ...r.tools.map((t) => t.name)])];
+      return { content: 'Carregadas para os próximos passos:\n' + r.tools.map((t) => `- ${t.name} (${t.server}): ${t.description}`).join('\n'), isError: false };
+    }
+    const body = { name, arguments: typeof args === 'string' ? args : JSON.stringify(args ?? {}), allow: tctx.refs, ws: tctx.ws };
+    // ponto de restauração: o servidor guarda o arquivo antes de mexer
+    const owner = tmsg?._cpOwner || tmsg;
+    if (FILE_MUT.has(name) && owner?.tool_call_id && tctx.conv) {
+      const cps = (owner.cps ||= []);
+      body.cp = cps.length ? `${owner.tool_call_id}_${cps.length}` : owner.tool_call_id;
+      body.conv = tctx.conv.id;
+      cps.push(body.cp);
+    }
+    const r = await api('/api/tools/call', body);
+    return r;
+  } catch (e) { return { content: 'Erro: ' + e.message, isError: true }; }
+}
+
+function recallHistory(args, conv) {
+  const words = String(args.query || '').toLowerCase().split(/\s+/).filter((w) => w.length > 1);
+  if (!words.length) return { content: 'Informe o que procurar.', isError: true };
+  const convs = args.scope === 'atual' ? [conv] : S.convs;
+  const hits = [];
+  for (const c of convs) {
+    c.messages.forEach((m, i) => {
+      if (m.hidden) return;
+      const text = m.role === 'user' ? m.content : m.role === 'assistant' ? splitThink(m.content).text : m.role === 'tool' ? m.content : '';
+      if (!text) return;
+      const low = text.toLowerCase();
+      const score = words.filter((w) => low.includes(w)).length;
+      if (!score) return;
+      const at = Math.max(0, low.indexOf(words.find((w) => low.includes(w))) - 160);
+      hits.push({ score, c, i, role: m.role, t: m.ts || c.updatedAt, snip: (at ? '...' : '') + text.slice(at, at + 420).replace(/\s+/g, ' ') + (text.length > at + 420 ? '...' : '') });
+    });
+  }
+  hits.sort((a, b) => b.score - a.score || b.t - a.t);
+  const top = hits.slice(0, Math.min(20, Number(args.limit) || 8));
+  if (!top.length) return { content: 'Nada encontrado no histórico.', isError: false };
+  const role = { user: 'usuário', assistant: 'assistente', tool: 'ferramenta' };
+  return { content: top.map((h) => `### ${h.c.title} (${fmtStamp(h.t)}, ${role[h.role]})\n${h.snip}`).join('\n\n'), isError: false };
+}
+
+/** Executa JavaScript num Worker isolado; tool() chama as ferramentas de verdade. */
+function runCode(code, tctx, tmsg) {
+  const src = `
+    const pending = new Map(); let seq = 0;
+    self.tool = (name, args = {}) => new Promise((res, rej) => { const id = ++seq; pending.set(id, { res, rej }); postMessage({ t: 'call', id, name, args }); });
+    const fmt = (a) => a.map((x) => typeof x === 'string' ? x : (() => { try { return JSON.stringify(x); } catch { return String(x); } })()).join(' ');
+    console.log = console.info = console.warn = console.error = (...a) => postMessage({ t: 'log', s: fmt(a) });
+    onmessage = async (e) => {
+      const m = e.data;
+      if (m.t === 'run') {
+        try {
+          const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
+          const v = await new AsyncFn(m.code)();
+          postMessage({ t: 'done', v: v === undefined ? null : typeof v === 'string' ? v : JSON.stringify(v, null, 2) });
+        } catch (err) { postMessage({ t: 'error', s: String((err && err.stack) || err) }); }
+      } else if (m.t === 'result') {
+        const p = pending.get(m.id); pending.delete(m.id);
+        if (m.error) p.rej(new Error(m.error)); else p.res(m.content);
+      }
+    };`;
+  const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+  const w = new Worker(url);
+  const logs = []; let calls = 0;
+  tmsg._sub = [];
+  return new Promise((resolve) => {
+    let done = false;
+    const logText = () => (logs.length ? '[console]\n' + logs.join('\n').slice(-20000) : '');
+    const finish = (content, isError) => { if (done) return; done = true; clearTimeout(timer); w.terminate(); URL.revokeObjectURL(url); resolve({ content: content || '(sem saída)', isError }); };
+    const timer = setTimeout(() => finish([logText(), 'Tempo esgotado (120 s).'].filter(Boolean).join('\n\n'), true), 120000);
+    tctx.signal.addEventListener('abort', () => finish('Cancelado.', true), { once: true });
+    w.onmessage = async (e) => {
+      const m = e.data;
+      if (m.t === 'log') logs.push(m.s);
+      else if (m.t === 'call') {
+        let r;
+        if (++calls > 200) r = { content: 'Limite de 200 chamadas por execução.', isError: true };
+        else if (['execute_code', 'explore'].includes(m.name)) r = { content: `${m.name} não pode ser chamada de dentro do código.`, isError: true };
+        else {
+          const step = { name: m.name, summary: toolSummary(m.name, m.args), status: 'running' };
+          tmsg._sub.push(step); scheduleRender();
+          r = await execTool(m.name, m.args, {}, tctx, { _cpOwner: tmsg });
+          step.status = r.isError ? 'error' : 'ok'; scheduleRender();
+        }
+        if (!done) w.postMessage({ t: 'result', id: m.id, content: r.content, error: r.isError ? r.content : null });
+      } else if (m.t === 'done') finish([logText(), m.v != null ? '[retorno]\n' + m.v : ''].filter(Boolean).join('\n\n'), false);
+      else if (m.t === 'error') finish([logText(), '[erro]\n' + m.s].filter(Boolean).join('\n\n'), true);
+    };
+    w.onerror = (e) => finish('[erro]\n' + (e.message || 'falha ao executar o código'), true);
+    w.postMessage({ t: 'run', code });
+  });
+}
+
+/** Subagente explorador: ciclo próprio, só ferramentas de leitura, devolve um relatório. */
+async function runExplorer(args, tctx, tmsg) {
+  const only = ['list_directory', 'read_file', 'search_files'];
+  if (tctx.groups.includes('browser')) only.push('browser_navigate', 'browser_read', 'browser_click', 'browser_back');
+  if (tctx.groups.includes('history')) only.push('recall_history');
+  const { tools } = await api('/api/tools', { groups: ['read', 'browser', 'history'], mcp: [], skills: [], only });
+  const sys = 'Você é um subagente explorador do llama studio. Investigue a tarefa usando só as ferramentas de leitura disponíveis. '
+    + 'Seja eficiente: procure antes de ler, leia só o necessário. Não faça perguntas. Quando terminar, responda com um relatório objetivo em português: '
+    + 'o que encontrou, com caminhos de arquivo, trechos curtos relevantes e URLs. Se algo não existir, diga.\n\n' + tctx.ctxText.split('\n\n').filter((p) => !p.startsWith('O usuário ativou as skills')).join('\n\n');
+  const msgs = [{ role: 'system', content: sys }, { role: 'user', content: args.task + (args.where ? `\n\nComece por: ${args.where}` : '') }];
+  tmsg._sub = [];
+  const max = Math.max(3, Number(S.settings.explorerSteps) || 20);
+  for (let step = 0; step <= max; step++) {
+    if (tctx.signal.aborted) return { content: 'Cancelado.', isError: true };
+    const last = step === max;
+    if (last) msgs.push({ role: 'user', content: 'Limite de passos atingido. Escreva agora o relatório final com o que já encontrou.' });
+    const m = { content: '', reasoning: '', tool_calls: [] };
+    await streamRaw(msgs, last ? [] : tools, m, tctx.signal, null);
+    const calls = m.tool_calls.filter((t) => t && t.function?.name);
+    calls.forEach((t) => { if (!t.id) t.id = 'call_' + uid(); });
+    const text = splitThink(m.content).text;
+    if (!calls.length) return { content: text.trim() || 'O subagente terminou sem relatório.', isError: false };
+    msgs.push({ role: 'assistant', content: text, tool_calls: calls.map((t) => ({ id: t.id, type: 'function', function: { name: t.function.name, arguments: validArgs(t.function.arguments, () => {}) } })) });
+    // leituras do mesmo passo rodam juntas; o navegador (uma página só) vai em ordem
+    const results = new Array(calls.length);
+    const pend = [];
+    for (let i = 0; i < calls.length; i++) {
+      const t = calls[i];
+      const a = parseArgs(t.function.arguments) || {};
+      const st = { name: t.function.name, summary: toolSummary(t.function.name, a), status: 'running' };
+      tmsg._sub.push(st); scheduleRender();
+      const run = () => (only.includes(t.function.name) ? execTool(t.function.name, a, {}, tctx, {}) : Promise.resolve({ content: 'Ferramenta não permitida para o explorador.', isError: true }))
+        .then((r) => { results[i] = r; st.status = r.isError ? 'error' : 'ok'; scheduleRender(); });
+      if (PARALLEL_READS.has(t.function.name)) pend.push(run());
+      else { await Promise.all(pend); pend.length = 0; await run(); }
+    }
+    await Promise.all(pend);
+    calls.forEach((t, i) => msgs.push({ role: 'tool', tool_call_id: t.id, content: String(results[i].content).slice(0, 24000) }));
+  }
+  return { content: 'O subagente não concluiu.', isError: true };
+}

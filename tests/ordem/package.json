@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "description": "Confere a ordem dos arquivos de ui/js",
+  "dependencies": { "acorn": "8.14.0", "acorn-walk": "8.3.4" }
+}

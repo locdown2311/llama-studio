@@ -145,6 +145,8 @@ cargo build --release
 |---|---|
 | `src/` | Servidor local (axum), cliente MCP, gerenciador do llama-server, ferramentas, downloads, janela e bandeja |
 | `ui/` | Interface (HTML, CSS e JS sem build), embutida no executável |
+| `ui/js/` | O JavaScript da interface, um arquivo por assunto (`01-base.js` … `16-inicio.js`). São scripts comuns que dividem o mesmo escopo e carregam na ordem do número; código que roda ao carregar só pode usar o que vem de arquivos anteriores. |
+| `tests/` | `rotas/`: frases que conferem os recursos automáticos. `ordem/`: confere a regra de ordem dos arquivos de `ui/js`. Os dois rodam no CI. |
 | `installer/` | Instalador (Inno Setup) |
 | `.github/workflows/ik-llama.yml` | Compila o ik_llama.cpp para Windows e publica como pré-release `ik-*` |
 | `assets/` | Ícone |
