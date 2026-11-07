@@ -210,6 +210,13 @@ function apiFor(role) {
   if (!v || !apis.length) return null;
   return (v === true ? apis[0] : apis.find((a) => a.id === v))?.id || null;
 }
+/** Abre a conexão com a API antes de precisar dela (no máximo uma vez a cada 6 s por API). */
+const API_WARM = new Map();
+function apiWarm(pid) {
+  if (!pid || Date.now() - (API_WARM.get(pid) || 0) < 6000) return;
+  API_WARM.set(pid, Date.now());
+  api('/api/remote/warm?p=' + encodeURIComponent(pid), {}).catch(() => {});
+}
 function apiById(id) { return (S.info?.apis || []).find((a) => a.id === id); }
 /** Contagem do dia: pedidos, tokens e falhas (só neste navegador). */
 function apiUse(add, pid) {

@@ -373,9 +373,18 @@ async function runAgent(conv) {
       if (step === 0) { await ensureModel(conv, ac.signal); await waitModel(conv, ac.signal); await assignSlot(conv); await preloadImgs(conv); }
       if (ac.signal.aborted) throw new DOMException('abort', 'AbortError');
       await maybeCompact(conv, system, tools, ac.signal);
+      // enquanto o modelo ainda escreve a chamada de ferramenta, abre a conexão com a API do auditor (e a dos
+      // exploradores, se ele chamar explore): o primeiro pedido não espera o aperto de mão TLS
+      const warmAud = apiFor('auditor'), warmExp = apiFor('explorer');
+      const warmT = warmAud || warmExp ? setInterval(() => {
+        if (!msg.tool_calls?.length) return;
+        apiWarm(warmAud);
+        if (msg.tool_calls.some((t) => t?.function?.name === 'explore')) apiWarm(warmExp);
+      }, 250) : null;
       try {
         await streamCompletion(conv, system, tools, msg, ac.signal);
       } finally {
+        if (warmT) clearInterval(warmT);
         msg.t1 = Date.now();
         msg.tool_calls = msg.tool_calls.filter((t) => t && t.function?.name);
         msg.tool_calls.forEach((t) => { if (!t.id) t.id = 'call_' + uid(); });
@@ -388,6 +397,19 @@ async function runAgent(conv) {
       const reads = [];
       const images = [];
       let refetch = false;
+      // auditor numa API: as auditorias do passo saem todas juntas (não disputam slot) e o laço só espera
+      // cada resultado na sua vez; no modelo local continuam uma por vez
+      const preAudit = new Map();
+      if (apiFor('auditor') && !planTurn) {
+        for (const tc of msg.tool_calls) {
+          const info = meta[tc.function.name] || { source: tc.function.name.includes('__') ? 'mcp' : 'builtin', mutating: true };
+          if (PARALLEL_READS.has(tc.function.name) && !needsApproval(info, conv) && !shouldAudit(info, conv)) continue;
+          if (tc.function.name === 'explore' || !shouldAudit(info, conv)) continue;
+          const pr = auditCall(tc, info, conv, ac.signal);
+          pr.catch(() => {});
+          preAudit.set(tc.id, pr);
+        }
+      }
       for (const tc of msg.tool_calls) {
         if (ac.signal.aborted) throw new DOMException('abort', 'AbortError');
         const info = meta[tc.function.name] || { source: tc.function.name.includes('__') ? 'mcp' : 'builtin', mutating: true };
@@ -424,7 +446,7 @@ async function runAgent(conv) {
         let audited = false;
         if (shouldAudit(info, conv) || (forceAsk && S.settings.auditor)) {
           tmsg.status = 'audit'; scheduleRender();
-          tmsg.audit = await auditCall(tc, info, conv, ac.signal);
+          tmsg.audit = await (preAudit.get(tc.id) || auditCall(tc, info, conv, ac.signal));
           if (ac.signal.aborted) { tmsg.status = 'denied'; tmsg.content = L('Cancelado pelo usuário.'); throw new DOMException('abort', 'AbortError'); }
           audited = tmsg.audit.approve;
         }

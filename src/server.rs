@@ -125,6 +125,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/hf/cancel", post(hf_cancel))
         .route("/remote/v1/chat/completions", post(remote_chat))
         .route("/api/remote/models", get(remote_models))
+        .route("/api/remote/warm", post(remote_warm))
         .route("/v1/{*rest}", any(proxy))
         .route("/props", any(proxy))
         .route("/health", any(proxy))
@@ -255,6 +256,12 @@ async fn proxy(State(app): S, req: Request) -> Response {
 
 async fn remote_chat(State(app): S, Query(qs): Q, b: Bytes) -> Response {
     crate::remote::chat(&app, q(&qs, "p"), b).await
+}
+
+async fn remote_warm(State(app): S, Query(qs): Q) -> Res {
+    let id = q(&qs, "p").to_string();
+    tokio::spawn(async move { crate::remote::warm(&app, &id).await });
+    ok(json!({}))
 }
 
 async fn remote_models(State(app): S, Query(qs): Q) -> Res {

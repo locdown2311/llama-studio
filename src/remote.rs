@@ -134,6 +134,15 @@ pub async fn chat(app: &App, id: &str, body: Bytes) -> Response {
     }
 }
 
+/// Abre a conexão com o provedor antes do primeiro pedido (TLS pronto quando o auditor ou o explorador
+/// precisar). Um HEAD na raiz do servidor: não conta como pedido de modelo.
+pub async fn warm(app: &App, id: &str) {
+    let Some(c) = provider(app, id) else { return };
+    let Ok(u) = reqwest::Url::parse(c.base.trim()) else { return };
+    let Ok(root) = u.join("/") else { return };
+    let _ = client().head(root).timeout(Duration::from_secs(5)).header("User-Agent", "llama-studio").send().await;
+}
+
 /// Lista os modelos do provedor (GET /models), para escolher sem digitar.
 pub async fn models(app: &App, id: &str) -> Result<Vec<String>, String> {
     let c = provider(app, id).ok_or_else(|| L!("API não encontrada.", "API not found.").to_string())?;
