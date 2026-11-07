@@ -86,6 +86,23 @@ function sideSlot(conv) {
   return best;
 }
 
+/* Comandos que dispensam o modelo no auditor: compilar, testar e só ler, sem nada perigoso e sem sair da pasta.
+   Cada parte (separada por |, ;, &&) precisa começar por um desses e nenhuma pode ter um verbo perigoso. */
+const SAFE_CMD = /^(gcc|g\+\+|cc|c\+\+|clang|clang\+\+|clang-cl|cl|tcc|make|mingw32-make|nmake|cmake|ninja|meson|javac|java -version|go (build|test|vet|run)|cargo (build|check|test|clippy|fmt|run|tree|metadata)|rustc|dotnet (build|test|run|restore)|msbuild|npm (test|run (build|test|lint))|npx (tsc|eslint|prettier)|tsc|node --check|pytest|python -m (pytest|py_compile|unittest)|py -m (pytest|py_compile)|uv run (pytest|python -m pytest)|dir|ls|tree|pwd|cd|echo|cat|type|more|head|tail|wc|where|which|get-childitem|gci|get-content|gc|get-item|gi|test-path|resolve-path|select-string|sls|measure-object|sort-object|select-object|format-table|format-list|out-string|get-command|get-filehash|get-date|get-location|rg|fd|grep|find|findstr|git (status|diff|log|show|branch|rev-parse|ls-files|blame|remote -v)|file|strings|xxd|hexdump|od|objdump|nm|readelf|dumpbin|ldd|size|7z l|7z t|\.\\[\w.-]+\.exe|\.\/[\w.-]+)(\s|$)/i;
+const DANGER_CMD = /\b(remove-item|rm|rmdir|rd|del|erase|ri|move-item|mv|move|format|diskpart|stop-process|kill|taskkill|reg|set-itemproperty|new-itemproperty|remove-itemproperty|shutdown|restart-computer|stop-computer|invoke-webrequest|iwr|curl|wget|invoke-restmethod|irm|invoke-expression|iex|start-process|saps|msiexec|schtasks|sc|net|netsh|bcdedit|takeown|icacls|cipher|set-executionpolicy|git (push|reset|clean|checkout|rebase|stash)|clear-content|set-content|add-content|out-file|copy-item|cp|xcopy|robocopy)\b|\$env:|\[system\.|downloadstring|-encodedcommand/i;
+function safeCommand(cmd, ws) {
+  const c = String(cmd || '').trim();
+  if (!c || c.length > 600 || /`|\$\(/.test(c)) return false;
+  if (DANGER_CMD.test(c)) return false;
+  // redirecionar para arquivo grava algo: só o descarte de erros/saída
+  if (/(^|[^2&])>(?!&1|\s*\$null)/.test(c.replace(/2>&1/g, '').replace(/>\s*\$null/gi, ''))) return false;
+  const parts = c.split(/\|\||&&|;|\|/).map((x) => x.trim()).filter(Boolean);
+  if (!parts.every((x) => SAFE_CMD.test(x))) return false;
+  // caminhos absolutos citados ficam dentro da pasta de trabalho
+  const abs = c.match(/[a-z]:\\[^\s"'|;&]*|\\\\[^\s"'|;&]+/gi) || [];
+  return abs.every((p) => insideWs(p, ws));
+}
+
 function insideWs(p, ws) {
   if (!p || !ws || typeof p !== 'string') return !p;
   const a = p.replace(/\//g, '\\').toLowerCase(); const b = ws.replace(/\//g, '\\').toLowerCase().replace(/\\+$/, '');
@@ -109,7 +126,7 @@ function auditorSection() {
   pol.addEventListener('change', () => { S.settings.auditPolicy = pol.value.trim() === AUDIT_POLICY.trim() ? '' : pol.value; save(); });
   const reset = h('button.btn.sm', { type: 'button', onclick: () => { pol.value = AUDIT_POLICY; S.settings.auditPolicy = ''; save(); toast('Política padrão restaurada'); } }, 'Restaurar a padrão');
   const more = h('div', { hidden: !st.auditor },
-    sw('auditReversible', 'Arquivos editados na pasta passam direto', 'Criar e editar arquivos dentro da pasta de trabalho sempre guarda um ponto de restauração antes, então dá para desfazer. Sem chamar o modelo, a ação não espera e o cache da conversa não se perde.'),
+    sw('auditReversible', 'Ações seguras passam direto', 'Criar e editar arquivos na pasta (sempre há ponto de restauração) e comandos que só compilam, testam ou leem dentro dela são aprovados sem chamar o modelo: a ação não espera e o cache da conversa não se perde.'),
     sw('auditMcp', 'Auditar também as ferramentas de conectores', 'Debuggers, bancos de dados e APIs também passam por ele.'),
     h('div.field', null, h('label', null, 'O auditor aprova sozinho'), max, h('small', null, 'Acima disso, ou se ele tiver dúvida, a ação espera você com a análise dele, mesmo em "Nunca perguntar".')),
     h('div.field', null, h('label', null, 'Política do auditor'), pol, h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', marginTop: '6px' } }, h('small', { style: { flex: 1 } }, 'Regras que ele segue para decidir. Escreva o que é seguro e o que deve sempre passar por você.'), reset)));
@@ -142,6 +159,7 @@ async function auditCall(tc, info, conv, signal) {
   if (info.source === 'builtin' && !info.mutating && insideWs(args?.path, ws)) return done({ risk: 'baixo', approve: true, reason: 'Só leitura, dentro da pasta de trabalho.', rule: true });
   // criar e editar arquivos pelas ferramentas internas só acontece dentro da pasta e sempre guarda um ponto
   // de restauração antes: dá para desfazer, então não vale uma chamada ao modelo (nem estragar o cache)
+  if (S.settings.auditReversible !== false && name === 'run_command' && safeCommand(args?.command, ws) && (!args?.cwd || insideWs(args.cwd, ws))) return done({ risk: 'baixo', approve: true, reason: 'Comando seguro (compilar, testar ou só ler) dentro da pasta de trabalho, sem nada que apague, baixe ou mude o sistema.', rule: true });
   if (S.settings.auditReversible !== false && info.source === 'builtin' && FILE_MUT.has(name) && insideWs(args?.path, ws)) return done({ risk: 'baixo', approve: true, reason: 'Alteração de arquivo dentro da pasta de trabalho, com ponto de restauração guardado antes (dá para desfazer).', rule: true });
 
   const lastUser = [...conv.messages].reverse().find((m) => m.role === 'user' && !m.hidden);
