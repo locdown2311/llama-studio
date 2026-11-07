@@ -34,6 +34,37 @@ pub fn public(app: &App) -> Value {
     json!(app.cfg().api_providers.iter().map(|p| json!({ "id": p.id, "name": p.name, "base": p.base, "model": p.model, "params": p.params, "hasKey": !p.key.trim().is_empty(), "ready": ready(p) })).collect::<Vec<_>>())
 }
 
+/// Cliente próprio para a internet: respeita o proxy do sistema (o de app.http é só para o llama-server
+/// local, sem proxy) e larga conexões paradas antes que o provedor as feche.
+fn client() -> &'static reqwest::Client {
+    static C: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    C.get_or_init(|| {
+        reqwest::Client::builder()
+            .pool_idle_timeout(Duration::from_secs(8))
+            .pool_max_idle_per_host(2)
+            .tcp_keepalive(Duration::from_secs(20))
+            .connect_timeout(Duration::from_secs(15))
+            .build()
+            .expect("cliente das APIs externas")
+    })
+}
+
+/// O erro com as causas (o "error sending request" sozinho não diz se foi DNS, TLS, conexão recusada...).
+fn chain(e: reqwest::Error) -> String {
+    let e = e.without_url();
+    let mut out = e.to_string();
+    let mut src = std::error::Error::source(&e);
+    while let Some(s) = src {
+        let t = s.to_string();
+        if !out.contains(&t) {
+            out.push_str(": ");
+            out.push_str(&t);
+        }
+        src = s.source();
+    }
+    out
+}
+
 fn endpoint(base: &str, path: &str) -> String {
     format!("{}/{}", base.trim().trim_end_matches('/'), path)
 }
@@ -61,14 +92,26 @@ pub async fn chat(app: &App, id: &str, body: Bytes) -> Response {
             o.insert("stream_options".into(), json!({ "include_usage": true }));
         }
     }
-    let mut rb = app.http.post(endpoint(&c.base, "chat/completions")).timeout(Duration::from_secs(300)).header("Content-Type", "application/json").header("User-Agent", "llama-studio");
-    if !c.key.trim().is_empty() {
-        rb = rb.bearer_auth(c.key.trim());
-    }
-    if c.base.contains("openrouter.ai") {
-        rb = rb.header("X-Title", "Llama Studio");
-    }
-    match rb.body(v.to_string()).send().await {
+    let body = v.to_string();
+    let build = || {
+        let mut rb = client().post(endpoint(&c.base, "chat/completions")).timeout(Duration::from_secs(300)).header("Content-Type", "application/json").header("User-Agent", "llama-studio");
+        if !c.key.trim().is_empty() {
+            rb = rb.bearer_auth(c.key.trim());
+        }
+        if c.base.contains("openrouter.ai") {
+            rb = rb.header("X-Title", "Llama Studio");
+        }
+        rb.body(body.clone())
+    };
+    // uma conexão parada no pool pode ter sido fechada pelo provedor: falha ao mandar = tenta de novo uma vez
+    let sent = match build().send().await {
+        Err(e) if e.is_connect() || e.is_request() => {
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            build().send().await
+        }
+        r => r,
+    };
+    match sent {
         Ok(resp) => {
             let status = resp.status().as_u16();
             let mut out = Response::builder().status(status);
@@ -79,7 +122,7 @@ pub async fn chat(app: &App, id: &str, body: Bytes) -> Response {
             }
             out.body(Body::from_stream(resp.bytes_stream())).unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response())
         }
-        Err(e) => err(StatusCode::BAD_GATEWAY, LF!("API externa indisponível ({}).", "External API unavailable ({}).", e.without_url())),
+        Err(e) => err(StatusCode::BAD_GATEWAY, LF!("API externa indisponível ({}).", "External API unavailable ({}).", chain(e))),
     }
 }
 
@@ -89,11 +132,11 @@ pub async fn models(app: &App, id: &str) -> Result<Vec<String>, String> {
     if c.base.trim().is_empty() {
         return Err(L!("Informe o endereço da API.", "Enter the API address.").into());
     }
-    let mut rb = app.http.get(endpoint(&c.base, "models")).timeout(Duration::from_secs(20)).header("User-Agent", "llama-studio");
+    let mut rb = client().get(endpoint(&c.base, "models")).timeout(Duration::from_secs(20)).header("User-Agent", "llama-studio");
     if !c.key.trim().is_empty() {
         rb = rb.bearer_auth(c.key.trim());
     }
-    let resp = rb.send().await.map_err(|e| e.without_url().to_string())?;
+    let resp = rb.send().await.map_err(chain)?;
     let status = resp.status();
     let text = resp.text().await.unwrap_or_default();
     if !status.is_success() {
