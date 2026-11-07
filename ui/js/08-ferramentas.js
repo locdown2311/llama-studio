@@ -245,7 +245,7 @@ async function runExplorer(args, tctx, tmsg) {
     const calls = m.tool_calls.filter((t) => t && t.function?.name);
     calls.forEach((t) => { if (!t.id) t.id = 'call_' + uid(); });
     const text = splitThink(m.content).text;
-    if (!calls.length) return { content: text.trim() || L('O subagente terminou sem relatório.'), isError: false };
+    if (!calls.length) { tmsg.sub = tmsg._sub.map((x) => ({ name: x.name, summary: x.summary, status: x.status })); return { content: text.trim() || L('O subagente terminou sem relatório.'), isError: false }; }
     msgs.push({ role: 'assistant', content: text, tool_calls: calls.map((t) => ({ id: t.id, type: 'function', function: { name: t.function.name, arguments: validArgs(t.function.arguments, () => {}) } })) });
     // leituras do mesmo passo rodam juntas; o navegador (uma página só) vai em ordem
     const results = new Array(calls.length);

@@ -867,14 +867,15 @@ function renderTool(tc, res, live) {
     bodyEl.append(h('div.tool-sec', null, h('div.tool-sec-label', null, L('Argumentos')), h('pre.result-text', null, tc.function.arguments)));
   }
 
-  if (res?._sub?.length) {
+  const subs = res?._sub?.length ? res._sub : res?.sub || [];
+  if (subs.length) {
     const steps = h('div.substeps');
-    for (const st of res._sub) {
+    for (const st of subs) {
       steps.append(h('div.substep.s-' + st.status, null,
         h('span', { html: svg(st.status === 'running' ? 'loader' : st.status === 'error' ? 'alert' : 'check', st.status === 'running' ? 'spin' : '') }),
         h('span.ss-name', null, st.name), h('span.ss-sub', null, st.summary || '')));
     }
-    bodyEl.append(h('div.tool-sec', null, h('div.tool-sec-label', null, name === 'explore' ? L('Passos do subagente ({0})', res._sub.length) : L('Ferramentas chamadas pelo código ({0})', res._sub.length)), steps));
+    bodyEl.append(h('div.tool-sec', null, h('div.tool-sec-label', null, name === 'explore' ? L('Passos do subagente ({0})', subs.length) : L('Ferramentas chamadas pelo código ({0})', subs.length)), steps));
   }
   if (res?._images?.length) {
     bodyEl.append(h('div.tool-sec', null, h('div.tool-sec-label', null, L('Imagem')), ...res._images.map((src) => h('img.tool-img', { src, alt: L('Captura'), onclick: () => window.open(src) }))));

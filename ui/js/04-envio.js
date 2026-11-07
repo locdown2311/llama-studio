@@ -512,9 +512,11 @@ async function streamCompletion(conv, system, tools, msg, signal) {
   if (msg._pp?.total) {
     const read = Math.max(0, msg._pp.total - msg._pp.cache);
     conv.cacheLast = { total: msg._pp.total, cache: msg._pp.cache, read, ms: msg._pp.time_ms || 0, why: read > Math.max(2000, msg._pp.total * 0.3) ? (msg._why || L('o servidor não tinha esse trecho guardado (modelos com camadas recorrentes, como Qwen3.5/3.6, só voltam até o último ponto salvo)')) : '' };
+    // guardado na mensagem (vai para o disco): a aba Atividade mostra o que cada passo leu e por que releu
+    msg.pp = { total: msg._pp.total, cache: msg._pp.cache, ms: Math.round(msg._pp.time_ms || 0), why: conv.cacheLast.why || '' };
     drawCtxMeter();
     // causa desconhecida: o log do llama-server mostra onde o pedido divergiu do que o slot tinha
-    if (conv.cacheLast.why && !msg._why) serverDiff(conv._slot).then((d) => { if (d) { conv.cacheLast.why = d; conv.cacheLast.diff = true; drawCtxMeter(); saveConvs(); } }).catch(() => {});
+    if (conv.cacheLast.why && !msg._why) serverDiff(conv._slot).then((d) => { if (d) { conv.cacheLast.why = d; conv.cacheLast.diff = true; if (msg.pp) msg.pp.why = d; drawCtxMeter(); saveConvs(); } }).catch(() => {});
   }
   return r;
 }

@@ -153,6 +153,7 @@ function plainOf(m) {
   return m.parts.map((p) => (p.t === 'text' ? p.v : p.t === 'br' ? ' ' : p.name ? `[${p.name}]` : '')).join('');
 }
 
+const ACT_FILTERS = [['all', L('Tudo')], ['tools', L('Ferramentas')], ['err', L('Erros')], ['reread', L('Releituras')]];
 function drawActivity() {
   const box = $('#ws-activity'); if (!box || box.hidden) return;
   const c = cur();
@@ -160,47 +161,95 @@ function drawActivity() {
   box.innerHTML = '';
   if (!c || !c.messages.length) { box.append(h('div.act-empty', null, ic('list'), L('Os passos do modelo (raciocínio, ferramentas, respostas) desta conversa aparecem aqui conforme ele trabalha.'))); return; }
   box.append(h('div.ws-scope', null, ic('list'), L('Atividade de "{0}"', clipText(c.title, 40))));
+  const filt = S.actFilter || 'all';
+  const show = (kind) => filt === 'all' || filt === kind;
   const blocks = blocksOf(c);
-  let nTools = 0; let nErr = 0; let ms = 0;
+  const n = { tools: 0, err: 0, msTools: 0, msModel: 0, msAudit: 0, re: 0, reTok: 0, api: 0, apiTok: 0, gen: 0 };
   const list = h('div.act');
+  const errLine = (r) => String(r?.content || '').split('\n').map((x) => x.trim()).find(Boolean)?.slice(0, 160) || '';
   blocks.forEach((b, bi) => {
     if (b.type === 'user') {
       const m = b.msgs[0];
-      list.append(h('button.act-user', { onclick: () => jumpTo(b.start) }, h('span.act-time', null, fmtStamp(m.ts).slice(11)), h('span.act-u', null, plainOf(m).replace(/\s+/g, ' ').slice(0, 140))));
+      // duração do turno: do primeiro passo do modelo ao último
+      const ai = blocks[bi + 1]?.type === 'ai' ? blocks[bi + 1].msgs.filter((x) => x.role === 'assistant') : [];
+      const dur = ai.length && ai[0].t0 && ai[ai.length - 1].t1 ? ai[ai.length - 1].t1 - ai[0].t0 : 0;
+      list.append(h('button.act-user', { onclick: () => jumpTo(b.start) },
+        h('span.act-time', null, fmtStamp(m.ts).slice(11), dur > 1500 ? h('span.act-dur', null, ' · ' + fmtMs(dur)) : null),
+        h('span.act-u', null, plainOf(m).replace(/\s+/g, ' ').slice(0, 140))));
       return;
     }
-    if (b.type === 'notice') { list.append(h('button.act-row', { onclick: () => jumpTo(b.start) }, h('span.act-ico', { html: svg(b.msgs[0].icon || 'arrowUp') }), h('span.act-main', null, h('span.act-name', null, L('Studio')), h('span.act-sub', null, b.msgs[0].content.slice(0, 120))))); return; }
-    if (b.type === 'error') { list.append(h('button.act-row.err', { onclick: () => jumpTo(b.start) }, h('span.act-ico', { html: svg('alert') }), h('span.act-main', null, h('span.act-name', null, L('Erro')), h('span.act-sub', null, b.msgs[0].content.slice(0, 120))))); return; }
+    if (b.type === 'notice') { if (show('all') && filt === 'all') list.append(h('button.act-row', { onclick: () => jumpTo(b.start) }, h('span.act-ico', { html: svg(b.msgs[0].icon || 'arrowUp') }), h('span.act-main', null, h('span.act-name', null, L('Studio')), h('span.act-sub.wrap', null, b.msgs[0].content)))); return; }
+    if (b.type === 'error') { n.err++; if (show('err') || filt === 'tools') list.append(h('button.act-row.err', { onclick: () => jumpTo(b.start) }, h('span.act-ico', { html: svg('alert') }), h('span.act-main', null, h('span.act-name', null, L('Erro')), h('span.act-sub.wrap', null, String(b.msgs[0].content).slice(0, 200))))); return; }
     const live = bi === blocks.length - 1 && running(c);
     const results = new Map(b.msgs.filter((m) => m.role === 'tool').map((m) => [m.tool_call_id, m]));
     const asts = b.msgs.filter((m) => m.role === 'assistant');
     asts.forEach((m) => {
       const sp = splitThink(m.content);
       const think = (m.reasoning || '') + (sp.think || '');
-      if (think.trim()) list.append(h('button.act-row.k-think', { onclick: () => jumpTo(b.start) }, h('span.act-ico', { html: svg('brain') }), h('span.act-main', null, h('span.act-name', null, L('Raciocínio')), h('span.act-sub', null, think.trim().replace(/\s+/g, ' ').slice(0, 90)))));
-      if (sp.text.trim() && m.tool_calls?.length) list.append(h('button.act-row.k-say', { onclick: () => jumpTo(b.start) }, h('span.act-ico', { html: svg('chat') }), h('span.act-main', null, h('span.act-name', null, L('Comentário')), h('span.act-sub', null, sp.text.trim().replace(/\s+/g, ' ').slice(0, 90)))));
-      for (const tc of m.tool_calls || []) {
+      // o passo do modelo: quanto leu (e do cache), quanto pensou e gerou, quanto levou
+      const dur = m.t0 && m.t1 ? m.t1 - m.t0 : 0;
+      n.msModel += dur; n.gen += m.tokens || 0;
+      const pp = m.pp; const read = pp ? Math.max(0, pp.total - pp.cache) : 0;
+      const re = !!(pp && pp.why && read > Math.max(2000, pp.total * 0.3));
+      if (re) { n.re++; n.reTok += read; }
+      if (show('reread') && (filt !== 'reread' || re) && (dur || pp)) {
+        const bits = [];
+        if (pp) bits.push(pp.cache ? L('leu {0} novos ({1} do cache)', fmtK(read), fmtK(pp.cache)) : L('leu {0}', fmtK(read)));
+        if (think.trim()) bits.push(L('pensou {0} palavras', think.trim().split(/\s+/).length));
+        if (m.tokens) bits.push(L('gerou {0}', fmtK(m.tokens)) + (m.tps ? ` · ${m.tps.toFixed(1)} tok/s` : ''));
+        list.append(h('button.act-row.k-model' + (re ? '.reread' : ''), { onclick: () => jumpTo(b.start), title: re ? L('Releu porque {0}', pp.why) : '' },
+          h('span.act-ico', { html: svg(re ? 'refresh' : 'brain') }),
+          h('span.act-main', null, h('span.act-name', null, re ? L('Modelo · releu o contexto') : L('Modelo')), h('span.act-sub', null, bits.join(' · ')),
+            re ? h('span.act-why', null, L('porque {0}', pp.why)) : null),
+          h('span.act-st', null, dur ? fmtMs(dur) : '')));
+      }
+      if (filt === 'all' && sp.text.trim() && m.tool_calls?.length) list.append(h('button.act-row.k-say', { onclick: () => jumpTo(b.start) }, h('span.act-ico', { html: svg('chat') }), h('span.act-main', null, h('span.act-name', null, L('Comentário')), h('span.act-sub', null, sp.text.trim().replace(/\s+/g, ' ').slice(0, 120)))));
+      // ferramentas do passo; mais de uma = pedidas juntas (leituras e exploradores rodam em paralelo)
+      const calls = m.tool_calls || [];
+      const holder = calls.length > 1 && (filt === 'all' || filt === 'tools') ? h('div.act-par', null, h('span.act-par-lbl', null, L('{0} no mesmo passo', calls.length))) : null;
+      for (const tc of calls) {
         const r = results.get(tc.id); const name = tc.function?.name || '?';
         const st = r ? r.status || (r.isError ? 'error' : 'ok') : (live ? 'running' : 'error');
-        nTools++; if (st === 'error' || st === 'denied') nErr++; if (r?.ms) ms += r.ms;
+        const bad = st === 'error' || st === 'denied';
+        n.tools++; if (bad) n.err++; if (r?.ms) n.msTools += r.ms;
+        if (r?.audit && !r.audit.rule) { n.msAudit += r.audit.ms || 0; if (r.audit.via) n.api++; }
+        if (r?.runOn?.api) { n.api++; n.apiTok += r.apiTokens || 0; }
+        if (!(filt === 'all' || filt === 'tools' || (filt === 'err' && bad))) continue;
         const src = r?.source || (name.includes('__') ? 'mcp' : 'builtin');
         const nm = src === 'mcp' && name.includes('__') ? name.slice(name.indexOf('__') + 2) : name;
-        list.append(h('button.act-row.k-tool.s-' + st, { onclick: () => jumpTo(b.start, tc.id), title: name },
-          h('span.act-ico', { html: svg(st === 'running' || st === 'pending' || st === 'audit' ? 'loader' : toolIcon(name, src), st === 'running' || st === 'pending' || st === 'audit' ? 'spin' : '') }),
-          h('span.act-main', null, h('span.act-name', null, nm), h('span.act-sub', null, toolSummary(name, parseArgs(tc.function?.arguments)) || '')),
-          h('span.act-st', null, st === 'ok' ? (r?.ms != null ? fmtMs(r.ms) : '') : st === 'error' ? L('erro') : st === 'denied' ? L('negada') : st === 'approval' ? L('aguarda') : st === 'audit' ? L('auditando') : '')));
+        const busy = st === 'running' || st === 'pending' || st === 'audit';
+        const badges = [];
+        if (r?.runOn) badges.push(h('span.act-badge' + (r.runOn.api ? '.api' : ''), { title: r.runOn.api ? L('Rodou pela API {0} ({1})', r.runOn.api, r.runOn.model) : '' }, r.runOn.api ? `${r.runOn.api}${r.apiTokens ? ' · ' + fmtK(r.apiTokens) : ''}` : r.runOn.fell ? L('local (API falhou)') : L('local')));
+        if (r?.audit) badges.push(h('span.act-badge' + (r.audit.approve ? '.ok' : '.bad'), { title: r.audit.reason || '' }, ic('shield'),
+          r.audit.rule ? L('regra') : `${r.audit.risk || ''}${r.audit.via ? ' · API' : r.audit.slot != null ? ' · slot ' + r.audit.slot : ''}${r.audit.ms ? ' · ' + fmtMs(r.audit.ms) : ''}`));
+        const subs = r?._sub?.length ? r._sub : r?.sub || [];
+        const row = h('button.act-row.k-tool.s-' + st, { onclick: () => jumpTo(b.start, tc.id), title: name },
+          h('span.act-ico', { html: svg(busy ? 'loader' : toolIcon(name, src), busy ? 'spin' : '') }),
+          h('span.act-main', null,
+            h('span.act-name', null, nm),
+            h('span.act-sub', null, toolSummary(name, parseArgs(tc.function?.arguments)) || ''),
+            badges.length ? h('span.act-badges', null, badges) : null,
+            bad && r ? h('span.act-err', null, errLine(r)) : null,
+            subs.length ? h('span.act-subs', null, subs.slice(0, 8).map((x) => h('span.act-subs-i.s-' + x.status, null, x.name)), subs.length > 8 ? h('span.act-subs-i', null, '+' + (subs.length - 8)) : null) : null),
+          h('span.act-st', null, st === 'ok' ? (r?.ms != null ? fmtMs(r.ms) : '') : st === 'error' ? L('erro') : st === 'denied' ? L('negada') : st === 'approval' ? L('aguarda') : st === 'audit' ? L('auditando') : ''));
+        (holder || list).append(row);
       }
-      if (sp.text.trim() && !m.tool_calls?.length) list.append(h('button.act-row.k-answer', { onclick: () => jumpTo(b.start) }, h('span.act-ico', { html: svg('check') }), h('span.act-main', null, h('span.act-name', null, L('Resposta')), h('span.act-sub', null, sp.text.trim().replace(/\s+/g, ' ').slice(0, 90)))));
+      if (holder && holder.children.length > 1) list.append(holder);
+      if (filt === 'all' && sp.text.trim() && !calls.length) list.append(h('button.act-row.k-answer', { onclick: () => jumpTo(b.start) }, h('span.act-ico', { html: svg('check') }), h('span.act-main', null, h('span.act-name', null, L('Resposta')), h('span.act-sub', null, sp.text.trim().replace(/\s+/g, ' ').slice(0, 120)))));
     });
-    if (live) list.append(h('div.act-row.k-live', null, h('span.act-ico', { html: svg('loader', 'spin') }), h('span.act-main', null, h('span.act-name', null, c._waitingModel ? L('Esperando o modelo') : 'Trabalhando...'))));
+    if (live) list.append(h('div.act-row.k-live', null, h('span.act-ico', { html: svg('loader', 'spin') }), h('span.act-main', null, h('span.act-name', null, c._waitingModel ? L('Esperando o modelo') : L('Trabalhando...')))));
   });
+  const stat = (big, label, cls, title) => h('div', { class: cls || '', title: title || '' }, h('b', null, big), h('span', null, label));
   box.append(h('div.act-stats', null,
-    h('div', null, h('b', null, String(nTools)), h('span', null, L('ferramentas'))),
-    h('div', { class: nErr ? 'bad' : '' }, h('b', null, String(nErr)), h('span', null, L('erros'))),
-    h('div', null, h('b', null, fmtMs(ms)), h('span', null, L('em ferramentas')))));
-  const chg = changesSection(c);
+    stat(String(n.tools), n.err ? L('ferramentas · {0} com erro', n.err) : L('ferramentas'), n.err ? 'bad' : ''),
+    stat(fmtMs(n.msModel), L('modelo · {0} ferramentas', fmtMs(n.msTools)) + (n.msAudit ? L(' · {0} auditor', fmtMs(n.msAudit)) : ''), '', L('Tempo do modelo lendo e escrevendo; das ferramentas rodando; do auditor decidindo')),
+    stat(String(n.re), n.re ? L('releituras · {0} tokens', fmtK(n.reTok)) : L('releituras'), n.re ? 'warn' : '', L('Vezes em que o servidor teve que reler boa parte da conversa')),
+    n.api ? stat(String(n.api), L('usos de API') + (n.apiTok ? ` · ${fmtK(n.apiTok)}` : ''), 'api') : stat(fmtK(n.gen), L('tokens gerados'))));
+  box.append(h('div.act-filter', null, ACT_FILTERS.map(([k, label]) => h('button' + (filt === k ? '.on' : ''), { type: 'button', onclick: () => { S.actFilter = k; drawActivity(); } },
+    label, k === 'err' && n.err ? h('span.act-fn', null, String(n.err)) : k === 'reread' && n.re ? h('span.act-fn', null, String(n.re)) : null))));
+  const chg = filt === 'all' ? changesSection(c) : null;
   if (chg) box.append(chg);
-  box.append(list);
+  box.append(list.children.length ? list : h('div.act-empty.small', null, filt === 'err' ? L('Nenhum erro nesta conversa.') : filt === 'reread' ? L('Nenhuma releitura grande nesta conversa.') : L('Nada aqui ainda.')));
   if (chgKey(c) !== S.chg.key) refreshChanges(c);
   box.scrollTop = atEnd ? box.scrollHeight : keep;
 }
