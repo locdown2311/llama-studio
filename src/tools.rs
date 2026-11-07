@@ -39,8 +39,8 @@ const DEFS: &[Def] = &[
       r#"{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}"#),
     d("create_directory", "write", true, false, "Cria uma pasta (e as intermediárias) dentro da pasta de trabalho.",
       r#"{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}"#),
-    d("edit_file", "edit", true, false, "Altera parte de um arquivo. Três formas: old_text + new_text (old_text exato, aparece uma vez, ou replace_all); start_line + end_line + new_text (troca essas linhas, sem repetir o texto antigo; end_line = start_line - 1 insere antes); ou edits = lista de {old_text, new_text} aplicadas juntas.",
-      r#"{"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"},"replace_all":{"type":"boolean"},"start_line":{"type":"integer"},"end_line":{"type":"integer"},"edits":{"type":"array","items":{"type":"object","properties":{"old_text":{"type":"string"},"new_text":{"type":"string"}},"required":["old_text","new_text"]}}},"required":["path"]}"#),
+    d("edit_file", "edit", true, false, "Altera parte de um arquivo. Três formas: old_text + new_text (old_text exato, aparece uma vez, ou replace_all); start_line + end_line + new_text (troca essas linhas, sem repetir o texto antigo; end_line = start_line - 1 insere antes; mande expect com o começo da linha start_line); ou edits = lista de {old_text, new_text} aplicadas juntas.",
+      r#"{"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"},"replace_all":{"type":"boolean"},"start_line":{"type":"integer"},"end_line":{"type":"integer"},"expect":{"type":"string","description":"Com start_line: o começo da linha start_line como está agora (confere que o número não mudou)"},"edits":{"type":"array","items":{"type":"object","properties":{"old_text":{"type":"string"},"new_text":{"type":"string"}},"required":["old_text","new_text"]}}},"required":["path"]}"#),
     // ---------------- shell
     d("run_command", "shell", true, false, "Executa um comando no PowerShell (Windows) dentro da pasta de trabalho e devolve a saída e o código de saída. Use para compilar, rodar scripts, git, instalar pacotes etc. Não use para comandos interativos.",
       r#"{"type":"object","properties":{"command":{"type":"string","description":"Comando ou script do PowerShell"},"cwd":{"type":"string","description":"Subpasta onde rodar (padrão: raiz da pasta de trabalho)"},"timeout":{"type":"integer","description":"Segundos até encerrar (padrão 120, máximo 1800)"}},"required":["command"]}"#),
@@ -638,6 +638,11 @@ fn read_text(file: &Path, size: u64, a: &Value) -> Result<String, String> {
     Ok(out)
 }
 
+/// Espaços repetidos viram um só (o modelo nem sempre copia a indentação certinha).
+fn norm_ws(t: &str) -> String {
+    t.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 const BIG_LINES: usize = 400;
 const SEARCH_MAX: usize = 120;
 const MAX_SLICE: usize = 600;
@@ -973,6 +978,16 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
                 let total = lines.len();
                 if start > total + 1 || end + 1 < start || end > total {
                     return Err(format!("Linhas fora do arquivo ({total} linhas)."));
+                }
+                // confere o lugar: números de uma leitura antiga erram depois de inserir linhas acima
+                let want = norm_ws(s(a, "expect"));
+                if !want.is_empty() {
+                    let at = |i: usize| lines.get(i).map(|l| norm_ws(l.trim_end_matches('\r'))).unwrap_or_default();
+                    if !at(start - 1).starts_with(&want) {
+                        let moved = (0..total).filter(|&i| at(i).starts_with(&want)).min_by_key(|&i| (i as i64 - (start as i64 - 1)).abs());
+                        let near: Vec<String> = (start.saturating_sub(1)..(start + 2).min(total)).map(|i| format!("{}: {}", i + 1, cut(lines[i].trim_end_matches('\r'), 100))).collect();
+                        return Err(format!("A linha {start} não começa com \"{}\". Nada foi alterado.{}\nO que está lá agora:\n{}", cut(&want, 60), moved.map(|i| format!(" Esse texto está agora na linha {} (diferença de {}).", i + 1, i as i64 + 1 - start as i64)).unwrap_or_default(), near.join("\n")));
+                    }
                 }
                 let before = lines[start - 1..end].iter().map(|l| l.trim_end_matches('\r')).collect::<Vec<_>>();
                 let nl: Vec<String> = if new.is_empty() { vec![] } else { new.split('\n').map(|l| if crlf { format!("{}\r", l.trim_end_matches('\r')) } else { l.to_string() }).collect() };
