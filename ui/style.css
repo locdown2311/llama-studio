@@ -1494,3 +1494,6 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .api-role-main { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .api-role .select { max-width: 260px; }
 @media (max-width: 640px) { .api-role { flex-direction: column; align-items: stretch; } .api-role .select { max-width: none; } }
+.tool-head .run-on { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; flex: none; }
+.tool-head .run-on svg { width: 12px; height: 12px; }
+.tool-head .run-on.api { color: var(--accent); }

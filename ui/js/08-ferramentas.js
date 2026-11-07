@@ -205,6 +205,9 @@ async function runExplorer(args, tctx, tmsg) {
   let remote = apiFor('explorer');
   const slot = remote ? null : await sideSlot(tctx.conv);
   let extra = slot != null ? { id_slot: slot } : undefined;
+  // onde o subagente roda, para o cartão mostrar (API e modelo, ou local)
+  tmsg.runOn = remote ? { api: apiLabel(apiById(remote) || {}), model: apiById(remote)?.model || '' } : { local: true };
+  tmsg.apiTokens = 0;
   const max = Math.max(3, Number(S.settings.explorerSteps) || 20);
   for (let step = 0; step <= max; step++) {
     if (tctx.signal.aborted) return { content: 'Cancelado.', isError: true };
@@ -212,11 +215,11 @@ async function runExplorer(args, tctx, tmsg) {
     if (last) msgs.push({ role: 'user', content: L('Limite de passos atingido. Escreva agora o relatório final com o que já encontrou.') });
     const m = { content: '', reasoning: '', tool_calls: [] };
     if (remote) {
-      try { await streamApi(msgs, last ? [] : tools, m, tctx.signal, null, { _p: remote }); tmsg.via = m.via; }
+      try { await streamApi(msgs, last ? [] : tools, m, tctx.signal, null, { _p: remote }); tmsg.via = m.via; tmsg.apiTokens += m.usage?.total_tokens || 0; scheduleRender(); }
       catch (e) {
         if (tctx.signal.aborted) throw e;
         // API fora (limite do plano grátis, sem internet): segue no modelo local daqui em diante
-        remote = false; tmsg.apiErr = String(e.message || e).slice(0, 200);
+        remote = false; tmsg.apiErr = String(e.message || e).slice(0, 200); tmsg.runOn = { local: true, fell: true }; scheduleRender();
         const s2 = await sideSlot(tctx.conv); extra = s2 != null ? { id_slot: s2 } : undefined;
         m.content = ''; m.reasoning = ''; m.tool_calls = [];
         await streamRaw(msgs, last ? [] : tools, m, tctx.signal, null, extra);

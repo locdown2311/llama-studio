@@ -606,6 +606,13 @@ function sendRing() {
   send.style.setProperty('--p', pp ? Math.round(pp.frac * 100) + '%' : '0%');
 }
 
+/** Onde o subagente rodou: numa API externa (qual, modelo e tokens) ou no modelo local. */
+function runOnChip(res) {
+  const r = res.runOn;
+  if (r.local) return h('span.tag.run-on', { title: r.fell ? L('A API falhou ({0}) e o subagente continuou no modelo local.', res.apiErr || '') : L('Rodou no modelo local, num slot separado da conversa.') }, ic('cpu'), r.fell ? L('local (API falhou)') : L('local'));
+  return h('span.tag.run-on.api', { title: L('Rodou pela API {0} ({1}){2}', r.api, r.model, res.apiTokens ? L(', {0} tokens', res.apiTokens.toLocaleString(LOCALE)) : '') }, ic('globe'), `${r.api}${res.apiTokens ? ' · ' + fmtK(res.apiTokens) : ''}`);
+}
+
 function renderBlock(b, conv, isLast) {
   if (b.type === 'user') return renderUser(b.msgs[0], b.start, conv);
   if (b.type === 'error') {
@@ -818,7 +825,8 @@ function renderTool(tc, res, live) {
     h('span.tool-name', null, displayName),
     server ? h('span.tool-server', null, server) : null,
     h('span.tool-sub', null, toolSummary(name, args)),
-    res?.audit?.approve && status !== 'approval' ? h('span.audit-chip', { title: L('Aprovado pelo auditor: ') + res.audit.reason, html: svg('shield') }) : null,
+    res?.runOn ? runOnChip(res) : null,
+    res?.audit?.approve && status !== 'approval' ? h('span.audit-chip', { title: L('Aprovado pelo auditor: ') + res.audit.reason + (res.audit.via ? L(' (via API: {0})', res.audit.via) : ''), html: svg('shield') }) : null,
     h('span.tool-state', null, stateEl),
     h('span', { html: svg('chev', 'chev'), style: { display: 'contents' } }));
 

@@ -1455,5 +1455,12 @@ const I18N_EN = {
 "Quem faz cada função": "Who does each function",
 "Planos grátis costumam poder usar o que você manda para treinar modelos (o Gemini grátis avisa isso). Deixe no modelo local o que tiver dado sensível.": "Free plans can often use what you send to train models (free Gemini says so). Keep on the local model whatever has sensitive data.",
 "API": "API",
-"API não encontrada.": "API not found."
+"API não encontrada.": "API not found.",
+"A API falhou ({0}) e o subagente continuou no modelo local.": "The API failed ({0}) and the subagent continued on the local model.",
+"Rodou no modelo local, num slot separado da conversa.": "Ran on the local model, in a slot separate from the chat.",
+"local (API falhou)": "local (API failed)",
+"local": "local",
+"Rodou pela API {0} ({1}){2}": "Ran through the {0} API ({1}){2}",
+", {0} tokens": ", {0} tokens",
+" (via API: {0})": " (via API: {0})"
 };
