@@ -160,6 +160,7 @@ const API_PRESETS = [
   ['gemini', 'Google Gemini', 'https://generativelanguage.googleapis.com/v1beta/openai', 'https://aistudio.google.com/apikey'],
   ['cerebras', 'Cerebras', 'https://api.cerebras.ai/v1', 'https://cloud.cerebras.ai'],
   ['openrouter', 'OpenRouter', 'https://openrouter.ai/api/v1', 'https://openrouter.ai/keys'],
+  ['nvidia', 'NVIDIA NIM', 'https://integrate.api.nvidia.com/v1', 'https://build.nvidia.com/settings/api-keys'],
   ['custom', L('Outro (compatível com OpenAI)'), '', ''],
 ];
 const API_ROLES = [
