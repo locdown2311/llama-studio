@@ -23,7 +23,7 @@ function setEditorText(text) { editor().textContent = text; focusEditor(true); }
 
 function makePill(p) {
   const kind = p.kind;
-  const label = kind === 'skill' ? 'Habilidade' : kind === 'mcp' ? 'Conector' : 'Arquivo';
+  const label = kind === 'skill' ? L('Habilidade') : kind === 'mcp' ? L('Conector') : L('Arquivo');
   const el = h('span.pill.pill-' + kind, { contenteditable: 'false', dataset: { kind, id: p.id || '', name: p.name || '' } }, h('span.k', null, label + ':'), h('span.v', null, p.name || ''));
   if (kind === 'file') {
     el.dataset.ref = p.ref;
@@ -95,8 +95,8 @@ function readEditor() {
 function partsToContent(parts) {
   return parts.map((p) => {
     if (p.t === 'text') return p.v;
-    if (p.kind === 'skill') return `Habilidade:${p.name}`;
-    if (p.kind === 'mcp') return `Conector:${p.name}`;
+    if (p.kind === 'skill') return L('Habilidade:{0}', p.name);
+    if (p.kind === 'mcp') return L('Conector:{0}', p.name);
     return `"${p.path}"`;
   }).join('');
 }
@@ -120,8 +120,8 @@ function mentionItems(q) {
   q = q.toLowerCase();
   const items = [];
   for (const s of S.skills) if (!q || s.name.toLowerCase().includes(q) || s.id.includes(q)) items.push({ kind: 'skill', id: s.id, name: s.name, desc: s.description });
-  for (const s of S.mcp) if (!q || s.name.toLowerCase().includes(q)) items.push({ kind: 'mcp', id: s.name, name: s.name, desc: s.status === 'connected' ? `${s.tools.length} ferramentas` : statusInfo(s.status).label });
-  for (const it of S.ws.cache.get('') || []) if (q && it.name.toLowerCase().includes(q)) items.push({ kind: 'file', name: it.name, path: it.path, dir: it.dir, desc: it.dir ? 'pasta do espaço de trabalho' : fmtSize(it.size) });
+  for (const s of S.mcp) if (!q || s.name.toLowerCase().includes(q)) items.push({ kind: 'mcp', id: s.name, name: s.name, desc: s.status === 'connected' ? L('{0} ferramentas', s.tools.length) : statusInfo(s.status).label });
+  for (const it of S.ws.cache.get('') || []) if (q && it.name.toLowerCase().includes(q)) items.push({ kind: 'file', name: it.name, path: it.path, dir: it.dir, desc: it.dir ? L('pasta do espaço de trabalho') : fmtSize(it.size) });
   return items.slice(0, 12);
 }
 
@@ -142,10 +142,10 @@ function drawMention() {
   const pop = $('#pop-mention');
   pop.innerHTML = '';
   pop.classList.add('open');
-  if (!mention.items.length) { pop.append(h('div.pop-empty', null, 'Nada encontrado. Crie habilidades e conectores no menu à esquerda.')); return; }
-  pop.append(h('div.pop-head', null, h('span', null, 'Inserir na mensagem')));
+  if (!mention.items.length) { pop.append(h('div.pop-empty', null, L('Nada encontrado. Crie habilidades e conectores no menu à esquerda.'))); return; }
+  pop.append(h('div.pop-head', null, h('span', null, L('Inserir na mensagem'))));
   mention.items.forEach((it, i) => {
-    const kindLbl = { skill: 'habilidade', mcp: 'conector', file: 'arquivo' }[it.kind];
+    const kindLbl = { skill: L('habilidade'), mcp: L('conector'), file: L('arquivo') }[it.kind];
     pop.append(h('button.menu-item' + (i === mention.index ? '.hl' : ''), { onmousedown: (e) => { e.preventDefault(); chooseMention(i); } },
       ic(it.kind === 'skill' ? 'sparkles' : it.kind === 'mcp' ? 'plug' : it.dir ? 'folder' : ftype(it.name).icon),
       h('span.mi-main', null, h('b', null, it.name), it.desc ? h('span.mi-sub', null, it.desc) : null),
@@ -202,7 +202,7 @@ function updateSendBtn() {
   send.classList.toggle('stop', busy && !queueMode);
   sendRing();
   send.classList.toggle('queue', queueMode);
-  send.title = queueMode ? 'Pôr na fila (Enter) · Esc para parar a resposta' : busy ? 'Parar (Esc)' : 'Enviar (Enter)';
+  send.title = queueMode ? L('Pôr na fila (Enter) · Esc para parar a resposta') : busy ? L('Parar (Esc)') : L('Enviar (Enter)');
   send.setAttribute('aria-label', send.title);
 }
 
@@ -231,7 +231,7 @@ function updatePickers() {
   const dot = pending ? 'idle' : ({ ok: 'ok', loading: 'busy', offline: 'err' }[S.health.status] || '');
   const label = want ? want.name : S.model ? shortModel(S.model) : (S.health.status === 'loading' ? 'carregando...' : 'llama-server');
   pm.append(h('span.dot.' + dot), h('b', null, label.replace(/[-_.](I?Q\d[\w]*|BF16|F16|F32)$/i, '')), h('span', { html: svg('chev', 'caret'), style: { display: 'contents' } }));
-  pm.title = pending ? `${want.name}: será carregado no lugar de ${modelById(S.models.active)?.name || 'o atual'} quando você enviar` : (want?.model || S.model || S.info.llamaUrl || '');
+  pm.title = pending ? L('{0}: será carregado no lugar de {1} quando você enviar', want.name, modelById(S.models.active)?.name || L('o atual')) : (want?.model || S.model || S.info.llamaUrl || '');
   pm.querySelector('.caret').style.transform = 'rotate(90deg)';
 
   // só ícone; o nome aparece na dica e no menu ao clicar
@@ -244,18 +244,18 @@ function updatePickers() {
   };
   const pers = personaOf(c);
   iconBtn($('#pick-persona'), pers ? h('span.p-ava', { style: { background: pers.color } }, (pers.name[0] || '?').toUpperCase()) : ic('user'),
-    pers ? `Personalidade: ${pers.name}` : 'Personalidade: nenhuma', !!pers, 0, pers?.color);
+    pers ? L('Personalidade: {0}', pers.name) : L('Personalidade: nenhuma'), !!pers, 0, pers?.color);
   const tk = thinkOf(c);
-  iconBtn($('#pick-think'), ic(tk === 'off' ? ('zap' in ICONS ? 'zap' : 'send') : 'brain'), `Raciocínio: ${THINK_OPTS.find((o) => o[0] === tk)[1]}`, tk !== thinkDefault(), 0, tk === 'off' ? '#d99a1e' : 'var(--accent)');
+  iconBtn($('#pick-think'), ic(tk === 'off' ? ('zap' in ICONS ? 'zap' : 'send') : 'brain'), L('Raciocínio: {0}', THINK_OPTS.find((o) => o[0] === tk)[1]), tk !== thinkDefault(), 0, tk === 'off' ? '#d99a1e' : 'var(--accent)');
   const al = autoLevelOf(c);
-  iconBtn($('#pick-auto'), ic(al === 'desligado' ? 'ban' : 'signpost'), `Recursos automáticos: ${AUTO_LEVELS.find((o) => o[0] === al)[1]}`, al !== 'equilibrado', 0, al === 'desligado' ? 'var(--muted)' : al === 'liberal' ? '#d99a1e' : 'var(--accent)');
+  iconBtn($('#pick-auto'), ic(al === 'desligado' ? 'ban' : 'signpost'), L('Recursos automáticos: {0}', AUTO_LEVELS.find((o) => o[0] === al)[1]), al !== 'equilibrado', 0, al === 'desligado' ? 'var(--muted)' : al === 'liberal' ? '#d99a1e' : 'var(--accent)');
   const pl = planOf(c);
-  iconBtn($('#pick-plan'), ic('list'), pl ? 'Modo plano: ligado (o modelo só investiga e propõe)' : 'Modo plano: desligado', pl, 0, '#0e9f8a');
+  iconBtn($('#pick-plan'), ic('list'), pl ? L('Modo plano: ligado (o modelo só investiga e propõe)') : L('Modo plano: desligado'), pl, 0, '#0e9f8a');
   const skNames = act.skills.map((id) => S.skills.find((k) => k.id === id)?.name || id);
-  iconBtn($('#pick-skills'), ic('sparkles'), nSk ? `Habilidades: ${skNames.join(', ') || nSk}` : 'Habilidades: nenhuma', nSk > 0, nSk, 'var(--skill)');
-  iconBtn($('#pick-mcp'), ic('plug'), nMcp ? `Conectores: ${act.mcp.join(', ') || nMcp}` : 'Conectores: nenhum', nMcp > 0, nMcp, 'var(--mcp)');
+  iconBtn($('#pick-skills'), ic('sparkles'), nSk ? L('Habilidades: {0}', skNames.join(', ') || nSk) : L('Habilidades: nenhuma'), nSk > 0, nSk, 'var(--skill)');
+  iconBtn($('#pick-mcp'), ic('plug'), nMcp ? L('Conectores: {0}', act.mcp.join(', ') || nMcp) : L('Conectores: nenhum'), nMcp > 0, nMcp, 'var(--mcp)');
   const proj = projectOf(c);
-  iconBtn($('#pick-ws'), ic('folder'), proj ? `Projeto: ${proj.name}\n${S.ws.path}` : `Espaço de trabalho: ${S.ws.path || '...'}`, !!proj, 0, '#b07a14');
+  iconBtn($('#pick-ws'), ic('folder'), proj ? L('Projeto: {0}\n{1}', proj.name, S.ws.path) : L('Espaço de trabalho: {0}', S.ws.path || '...'), !!proj, 0, '#b07a14');
 }
 
 function checkRow({ checked, title, desc, extra, disabled, onchange }) {
@@ -267,35 +267,35 @@ function checkRow({ checked, title, desc, extra, disabled, onchange }) {
 
 function fillSkillsPop() {
   const pop = $('#pop-skills'); pop.className = 'popover pop-skills'; pop.innerHTML = '';
-  pop.append(h('div.pop-head', null, h('span', null, 'Habilidades ativas em todas as mensagens'), S.sel.skills.length ? h('button', { onclick: () => { S.sel.skills = []; saveSel(); fillSkillsPop(); updatePickers(); renderChatTitle(); } }, 'Limpar') : null));
-  if (!S.skills.length) pop.append(h('div.pop-empty', null, 'Nenhuma habilidade ainda. Crie ou importe no menu Habilidades.'));
+  pop.append(h('div.pop-head', null, h('span', null, L('Habilidades ativas em todas as mensagens')), S.sel.skills.length ? h('button', { onclick: () => { S.sel.skills = []; saveSel(); fillSkillsPop(); updatePickers(); renderChatTitle(); } }, L('Limpar')) : null));
+  if (!S.skills.length) pop.append(h('div.pop-empty', null, L('Nenhuma habilidade ainda. Crie ou importe no menu Habilidades.')));
   for (const s of S.skills) {
     pop.append(checkRow({
       checked: S.sel.skills.includes(s.id), title: s.name, desc: s.description,
       onchange: (on) => { S.sel.skills = on ? [...new Set([...S.sel.skills, s.id])] : S.sel.skills.filter((x) => x !== s.id); saveSel(); updatePickers(); renderChatTitle(); },
     }));
   }
-  pop.append(h('div.pop-foot', null, h('button.btn.ghost.sm.wide', { onclick: () => { closePops(); setView('skills'); } }, ic('gear'), 'Gerenciar habilidades')));
+  pop.append(h('div.pop-foot', null, h('button.btn.ghost.sm.wide', { onclick: () => { closePops(); setView('skills'); } }, ic('gear'), L('Gerenciar habilidades'))));
 }
 
 function fillMcpPop() {
   const pop = $('#pop-mcp'); pop.className = 'popover pop-mcp'; pop.innerHTML = '';
-  pop.append(h('div.pop-head', null, h('span', null, 'Ferramentas disponíveis ao modelo')));
+  pop.append(h('div.pop-head', null, h('span', null, L('Ferramentas disponíveis ao modelo'))));
   const on = enabledGroups();
   pop.append(h('button.menu-item', { onclick: () => { closePops(); openSettings('tools'); } },
-    ic('wrench'), h('span.mi-main', null, `Ferramentas internas: ${on.length} de ${TOOL_GROUPS.length} ativas`, h('span.mi-sub', null, on.map((g) => TOOL_INFO[g].short).join(', ') || 'nenhuma')), h('span.tag', null, 'Configurar')));
+    ic('wrench'), h('span.mi-main', null, L('Ferramentas internas: {0} de {1} ativas', on.length, TOOL_GROUPS.length), h('span.mi-sub', null, on.map((g) => TOOL_INFO[g].short).join(', ') || 'nenhuma')), h('span.tag', null, L('Configurar'))));
   pop.append(h('div.menu-sep'));
-  if (!S.mcp.length) pop.append(h('div.pop-empty', null, 'Nenhum conector MCP configurado.'));
+  if (!S.mcp.length) pop.append(h('div.pop-empty', null, L('Nenhum conector MCP configurado.')));
   for (const s of S.mcp) {
     const st = statusInfo(s.status);
     pop.append(checkRow({
       checked: S.sel.mcp.includes(s.name), title: s.name,
-      extra: h('span', { style: { display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto', fontSize: '12px', color: 'var(--muted)', fontWeight: 400 } }, h('span.dot.' + st.dot), s.status === 'connected' ? `${s.tools.length} ferramentas` : st.label),
+      extra: h('span', { style: { display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto', fontSize: '12px', color: 'var(--muted)', fontWeight: 400 } }, h('span.dot.' + st.dot), s.status === 'connected' ? L('{0} ferramentas', s.tools.length) : st.label),
       desc: s.error || s.tools.slice(0, 6).map((t) => t.name).join(', '),
       onchange: (on) => { S.sel.mcp = on ? [...new Set([...S.sel.mcp, s.name])] : S.sel.mcp.filter((x) => x !== s.name); saveSel(); updatePickers(); renderChatTitle(); },
     }));
   }
-  pop.append(h('div.pop-foot', null, h('button.btn.ghost.sm.wide', { onclick: () => { closePops(); setView('mcp'); } }, ic('gear'), 'Gerenciar conectores')));
+  pop.append(h('div.pop-foot', null, h('button.btn.ghost.sm.wide', { onclick: () => { closePops(); setView('mcp'); } }, ic('gear'), L('Gerenciar conectores'))));
 }
 
 function modelById(id) { return S.models.models.find((m) => m.id === id) || null; }
@@ -313,7 +313,7 @@ async function loadModels() {
 
 async function activateModel(id, quiet) {
   const m = modelById(id);
-  if (!quiet) toast(`Carregando ${m?.name || 'modelo'}...`);
+  if (!quiet) toast(L('Carregando {0}...', m?.name || L('modelo')));
   S.llama = noteLlama(await api('/api/models/activate', { id }));
   S.models.active = id; S.model = ''; S.nCtx = 0;
   updatePickers();
@@ -338,8 +338,8 @@ function escalateWhy(conv, msg, st) {
       st.sigs.add(sig);
     } else if (r.status === 'ok') { st.fails = 0; }
   }
-  if (st.repeat) return `repetiu ${st.repeat} com o mesmo erro`;
-  if (st.fails >= cfg.after) return `${st.fails} falhas seguidas`;
+  if (st.repeat) return L('repetiu {0} com o mesmo erro', st.repeat);
+  if (st.fails >= cfg.after) return L('{0} falhas seguidas', st.fails);
   return '';
 }
 function normArgs(a) { const o = parseArgs(a); return o ? JSON.stringify(o, Object.keys(o).sort()) : String(a || ''); }
@@ -348,14 +348,14 @@ async function escalate(conv, why, st, signal) {
   const big = modelById(cfg.model); const small = modelById(S.models.active);
   if (!big || big.id === S.models.active) return;
   if ([...S.runs.keys()].some((id) => id !== conv.id)) {
-    conv.messages.push({ role: 'notice', icon: 'flask', content: `Ia escalar para ${big.name} (${why}), mas outra conversa está usando o servidor.` });
+    conv.messages.push({ role: 'notice', icon: 'flask', content: L('Ia escalar para {0} ({1}), mas outra conversa está usando o servidor.', big.name, why) });
     return;
   }
   conv._thinkNext = true;
-  conv.messages.push({ role: 'notice', content: `Escalado para ${big.name}: ${small?.name || 'o modelo atual'} ${why}.` });
-  conv.messages.push({ role: 'user', hidden: true, note: true, content: `(Nota do studio: o modelo anterior${small ? ` (${small.name})` : ''} ${why} nesta tarefa. Você é um modelo maior assumindo daqui. Releia os erros acima, descubra a causa e, se preciso, siga por outro caminho.)` });
+  conv.messages.push({ role: 'notice', content: L('Escalado para {0}: {1} {2}.', big.name, small?.name || L('o modelo atual'), why) });
+  conv.messages.push({ role: 'user', hidden: true, note: true, content: L('(Nota do studio: o modelo anterior{0} {1} nesta tarefa. Você é um modelo maior assumindo daqui. Releia os erros acima, descubra a causa e, se preciso, siga por outro caminho.)', small ? ` (${small.name})` : '', why) });
   saveConvs(); scheduleRender();
-  conv._waitingModel = true; conv._waitText = `Trocando para ${big.name}...`; scheduleRender();
+  conv._waitingModel = true; conv._waitText = L('Trocando para {0}...', big.name); scheduleRender();
   try { await activateModel(big.id, true); } finally { conv._waitingModel = false; conv._waitText = ''; }
   await waitModel(conv, signal); await assignSlot(conv);
   // voltar: a conversa fica presa ao modelo de antes, e o próximo pedido troca de volta
@@ -369,12 +369,12 @@ async function ensureModel(conv, signal) {
   if (!want || want.id === S.models.active) return;
   const others = () => [...S.runs.keys()].some((id) => id !== conv.id && !S.convs.find((x) => x.id === id)?._waitingModel);
   if (others()) {
-    conv._waitingModel = true; conv._waitText = `Esperando outra conversa terminar para trocar para ${want.name}.`; scheduleRender();
+    conv._waitingModel = true; conv._waitText = L('Esperando outra conversa terminar para trocar para {0}.', want.name); scheduleRender();
     try { while (others() && !signal.aborted) await new Promise((r) => setTimeout(r, 700)); }
     finally { conv._waitingModel = false; conv._waitText = ''; }
   }
   if (signal.aborted || want.id === S.models.active) return;
-  conv._waitingModel = true; conv._waitText = `Trocando para ${want.name}...`; scheduleRender();
+  conv._waitingModel = true; conv._waitText = L('Trocando para {0}...', want.name); scheduleRender();
   try { await activateModel(want.id, true); } finally { conv._waitingModel = false; conv._waitText = ''; }
 }
 
@@ -392,50 +392,50 @@ function chooseModel(id) {
 
 function fillModelPop() {
   const pop = $('#pop-model'); pop.innerHTML = '';
-  const st = { ok: 'Pronto', loading: 'Carregando o modelo', offline: 'Desligado ou inacessível' }[S.health.status] || 'Verificando';
+  const st = { ok: L('Pronto'), loading: L('Carregando o modelo'), offline: L('Desligado ou inacessível') }[S.health.status] || L('Verificando');
   const want = convModel(cur());
-  pop.append(h('div.pop-head', null, h('span', null, 'Modelo desta conversa')));
-  if (!S.models.models.length) pop.append(h('div.pop-path', null, S.model || 'Nenhum modelo cadastrado'));
+  pop.append(h('div.pop-head', null, h('span', null, L('Modelo desta conversa'))));
+  if (!S.models.models.length) pop.append(h('div.pop-path', null, S.model || L('Nenhum modelo cadastrado')));
   for (const m of S.models.models) {
     const loaded = m.id === S.models.active;
     pop.append(h('button.menu-item.model-item' + (want?.id === m.id ? '.sel' : ''), { onclick: () => { closePops(); chooseModel(m.id); } },
       h('span.dot.' + (loaded ? ({ ok: 'ok', loading: 'busy', offline: 'err' }[S.health.status] || '') : 'idle')),
-      h('span.mi-main', null, m.name, h('span.mi-sub', null, loaded ? `${st} · contexto ${fmtK(m.context)}` : `contexto ${fmtK(m.context)} · troca ao escolher`)),
+      h('span.mi-main', null, m.name, h('span.mi-sub', null, loaded ? L('{0} · contexto {1}', st, fmtK(m.context)) : L('contexto {0} · troca ao escolher', fmtK(m.context)))),
       want?.id === m.id ? ic('check') : null));
   }
   pop.append(...[h('div.menu-sep'),
-    h('div.mi-note', null, 'Só um modelo fica carregado por vez. Cada modelo lembra as habilidades, conectores e ferramentas que estavam marcados com ele.'),
-    S.llama && !S.llama.running && S.health.status === 'offline' ? h('button.menu-item', { onclick: () => { closePops(); startLlama(); } }, ic('play'), 'Iniciar o servidor') : null,
-    S.llama?.running ? h('button.menu-item', { onclick: () => { closePops(); stopLlama(); } }, ic('stop'), 'Parar o servidor') : null,
-    h('button.menu-item', { onclick: () => { closePops(); setView('server'); } }, ic('server'), 'Gerenciar modelos e servidor')].filter(Boolean));
+    h('div.mi-note', null, L('Só um modelo fica carregado por vez. Cada modelo lembra as habilidades, conectores e ferramentas que estavam marcados com ele.')),
+    S.llama && !S.llama.running && S.health.status === 'offline' ? h('button.menu-item', { onclick: () => { closePops(); startLlama(); } }, ic('play'), L('Iniciar o servidor')) : null,
+    S.llama?.running ? h('button.menu-item', { onclick: () => { closePops(); stopLlama(); } }, ic('stop'), L('Parar o servidor')) : null,
+    h('button.menu-item', { onclick: () => { closePops(); setView('server'); } }, ic('server'), L('Gerenciar modelos e servidor'))].filter(Boolean));
 }
 
 function fillWsPop() {
   const pop = $('#pop-ws'); pop.innerHTML = '';
   const proj = projectOf(cur());
-  pop.append(h('div.pop-head', null, h('span', null, proj ? `Pasta do projeto ${proj.name}` : 'Espaço de trabalho')), h('div.pop-path', null, S.ws.path));
-  if (proj) pop.append(h('button.menu-item', { onclick: () => { closePops(); editProject(proj); } }, ic('gear'), 'Configurar o projeto'));
+  pop.append(h('div.pop-head', null, h('span', null, proj ? L('Pasta do projeto {0}', proj.name) : L('Espaço de trabalho'))), h('div.pop-path', null, S.ws.path));
+  if (proj) pop.append(h('button.menu-item', { onclick: () => { closePops(); editProject(proj); } }, ic('gear'), L('Configurar o projeto')));
   for (const p of proj ? [] : (S.info.recentWorkspaces || []).filter((x) => x !== S.ws.path).slice(0, 5)) {
     pop.append(h('button.menu-item', { onclick: () => { closePops(); setWorkspace(p); } }, ic('folder'), h('span.mi-main', null, basename(p), h('span.mi-sub', null, p))));
   }
   pop.append(h('div.menu-sep'),
-    h('button.menu-item', { onclick: () => { closePops(); chooseWorkspace(); } }, ic('folderOpen'), 'Escolher outra pasta...'),
-    h('button.menu-item', { onclick: () => { closePops(); api('/api/reveal', { path: '.', ws: S.ws.path }); } }, ic('external'), 'Abrir no Explorer'),
-    h('button.menu-item', { onclick: () => { closePops(); toggleWs(); } }, ic('panel'), $('#ws').classList.contains('hidden') ? 'Mostrar painel de arquivos' : 'Ocultar painel de arquivos'));
+    h('button.menu-item', { onclick: () => { closePops(); chooseWorkspace(); } }, ic('folderOpen'), L('Escolher outra pasta...')),
+    h('button.menu-item', { onclick: () => { closePops(); api('/api/reveal', { path: '.', ws: S.ws.path }); } }, ic('external'), L('Abrir no Explorer')),
+    h('button.menu-item', { onclick: () => { closePops(); toggleWs(); } }, ic('panel'), $('#ws').classList.contains('hidden') ? L('Mostrar painel de arquivos') : L('Ocultar painel de arquivos')));
 }
 
 function fillPlusPop() {
   const pop = $('#pop-plus'); pop.innerHTML = '';
-  pop.append(h('div.pop-head', null, h('span', null, 'Inserir na mensagem')),
+  pop.append(h('div.pop-head', null, h('span', null, L('Inserir na mensagem'))),
     h('button.menu-item', { onclick: async () => {
       closePops();
-      const p = await pickPath({ title: 'Referenciar arquivo ou pasta', mode: 'any', start: S.ws.path });
+      const p = await pickPath({ title: L('Referenciar arquivo ou pasta'), mode: 'any', start: S.ws.path });
       if (p) { const st = await api('/api/stat', { path: p, ws: S.ws.path }); addRef({ name: basename(p), path: st.path, dir: st.dir }); }
-    } }, ic('pin'), h('span.mi-main', null, 'Arquivo ou pasta do computador', h('span.mi-sub', null, 'Entra o caminho completo, sem enviar o arquivo'))),
-    h('button.menu-item', { onclick: () => { closePops(); focusEditor(); document.execCommand('insertText', false, '@'); checkMention(); } }, ic('sparkles'), h('span.mi-main', null, 'Habilidade ou conector', h('span.mi-sub', null, 'O mesmo que digitar @'))),
+    } }, ic('pin'), h('span.mi-main', null, L('Arquivo ou pasta do computador'), h('span.mi-sub', null, L('Entra o caminho completo, sem enviar o arquivo')))),
+    h('button.menu-item', { onclick: () => { closePops(); focusEditor(); document.execCommand('insertText', false, '@'); checkMention(); } }, ic('sparkles'), h('span.mi-main', null, L('Habilidade ou conector'), h('span.mi-sub', null, L('O mesmo que digitar @')))),
     h('div.menu-sep'),
-    h('button.menu-item', { onclick: () => { closePops(); setView('skills'); } }, ic('download'), 'Importar habilidades'),
-    h('button.menu-item', { onclick: () => { closePops(); setView('mcp'); } }, ic('plus'), 'Adicionar conector MCP'));
+    h('button.menu-item', { onclick: () => { closePops(); setView('skills'); } }, ic('download'), L('Importar habilidades')),
+    h('button.menu-item', { onclick: () => { closePops(); setView('mcp'); } }, ic('plus'), L('Adicionar conector MCP')));
 }
 
 /* ------------------------------------------------------------ arquivos arrastados */
@@ -456,7 +456,7 @@ function updateRefPill(r) {
     if (r.status !== 'ok') el.classList.add(r.status);
     el.querySelector('.v').textContent = r.name || basename(r.path);
     el.dataset.name = r.name || '';
-    el.title = r.status === 'loading' ? 'Localizando no computador...' : r.status === 'missing' ? 'Não encontrei este arquivo. Clique para resolver.' : r.status === 'choose' ? 'Há mais de um arquivo com este nome. Clique para escolher.' : r.path;
+    el.title = r.status === 'loading' ? L('Localizando no computador...') : r.status === 'missing' ? L('Não encontrei este arquivo. Clique para resolver.') : r.status === 'choose' ? L('Há mais de um arquivo com este nome. Clique para escolher.') : r.path;
   }
 }
 
@@ -501,34 +501,34 @@ function refAction(r) {
   if (r.status === 'choose' || (r.options && r.options.length > 1)) {
     for (const o of r.options || []) {
       list.append(h('button', { onclick: () => { r.path = o.path; r.status = 'ok'; remember(r); done(); } }, o.path,
-        h('small', null, [o.exact ? 'mesmo tamanho e data' : 'mesmo nome', o.size != null && !r.dir ? fmtSize(o.size) : null, o.mtime ? new Date(o.mtime).toLocaleString('pt-BR') : null].filter(Boolean).join(', '))));
+        h('small', null, [o.exact ? L('mesmo tamanho e data') : L('mesmo nome'), o.size != null && !r.dir ? fmtSize(o.size) : null, o.mtime ? new Date(o.mtime).toLocaleString(LOCALE) : null].filter(Boolean).join(', '))));
     }
   }
   const body = [
     h('p', { style: { marginTop: 0, color: 'var(--text-2)' } },
-      r.status === 'missing' ? `Não encontrei "${r.name}" nas pastas comuns nem no índice de pesquisa do Windows.`
-        : r.status === 'choose' ? `Há mais de um "${r.name}" no computador. Qual deles?` : r.path),
+      r.status === 'missing' ? L('Não encontrei "{0}" nas pastas comuns nem no índice de pesquisa do Windows.', r.name)
+        : r.status === 'choose' ? L('Há mais de um "{0}" no computador. Qual deles?', r.name) : r.path),
     list.childElementCount ? list : null,
   ];
   const foot = [
-    h('button.btn.danger', { style: { marginRight: 'auto' }, onclick: () => { refPillEls(r).forEach((el) => el.remove()); S.refs = S.refs.filter((x) => x !== r); m.close(); updatePickers(); } }, 'Remover da mensagem'),
+    h('button.btn.danger', { style: { marginRight: 'auto' }, onclick: () => { refPillEls(r).forEach((el) => el.remove()); S.refs = S.refs.filter((x) => x !== r); m.close(); updatePickers(); } }, L('Remover da mensagem')),
     h('button.btn', { onclick: async () => {
-      const p = await promptBox('Caminho do arquivo', `Cole o caminho completo de "${r.name}"`, r.path || '', 'Usar');
+      const p = await promptBox(L('Caminho do arquivo'), L('Cole o caminho completo de "{0}"', r.name), r.path || '', L('Usar'));
       if (!p) return;
       const st = await api('/api/stat', { path: p.replace(/^"|"$/g, ''), ws: S.ws.path });
-      if (!st.exists) { toast('Esse caminho não existe.', 'err'); return; }
+      if (!st.exists) { toast(L('Esse caminho não existe.'), 'err'); return; }
       r.path = st.path; r.dir = st.dir; r.status = 'ok'; r.name = basename(st.path); remember(r); done();
-    } }, 'Informar caminho'),
+    } }, L('Informar caminho')),
     r.file && r.status !== 'ok' ? h('button.btn.primary', { onclick: async () => {
       try {
         r.status = 'loading'; done();
         const res = await api('/api/ws/upload?name=' + encodeURIComponent(r.name) + '&ws=' + encodeURIComponent(S.ws.path), r.file);
         r.path = res.path; r.status = 'ok'; r.file = null; updateRefPill(r); refreshTree();
-        toast('Copiado para a pasta anexos do espaço de trabalho');
+        toast(L('Copiado para a pasta anexos do espaço de trabalho'));
       } catch (e) { r.status = 'missing'; updateRefPill(r); toast(e.message, 'err'); }
-    } }, 'Copiar para o espaço de trabalho') : null,
+    } }, L('Copiar para o espaço de trabalho')) : null,
   ];
-  m = modal({ title: r.name || 'Arquivo', body, foot });
+  m = modal({ title: r.name || L('Arquivo'), body, foot });
 }
 
 function fileUriToPath(u) {
@@ -564,7 +564,7 @@ async function loadImg(path, ws) {
 async function pasteImage(file) {
   const ext = ({ 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'image/bmp': 'bmp' })[file.type] || 'png';
   const d = new Date(); const pad = (n) => String(n).padStart(2, '0');
-  const name = `colada-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.${ext}`;
+  const name = L('colada-{0}{1}{2}-{3}{4}{5}.{6}', d.getFullYear(), pad(d.getMonth() + 1), pad(d.getDate()), pad(d.getHours()), pad(d.getMinutes()), pad(d.getSeconds()), ext);
   const r = addRef({ name, status: 'loading' });
   const data = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => res(null); fr.readAsDataURL(file); });
   try {
@@ -572,8 +572,8 @@ async function pasteImage(file) {
     r.path = up.path; r.name = basename(up.path); r.status = 'ok';
     if (data) S.imgData.set(up.path, data);
     refreshTree();
-    if (!visionOn()) toast('Imagem salva em anexos. O modelo atual não enxerga imagens: ele recebe só o caminho.');
-  } catch (e) { r.status = 'missing'; toast('Não consegui salvar a imagem: ' + e.message, 'err'); }
+    if (!visionOn()) toast(L('Imagem salva em anexos. O modelo atual não enxerga imagens: ele recebe só o caminho.'));
+  } catch (e) { r.status = 'missing'; toast(L('Não consegui salvar a imagem: ') + e.message, 'err'); }
   updateRefPill(r); updatePickers();
 }
 /** Carrega as imagens da última mensagem do usuário antes de mandar ao modelo. */

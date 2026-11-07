@@ -169,13 +169,13 @@ async fn guard(req: Request, next: Next) -> Response {
     let host = req.headers().get(header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("");
     let host = if host.starts_with('[') { host.split(']').next().map(|h| format!("{h}]")).unwrap_or_default() } else { host.split(':').next().unwrap_or("").to_string() };
     if !matches!(host.as_str(), "127.0.0.1" | "localhost" | "[::1]") {
-        return (StatusCode::FORBIDDEN, "Host não permitido").into_response();
+        return (StatusCode::FORBIDDEN, L!("Host não permitido", "Host not allowed")).into_response();
     }
     let path = req.uri().path();
     let is_api = path.starts_with("/api/");
     let is_proxy_write = req.method() != Method::GET && !is_api && path != "/" && !path.contains('.');
     if (is_api || is_proxy_write) && req.headers().get("x-studio").map(|v| v.as_bytes()) != Some(b"1") {
-        return (StatusCode::FORBIDDEN, Json(json!({"error":"Cabeçalho ausente"}))).into_response();
+        return (StatusCode::FORBIDDEN, Json(json!({"error":L!("Cabeçalho ausente", "Missing header")}))).into_response();
     }
     next.run(req).await
 }
@@ -210,7 +210,7 @@ async fn static_file(State(app): S, req: Request) -> Response {
             r.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
             r
         }
-        None => (StatusCode::NOT_FOUND, "Não encontrado").into_response(),
+        None => (StatusCode::NOT_FOUND, L!("Não encontrado", "Not found")).into_response(),
     }
 }
 
@@ -245,7 +245,7 @@ async fn proxy(State(app): S, req: Request) -> Response {
         }
         Err(e) => (
             StatusCode::BAD_GATEWAY,
-            Json(json!({"error":{"message": format!("llama-server indisponível em {base} ({}). Ele está rodando?", e.without_url())}})),
+            Json(json!({"error":{"message": LF!("llama-server indisponível em {base} ({}). Ele está rodando?", "llama-server unavailable at {base} ({}). Is it running?", e.without_url())}})),
         )
             .into_response(),
     }
@@ -273,6 +273,7 @@ async fn state(State(app): S) -> Res {
         "closeToTray": c.close_to_tray,
         "compactOutput": c.compact_output,
         "useRtk": c.use_rtk,
+        "lang": c.lang,
     }))
 }
 
@@ -297,6 +298,10 @@ async fn set_config(State(app): S, b: Bytes) -> Res {
         }
         if let Some(g) = v.get("useRtk").and_then(Value::as_bool) {
             c.use_rtk = g;
+        }
+        if let Some(l) = v.get("lang").and_then(Value::as_str).filter(|l| !l.is_empty()) {
+            c.lang = if l.starts_with("en") { "en".into() } else { "pt".into() };
+            crate::i18n::set(&c.lang);
         }
     }
     app.save_config();
@@ -360,7 +365,7 @@ async fn set_workspace(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     let p = resolve(&app::home_dir(), st(&v, "path"));
     if !p.is_dir() {
-        return Err(bad(format!("Pasta não encontrada: {}", p.display())));
+        return Err(bad(LF!("Pasta não encontrada: {}", "Folder not found: {}", p.display())));
     }
     let s = p.to_string_lossy().into_owned();
     {
@@ -437,7 +442,7 @@ async fn ws_list(State(app): S, Query(qs): Q) -> Res {
     let ws = ws_of(&app, q(&qs, "ws"));
     let dir = resolve(&ws, q(&qs, "path"));
     if !is_inside(&ws, &dir) {
-        return Err(ApiErr(StatusCode::FORBIDDEN, "Fora da pasta de trabalho".into()));
+        return Err(ApiErr(StatusCode::FORBIDDEN, L!("Fora da pasta de trabalho", "Outside the workspace").into()));
     }
     let items = tokio::task::spawn_blocking(move || list_dir(&dir, false)).await.unwrap().map_err(|e| bad(e.to_string()))?;
     let more = items.len().saturating_sub(2000);
@@ -457,7 +462,7 @@ async fn ws_read(State(app): S, Query(qs): Q) -> Res {
     let ws = ws_of(&app, q(&qs, "ws"));
     let file = resolve(&ws, q(&qs, "path"));
     if !is_inside(&ws, &file) {
-        return Err(ApiErr(StatusCode::FORBIDDEN, "Fora da pasta de trabalho".into()));
+        return Err(ApiErr(StatusCode::FORBIDDEN, L!("Fora da pasta de trabalho", "Outside the workspace").into()));
     }
     let md = std::fs::metadata(&file).map_err(|e| bad(e.to_string()))?;
     if md.len() > 2 * 1024 * 1024 {
@@ -511,7 +516,7 @@ async fn reveal(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     let p = resolve(&ws_of(&app, st(&v, "ws")), st(&v, "path"));
     if !p.exists() {
-        return Err(ApiErr(StatusCode::NOT_FOUND, format!("Não encontrado: {}", p.display())));
+        return Err(ApiErr(StatusCode::NOT_FOUND, LF!("Não encontrado: {}", "Not found: {}", p.display())));
     }
     app::reveal(&p, !p.is_dir());
     ok(json!({"ok": true}))
@@ -539,7 +544,7 @@ async fn browse(Query(qs): Q) -> Res {
 async fn locate_h(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     if st(&v, "name").is_empty() {
-        return Err(bad("Falta o nome do arquivo."));
+        return Err(bad(L!("Falta o nome do arquivo.", "The file name is missing.")));
     }
     ok(locate::locate(&app, st(&v, "name"), v.get("size").and_then(Value::as_u64), v.get("lastModified").and_then(Value::as_f64), v.get("isDir").and_then(Value::as_bool).unwrap_or(false)).await)
 }
@@ -568,7 +573,7 @@ async fn skills_list(State(app): S) -> Res {
 }
 
 async fn skills_get(State(app): S, Query(qs): Q) -> Res {
-    let s = skills::get(&app, q(&qs, "id")).ok_or_else(|| ApiErr(StatusCode::NOT_FOUND, "Skill não encontrada".into()))?;
+    let s = skills::get(&app, q(&qs, "id")).ok_or_else(|| ApiErr(StatusCode::NOT_FOUND, L!("Skill não encontrada", "Skill not found").into()))?;
     let text = std::fs::read_to_string(s.dir.join("SKILL.md")).unwrap_or_default();
     let (meta, b) = skills::parse_frontmatter(&text);
     let mut v = serde_json::to_value(&s).unwrap();
@@ -580,11 +585,11 @@ async fn skills_get(State(app): S, Query(qs): Q) -> Res {
 async fn skills_save(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     if st(&v, "name").trim().is_empty() {
-        return Err(bad("Dê um nome à habilidade."));
+        return Err(bad(L!("Dê um nome à habilidade.", "Give the skill a name.")));
     }
     let id = st(&v, "id");
     if !id.is_empty() && !skills::get(&app, id).is_some_and(|s| s.editable) {
-        return Err(bad("Essa habilidade fica fora da pasta do studio; importe-a para editar."));
+        return Err(bad(L!("Essa habilidade fica fora da pasta do studio; importe-a para editar.", "That skill is outside the studio folder; import it to edit it.")));
     }
     let id = skills::write(&app, (!id.is_empty()).then_some(id), st(&v, "name").trim(), st(&v, "description").trim(), st(&v, "body")).map_err(bad)?;
     ok(json!({"id": id}))
@@ -592,9 +597,9 @@ async fn skills_save(State(app): S, b: Bytes) -> Res {
 
 async fn skills_delete(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
-    let s = skills::get(&app, st(&v, "id")).ok_or_else(|| bad("Habilidade não encontrada"))?;
+    let s = skills::get(&app, st(&v, "id")).ok_or_else(|| bad(L!("Habilidade não encontrada", "Skill not found")))?;
     if !s.editable {
-        return Err(bad("Essa habilidade fica numa pasta externa; remova a pasta nas configurações."));
+        return Err(bad(L!("Essa habilidade fica numa pasta externa; remova a pasta nas configurações.", "That skill is in an external folder; remove the folder in Settings.")));
     }
     std::fs::remove_dir_all(&s.dir).map_err(|e| bad(e.to_string()))?;
     ok(json!({"ok": true}))
@@ -650,7 +655,7 @@ async fn mcp_config_get(State(app): S) -> Res {
 
 async fn mcp_config_set(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
-    let mut cfg: Value = serde_json::from_str(st(&v, "text")).map_err(|e| bad(format!("JSON inválido: {e}")))?;
+    let mut cfg: Value = serde_json::from_str(st(&v, "text")).map_err(|e| bad(LF!("JSON inválido: {e}", "Invalid JSON: {e}")))?;
     if cfg.get("mcpServers").is_none() {
         cfg = json!({"mcpServers": cfg});
     }
@@ -663,9 +668,9 @@ async fn mcp_upsert(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     let name = st(&v, "name").trim().to_string();
     if name.is_empty() {
-        return Err(bad("Dê um nome ao servidor."));
+        return Err(bad(L!("Dê um nome ao servidor.", "Give the server a name.")));
     }
-    let c = v.get("config").filter(|c| c.is_object()).cloned().ok_or_else(|| bad("Configuração ausente."))?;
+    let c = v.get("config").filter(|c| c.is_object()).cloned().ok_or_else(|| bad(L!("Configuração ausente.", "Missing configuration.")))?;
     let mut cfg = crate::mcp::Mcp::read_config(&app.mcp_file());
     let old = st(&v, "oldName");
     if !old.is_empty() && old != name {
@@ -679,7 +684,7 @@ async fn mcp_upsert(State(app): S, b: Bytes) -> Res {
 
 async fn mcp_import(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
-    let obj: Value = serde_json::from_str(st(&v, "text")).map_err(|e| bad(format!("JSON inválido: {e}")))?;
+    let obj: Value = serde_json::from_str(st(&v, "text")).map_err(|e| bad(LF!("JSON inválido: {e}", "Invalid JSON: {e}")))?;
     let servers = obj.get("mcpServers").or_else(|| obj.get("servers")).unwrap_or(&obj).clone();
     let mut cfg = crate::mcp::Mcp::read_config(&app.mcp_file());
     let mut added = vec![];
@@ -690,7 +695,7 @@ async fn mcp_import(State(app): S, b: Bytes) -> Res {
         }
     }
     if added.is_empty() {
-        return Err(bad("Nenhum servidor encontrado no JSON (espera \"command\" ou \"url\")."));
+        return Err(bad(L!("Nenhum servidor encontrado no JSON (espera \"command\" ou \"url\").", "No server found in the JSON (expects \"command\" or \"url\").")));
     }
     write_mcp(&app, &cfg)?;
     app.mcp.sync(&app.http, &app.mcp_file()).await;
@@ -709,7 +714,7 @@ async fn mcp_delete(State(app): S, b: Bytes) -> Res {
 async fn mcp_toggle(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     let mut cfg = crate::mcp::Mcp::read_config(&app.mcp_file());
-    let s = cfg["mcpServers"].get_mut(st(&v, "name")).filter(|s| s.is_object()).ok_or_else(|| bad("Servidor não encontrado"))?;
+    let s = cfg["mcpServers"].get_mut(st(&v, "name")).filter(|s| s.is_object()).ok_or_else(|| bad(L!("Servidor não encontrado", "Server not found")))?;
     if v.get("disabled").and_then(Value::as_bool).unwrap_or(false) {
         s["disabled"] = json!(true);
     } else {
@@ -724,7 +729,7 @@ async fn mcp_toggle(State(app): S, b: Bytes) -> Res {
 async fn mcp_hide(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     let mut cfg = crate::mcp::Mcp::read_config(&app.mcp_file());
-    let s = cfg["mcpServers"].get_mut(st(&v, "name")).filter(|s| s.is_object()).ok_or_else(|| bad("Servidor não encontrado"))?;
+    let s = cfg["mcpServers"].get_mut(st(&v, "name")).filter(|s| s.is_object()).ok_or_else(|| bad(L!("Servidor não encontrado", "Server not found")))?;
     let mut names = strs(&v, "hidden");
     names.sort();
     names.dedup();
@@ -779,7 +784,7 @@ async fn tools_call(State(app): S, b: Bytes) -> Res {
         Some(Value::String(s)) if s.trim().is_empty() => json!({}),
         Some(Value::String(s)) => match serde_json::from_str::<Value>(s) {
             Ok(a) => a,
-            Err(_) => return ok(json!({"content": format!("Erro: os argumentos não são um JSON válido: {}", s.chars().take(300).collect::<String>()), "isError": true})),
+            Err(_) => return ok(json!({"content": LF!("Erro: os argumentos não são um JSON válido: {}", "Error: the arguments are not valid JSON: {}", s.chars().take(300).collect::<String>()), "isError": true})),
         },
         Some(a) => a.clone(),
         None => json!({}),
@@ -815,7 +820,7 @@ async fn llama_config(State(app): S, b: Bytes) -> Res {
             }
         }
     }
-    let c: crate::llama::LlamaCfg = serde_json::from_value(merged).map_err(|e| bad(format!("Configuração inválida: {e}")))?;
+    let c: crate::llama::LlamaCfg = serde_json::from_value(merged).map_err(|e| bad(LF!("Configuração inválida: {e}", "Invalid configuration: {e}")))?;
     let url = c.base_url();
     let old_model = app.llama.cfg().model;
     app.llama.save(c);
@@ -888,7 +893,7 @@ async fn models_list(State(app): S) -> Res {
 
 async fn models_save(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
-    let list: Vec<crate::models::Profile> = serde_json::from_value(v.get("models").cloned().unwrap_or(json!([]))).map_err(|e| bad(format!("Lista inválida: {e}")))?;
+    let list: Vec<crate::models::Profile> = serde_json::from_value(v.get("models").cloned().unwrap_or(json!([]))).map_err(|e| bad(LF!("Lista inválida: {e}", "Invalid list: {e}")))?;
     crate::models::save(&app, &list);
     let a = app.clone();
     ok(tokio::task::spawn_blocking(move || crate::models::list_json(&a)).await.map_err(|e| bad(e.to_string()))?)
@@ -1043,11 +1048,11 @@ async fn share_read(b: Bytes) -> Res {
     let p = std::path::PathBuf::from(st(&v, "path"));
     let md = std::fs::metadata(&p).map_err(|e| bad(format!("{}: {e}", p.display())))?;
     if md.len() > 64 * 1024 * 1024 {
-        return Err(bad("Arquivo grande demais.".to_string()));
+        return Err(bad(L!("Arquivo grande demais.", "File too large.").to_string()));
     }
-    let data: Value = serde_json::from_slice(&std::fs::read(&p).map_err(|e| bad(e.to_string()))?).map_err(|e| bad(format!("Não é um pacote do Llama Studio: {e}")))?;
+    let data: Value = serde_json::from_slice(&std::fs::read(&p).map_err(|e| bad(e.to_string()))?).map_err(|e| bad(LF!("Não é um pacote do Llama Studio: {e}", "Not a Llama Studio package: {e}")))?;
     if data["format"] != crate::share::FORMAT {
-        return Err(bad("Não é um pacote do Llama Studio (.studio.json).".to_string()));
+        return Err(bad(L!("Não é um pacote do Llama Studio (.studio.json).", "Not a Llama Studio package (.studio.json).").to_string()));
     }
     ok(data)
 }
@@ -1122,11 +1127,11 @@ async fn img_data(State(app): S, b: Bytes) -> Res {
         "webp" => "image/webp",
         "gif" => "image/gif",
         "bmp" => "image/bmp",
-        _ => return Err(bad("Não é uma imagem.".to_string())),
+        _ => return Err(bad(L!("Não é uma imagem.", "Not an image.").to_string())),
     };
     let md = std::fs::metadata(&file).map_err(|e| bad(e.to_string()))?;
     if md.len() > 15 * 1024 * 1024 {
-        return Err(bad("Imagem grande demais (mais de 15 MB).".to_string()));
+        return Err(bad(L!("Imagem grande demais (mais de 15 MB).", "Image too large (over 15 MB).").to_string()));
     }
     let buf = std::fs::read(&file).map_err(|e| bad(e.to_string()))?;
     ok(json!({"data": format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(buf))}))

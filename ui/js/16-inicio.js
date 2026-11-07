@@ -2,6 +2,7 @@
 'use strict';
 
 async function init() {
+  translateStatic();
   applyTheme();
   for (const [v] of SET_EMBED) {
     const sec = $('#view-' + v); const page = sec?.querySelector('.page');
@@ -10,7 +11,7 @@ async function init() {
     sec.remove();
   }
   const navIcons = { chat: 'chat', skills: 'sparkles', mcp: 'plug', personas: 'user', tools: 'wrench', server: 'server', settings: 'gear', calendar: 'calendar' };
-  const navLabels = { chat: 'Nova conversa', skills: 'Habilidades', mcp: 'Conectores', personas: 'Personalidades', tools: 'Utilitários', server: 'Servidor', settings: 'Configurações', calendar: 'Calendário' };
+  const navLabels = { chat: L('Nova conversa'), skills: L('Habilidades'), mcp: L('Conectores'), personas: L('Personalidades'), tools: L('Utilitários'), server: L('Servidor'), settings: L('Configurações'), calendar: L('Calendário') };
   $$('.nav-item').forEach((b) => {
     b.innerHTML = svg(navIcons[b.dataset.view]) + `<span>${navLabels[b.dataset.view]}</span>`;
     b.addEventListener('click', () => {
@@ -20,9 +21,9 @@ async function init() {
   });
   $('.search-ico').innerHTML = svg('search');
   $('#search').addEventListener('input', () => { if (S.view !== 'chat') setView('chat'); renderConvList(); });
-  $('#bins-check').append(ic('refresh'), 'Procurar versões novas');
+  $('#bins-check').append(ic('refresh'), L('Procurar versões novas'));
   $('#bins-check').addEventListener('click', () => loadBins(true, true));
-  $('#persona-new').append(ic('plus'), 'Nova personalidade');
+  $('#persona-new').append(ic('plus'), L('Nova personalidade'));
   $('#persona-new').addEventListener('click', () => editPersona(null));
   $('#pick-persona').addEventListener('click', () => togglePop('#pop-persona', fillPersonaPop));
   $('#conv-menu-btn').innerHTML = svg('more');
@@ -95,11 +96,14 @@ async function init() {
 
   try {
     S.info = await api('/api/state');
+    // idioma: o programa guarda o escolhido (instalador ou menu); a interface segue, e o programa aprende o da interface
+    if (S.info.lang && S.info.lang !== LANG && !S.settings.lang) { setLang(S.info.lang); return; }
+    if (!S.info.lang || (S.settings.lang && S.info.lang !== S.settings.lang)) api('/api/config', { lang: LANG }).catch(() => {});
     S.ws.path = wsOf(cur()) || S.info.workspace;
     $('#app-ver').textContent = 'v' + (S.info.uiVersion || S.info.version || '');
-    $('#app-ver').title = `Programa ${S.info.version}, interface ${S.info.uiVersion}`;
+    $('#app-ver').title = L('Programa {0}, interface {1}', S.info.version, S.info.uiVersion);
   } catch (e) {
-    toast('Não consegui falar com o auxiliar: ' + e.message, 'err');
+    toast(L('Não consegui falar com o auxiliar: ') + e.message, 'err');
   }
   renderWsPath();
   if (S.convs.length && !cur()) S.curId = S.convs[0].id;

@@ -4,12 +4,12 @@
 /* ============================================================ envio e ciclo do agente */
 /** Lê o editor como uma mensagem pronta para enviar (ou null). */
 function takeEditor() {
-  if (S.refs.some((r) => r.status === 'loading' && refPillEls(r).length)) { toast('Aguarde: ainda localizando os arquivos arrastados.'); return null; }
+  if (S.refs.some((r) => r.status === 'loading' && refPillEls(r).length)) { toast(L('Aguarde: ainda localizando os arquivos arrastados.')); return null; }
   const parts = readEditor();
   if (!parts.length) return null;
   const content = partsToContent(parts);
   const refs = parts.filter((p) => p.kind === 'file').map((p) => ({ name: p.name, path: p.path, dir: p.dir }));
-  if (S.refs.some((r) => r.status === 'missing' && refPillEls(r).length)) toast('Arquivos não localizados ficaram de fora.');
+  if (S.refs.some((r) => r.status === 'missing' && refPillEls(r).length)) toast(L('Arquivos não localizados ficaram de fora.'));
   editor().innerHTML = ''; S.refs = []; savedRange = null;
   return { content, parts, refs };
 }
@@ -54,7 +54,7 @@ function editorEmpty() { return !readEditor().length; }
 async function submit(conv, item) {
   const { content, parts, refs } = item;
   conv.messages.push({ role: 'user', content, parts, refs, ts: Date.now(), ...(conv.plan ? { plan: true } : {}) });
-  if (conv.title === 'Nova conversa') {
+  if (conv.title === 'Nova conversa' || conv.title === L('Nova conversa')) {
     const plain = parts.filter((p) => p.t === 'text').map((p) => p.v).join(' ').replace(/\s+/g, ' ').trim();
     conv.title = (plain || parts.map((p) => p.name).filter(Boolean).join(', ')).slice(0, 60);
   }
@@ -71,37 +71,37 @@ async function submit(conv, item) {
 // nunca desliga o que você escolheu. O que foi ligado aparece na mensagem, com "desfazer".
 const ROUTES = [
   // strong: um sinal basta; weak: precisa de dois sinais diferentes (evita "serial killer", "patch na moda")
-  { id: 're', label: 'Engenharia reversa', think: 'on', groups: ['notebook', 'explore', 'read'], mcp: /dbg|debug|ida\b|ghidra|binja|binary.?ninja|radare|r2|cheat.?engine|^ce$|dnspy|ilspy|dotpeek|de4dot|\bjeb\b|^rea$|decompil|frida/i, skills: /dbg|debug|revers|engenharia/i,
+  { id: 're', label: L('Engenharia reversa'), think: 'on', groups: ['notebook', 'explore', 'read'], mcp: /dbg|debug|ida\b|ghidra|binja|binary.?ninja|radare|r2|cheat.?engine|^ce$|dnspy|ilspy|dotpeek|de4dot|\bjeb\b|^rea$|decompil|frida/i, skills: /dbg|debug|revers|engenharia/i,
     strong: /x(32|64)dbg|\bdbg\b|\bdebugger\b|breakpoint|dnspy|ilspy|dotpeek|de4dot|descompil|decompil|\bassembl(y|ies) \.net|\.net assembl|\bil\b.{0,20}(patch|m[eé]todo)|\bbps?\b|\bdlls?\b|endere[cç]o\s+(0x)?[0-9a-f]{6,}|desassembl|disassembl|\bida\b|ghidra|radare|cheat.?engine|(?<!(erro|error|c[oó]digo|code)\s{0,3})\b0x[0-9a-f]{4,}\b|\.(exe|dll|sys)\b|anti.?debug|desempacot|unpack|\bupx\b|\bsub_[0-9a-f]{3,}|\bdump\b.{0,30}(m[oó]dulo|mem[oó]ria|processo)|\b[er](ax|bx|cx|dx|si|di)\b/i,
-    weak: /debug|depura|engenharia reversa|reverse|assembly|registrador|\bpatch|offset|\bserial\b|licen[cç]a|execut[aá]vel|bin[aá]rio|mem[oó]ria|processo|\bstrings?\b|referen[cç]i|m[oó]dulo|\bdump\b|senha|compar[ae]|rotina|criptograf|\bimports?\b|\bexports?\b|endere[cç]o|ponteiro|\bhook|inje[cç]|\bjogo\b/gi },
-  { id: 'code', label: 'Programação', groups: ['read', 'edit', 'write', 'shell', 'explore'],
+    weak: /debug|depura|engenharia reversa|reverse|assembly|registrador|\bpatch|offset|\bserial\b|licen[cç]a|execut[aá]vel|bin[aá]rio|mem[oó]ria|processo|\bstrings?\b|referen[cç]i|m[oó]dulo|\bdump\b|senha|compar[ae]|rotina|criptograf|\bimports?\b|\bexports?\b|endere[cç]o|ponteiro|\bhook|inje[cç]|\bjogo\b|registers?\b|license|executable|binary|memory|\bprocess|\bmodules?\b|password|routine|encrypt|address|pointer|inject|\bgame\b/gi },
+  { id: 'code', label: L('Programação'), groups: ['read', 'edit', 'write', 'shell', 'explore'],
     strong: /\.(rs|js|mjs|ts|tsx|jsx|py|cs|cpp|hpp|go|java|kt|php|rb|sh|ps1|lua|sql|html?|css|vue|svelte)\b|\b(sql|query|queries)\b|\b(cargo|npm|pnpm|yarn|pip|pytest|gradle|maven|dotnet|cmake)\b|stack.?trace|\bcommit|\bgit\b|pull request|\b(react|vue|svelte|django|flask|express|node\.?js)\b|typescript|javascript|python|\brust\b|c\+\+|\bc#|\bsrc\//i,
-    weak: /c[oó]digo|compil|\bbuild\b|\bbug|\berros?\b|exce[cç][aã]o|refator|\btestes?\b|script|componente|fun[cç][aã]o|m[oó]dulo|classe|\bapi\b|deploy|login|programa[cç][aã]o|\bmerge\b|\bbranch\b|quebr/gi },
-  { id: 'web', label: 'Web', groups: ['browser'],
-    strong: /https?:\/\/|www\.|\bsites?\b|pesquis|procur[ae] na (web|internet)|na internet|\bgoogle\b(?!\s*(drive|docs|sheets|agenda|calendar|fotos|photos))|not[ií]cias?|cota[cç][aã]o|previs[aã]o do tempo|naveg/i,
-    weak: /pre[cç]os?|\bhoje\b|p[aá]gina|\blink|atual|tutorial|lan[cç]amento|\blojas?\b|promo[cç]|onde comprar/gi },
-  { id: 'pc', label: 'Computador', groups: ['computer'],
-    strong: /abr[ae] o (app|programa|aplicativo)|\bclic(a|ar|ue|k)\b|\bna (minha )?tela\b|tir[ae]r? (um )?print|captura de tela|fech[ae]r? a janela|\bdigit[ae]r?\b.{0,30}\b(campo|caixa|barra)\b/i,
-    weak: /photoshop|spotify|\bpaint\b|\bword\b|\bexcel\b|bot[aã]o|\bmenu\b|aplicativo/gi },
-  { id: 'files', label: 'Arquivos', groups: ['read', 'write', 'shell'],
-    need: /\b(arquivos?|pastas?|fotos?|planilhas?|pdfs?|zip|documentos?|imagens?|v[ií]deos?|prints?)\b/i,
+    weak: /c[oó]digo|compil|\bbuild\b|\bbug|\berros?\b|exce[cç][aã]o|refator|\btestes?\b|script|componente|fun[cç][aã]o|m[oó]dulo|classe|\bapi\b|deploy|login|programa[cç][aã]o|\bmerge\b|\bbranch\b|quebr|\bcode\b|\btests?\b|compil|exception|refactor|\bfunctions?\b|\bclass(es)?\b|programming|\bbroke|crash/gi },
+  { id: 'web', label: L('Web'), groups: ['browser'],
+    strong: /https?:\/\/|www\.|\bsites?\b|pesquis|procur[ae] na (web|internet)|na internet|\bgoogle\b(?!\s*(drive|docs|sheets|agenda|calendar|fotos|photos))|not[ií]cias?|cota[cç][aã]o|previs[aã]o do tempo|naveg|search (the )?(web|internet)|look (it )?up online|on the internet|\bnews\b|weather forecast|\bbrows(e|ing)\b/i,
+    weak: /pre[cç]os?|\bhoje\b|p[aá]gina|\blink|atual|tutorial|lan[cç]amento|\blojas?\b|promo[cç]|onde comprar|\bprices?\b|\btoday\b|\bpages?\b|\bcurrent\b|\blatest\b|\breleases?\b|\bstores?\b|\bdeals?\b|where to buy/gi },
+  { id: 'pc', label: L('Computador'), groups: ['computer'],
+    strong: /abr[ae] o (app|programa|aplicativo)|\bclic(a|ar|ue|k)\b|\bna (minha )?tela\b|tir[ae]r? (um )?print|captura de tela|fech[ae]r? a janela|\bdigit[ae]r?\b.{0,30}\b(campo|caixa|barra)\b|open the (app|program|application)|\bclick\b|on (my )?screen|take a screenshot|screenshot|close the window|\btype\b.{0,30}\b(field|box|bar)\b/i,
+    weak: /photoshop|spotify|\bpaint\b|\bword\b|\bexcel\b|bot[aã]o|\bmenu\b|aplicativo|\bbuttons?\b|\bapp\b|application/gi },
+  { id: 'files', label: L('Arquivos'), groups: ['read', 'write', 'shell'],
+    need: /\b(arquivos?|pastas?|fotos?|planilhas?|pdfs?|zip|documentos?|imagens?|v[ií]deos?|prints?|files?|folders?|photos?|spreadsheets?|documents?|images?|screenshots?)\b/i,
     strong: /\.(pdf|zip|rar|7z|docx?|xlsx?|csv|txt|png|jpe?g|mp4|mp3)\b|\b(docx|xlsx|pptx)\b|\bdownloads\b|[aá]rea de trabalho|\bdesktop\b/i,
-    weak: /renome|organiz|extra[ií]|compact|\bjunt[ae]|mescl|convert|planilha|\bpdfs?\b|\bfotos\b|\barquivos?\b|\bpastas?\b|espa[cç]o|duplicad|\bmov[ae]\b|\bapag[ae]|\bmaiores\b/gi },
-  { id: 'social', label: 'Conteúdo', think: 'off', skills: /instagram|social|post|legenda|conte[uú]do/i,
-    strong: /instagram|\breels?\b|\bstories\b|carrossel|tiktok|hashtags?|legenda/i,
-    weak: /\bposts?\b|engajamento|seguidores|\bfeed\b/gi },
+    weak: /renome|organiz|extra[ií]|compact|\bjunt[ae]|mescl|convert|planilha|\bpdfs?\b|\bfotos\b|\barquivos?\b|\bpastas?\b|espa[cç]o|duplicad|\bmov[ae]\b|\bapag[ae]|\bmaiores\b|renam|organi[sz]|extract|compress|\bmerge|spreadsheet|\bphotos\b|\bfiles?\b|\bfolders?\b|\bspace\b|duplicate|\bmove\b|\bdelete\b|\blargest\b|\bbiggest\b/gi },
+  { id: 'social', label: L('Conteúdo'), think: 'off', skills: /instagram|social|post|legenda|conte[uú]do/i,
+    strong: /instagram|\breels?\b|\bstories\b|carrossel|carousel|tiktok|hashtags?|legenda|caption/i,
+    weak: /\bposts?\b|engajamento|seguidores|\bfeed\b|engagement|followers/gi },
 ];
 // pergunta de conceito ("o que é um debugger?", "qual a diferença entre site e app?") não liga nada,
 // a não ser que fale de algo concreto: "esse", "meu", "quando abro", um arquivo, um link, um endereço
-const ASK_RE = /^\s*(me\s+)?(o que (é|e|são|significa)|explica|explique|como funciona|qual (a|é a|e a) diferen[cç]a|qual o significado|por ?que|quem (foi|é))/i;
-const CONCRETE_RE = /\b(esse|essa|este|esta|isso|isto|aqui|nesse|nessa|neste|nesta|meu|minha|meus|minhas|abro|uso|rodo|tento|estou|t[oô])\b|https?:\/\/|\b0x[0-9a-f]{4,}\b|\b\w+\.(exe|dll|sys|rs|js|ts|py|cs|cpp|go|java|pdf|zip|docx?|xlsx?|csv|txt|png|jpe?g|json|md)\b/i;
+const ASK_RE = /^\s*(me\s+)?(o que (é|e|são|significa)|explica|explique|como funciona|qual (a|é a|e a) diferen[cç]a|qual o significado|por ?que|quem (foi|é)|what (is|are) (a|an)\b|what does \w+ mean|explain|how does|what(\'?s| is) the difference|why|who (was|is))/i;
+const CONCRETE_RE = /\b(esse|essa|este|esta|isso|isto|aqui|nesse|nessa|neste|nesta|meu|minha|meus|minhas|abro|uso|rodo|tento|estou|t[oô]|this|that|these|here|my|mine|i\'?m|i (use|run|open|try))\b|https?:\/\/|\b0x[0-9a-f]{4,}\b|\b\w+\.(exe|dll|sys|rs|js|ts|py|cs|cpp|go|java|pdf|zip|docx?|xlsx?|csv|txt|png|jpe?g|json|md)\b/i;
 // níveis: cauteloso (só sinais fortes), equilibrado (fortes ou dois fracos) e liberal (um fraco basta,
 // e perguntas de conceito também ligam)
 const AUTO_LEVELS = [
-  ['desligado', 'Desligado', 'Só o que você ligar na barra do chat.'],
-  ['cauteloso', 'Cauteloso', 'Só com sinais claros: x64dbg, 0x401000, .dll, cargo, um link, instagram.'],
-  ['equilibrado', 'Equilibrado', 'Sinais claros ou dois indícios juntos. Erra pouco para os dois lados.'],
-  ['liberal', 'Liberal', 'Um indício basta, inclusive em perguntas. Liga mais coisas e gasta mais contexto.'],
+  ['desligado', L('Desligado'), L('Só o que você ligar na barra do chat.')],
+  ['cauteloso', L('Cauteloso'), L('Só com sinais claros: x64dbg, 0x401000, .dll, cargo, um link, instagram.')],
+  ['equilibrado', L('Equilibrado'), L('Sinais claros ou dois indícios juntos. Erra pouco para os dois lados.')],
+  ['liberal', L('Liberal'), L('Um indício basta, inclusive em perguntas. Liga mais coisas e gasta mais contexto.')],
 ];
 function routeProfiles(text, level = 'equilibrado') {
   if (level === 'desligado') return [];
@@ -114,7 +114,7 @@ function routeProfiles(text, level = 'equilibrado') {
   // engenharia reversa explícita: "função", "compila" e "erro" ali não são pedido de programação
   return strongHit.some((r) => r.id === 're') && !strongHit.some((r) => r.id === 'code') ? out.filter((r) => r.id !== 'code') : out;
 }
-const STOP = new Set('para como sobre quando entre depois antes mesmo ainda cada todos todas outro outra sendo usar use usa esta este isso essa esse aqui onde qual quais pelo pela pelos pelas fazer feito skill skills habilidade arquivo arquivos'.split(' '));
+const STOP = new Set(L('para como sobre quando entre depois antes mesmo ainda cada todos todas outro outra sendo usar use usa esta este isso essa esse aqui onde qual quais pelo pela pelos pelas fazer feito skill skills habilidade arquivo arquivos').split(' '));
 const norm = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 const words = (t) => new Set(norm(t).split(/[^a-z0-9]+/).filter((w) => w.length >= 5 && !STOP.has(w)));
 
@@ -148,14 +148,14 @@ function autoLevelOf(c) {
 function fillAutoPop() {
   const pop = $('#pop-auto'); pop.innerHTML = '';
   const cur0 = autoLevelOf(cur());
-  pop.append(h('div.pop-head', null, h('span', null, 'Recursos automáticos nesta conversa')));
+  pop.append(h('div.pop-head', null, h('span', null, L('Recursos automáticos nesta conversa'))));
   for (const [v, l, d] of AUTO_LEVELS) {
     pop.append(h('button.menu-item' + (v === cur0 ? '.sel' : ''), { onclick: () => {
       const c = cur(); if (c) { c.autoLevel = v; saveConvs(); } else S.draftAuto = v;
       closePops(); updatePickers();
     } }, ic(v === 'desligado' ? 'ban' : 'signpost'), h('span.mi-main', null, l, h('span.mi-sub', null, d)), v === cur0 ? ic('check') : null));
   }
-  pop.append(h('div.pop-foot', null, h('button.link', { onclick: () => { closePops(); openSettings('auto'); } }, 'Padrão para novas conversas')));
+  pop.append(h('div.pop-foot', null, h('button.link', { onclick: () => { closePops(); openSettings('auto'); } }, L('Padrão para novas conversas'))));
 }
 
 // Qual conector de engenharia reversa o pedido quer: o citado (x64dbg, dnspy...) ou o indicado
@@ -216,8 +216,8 @@ async function autoRoute(conv, msg) {
   // o que o pedido indicou vira o mesmo aviso que o @ gera ("Conector:x64dbg"), que o modelo segue
   const said = [...new Set([...ex.mcp, ...added.mcp.filter((n) => ROUTES[0].mcp.test(n))])];
   const pills = new Set((msg.parts || []).filter((p) => p.kind === 'mcp' || p.kind === 'skill').map((p) => p.name));
-  const use = [...said.filter((n) => !pills.has(n)).map((n) => `Conector:${n}`),
-    ...ex.skills.map((id) => S.skills.find((x) => x.id === id)?.name || id).filter((n) => !pills.has(n)).map((n) => `Habilidade:${n}`)];
+  const use = [...said.filter((n) => !pills.has(n)).map((n) => L('Conector:{0}', n)),
+    ...ex.skills.map((id) => S.skills.find((x) => x.id === id)?.name || id).filter((n) => !pills.has(n)).map((n) => L('Habilidade:{0}', n))];
   if (use.length) msg.use = use;
   const reMcp = profs.some((r) => r.id === 're') && [...have.mcp].some((n) => ROUTES[0].mcp.test(n));
   const namedDbg = ex.mcp.some((n) => ROUTES[0].mcp.test(n)); // "abre o programa no x64dbg": é o debugger, não a tela
@@ -231,7 +231,7 @@ function undoAuto(conv, msg) {
   for (const k of ['groups', 'mcp', 'skills', 'eager', 'block']) conv.auto[k] = (conv.auto[k] || []).filter((x) => !(a[k] || []).includes(x));
   msg.auto = { ...a, undone: true };
   saveConvs(); renderMessages(); updatePickers();
-  toast('Recursos automáticos desta mensagem removidos para as próximas respostas');
+  toast(L('Recursos automáticos desta mensagem removidos para as próximas respostas'));
 }
 function autoChip(conv, m) {
   const a = m.auto; if (!a || a.undone) return null;
@@ -240,10 +240,10 @@ function autoChip(conv, m) {
     ...a.skills.map((id) => S.skills.find((s) => s.id === id)?.name || id),
     ...a.groups.map((g) => TOOL_INFO[g]?.short || TOOL_INFO[g]?.title || g),
   ];
-  if (a.block?.includes('computer')) names.push('sem controle da tela');
-  return h('div.auto-chip', { title: `Ligado automaticamente pelo pedido${a.profiles.length ? ` (${a.profiles.join(', ')})` : ''}. Vale para esta conversa.` },
-    ic('sparkles'), h('span', null, 'Ativado: ' + names.join(', ')),
-    h('button', { title: 'Desfazer', 'aria-label': 'Desfazer', html: svg('x'), onclick: () => undoAuto(conv, m) }));
+  if (a.block?.includes('computer')) names.push(L('sem controle da tela'));
+  return h('div.auto-chip', { title: L('Ligado automaticamente pelo pedido{0}. Vale para esta conversa.', a.profiles.length ? ` (${a.profiles.join(', ')})` : '') },
+    ic('sparkles'), h('span', null, L('Ativado: ') + names.join(', ')),
+    h('button', { title: L('Desfazer'), 'aria-label': L('Desfazer'), html: svg('x'), onclick: () => undoAuto(conv, m) }));
 }
 
 /* ============================================================ lista de tarefas do modelo */
@@ -252,7 +252,7 @@ async function updateTodos(conv, args, signal) {
   const isNew = !conv.todos?.length || conv.todos.every((t) => t.status === 'done');
   let list = args?.todos;
   if (typeof list === 'string') { try { list = JSON.parse(list); } catch { list = null; } }
-  if (!Array.isArray(list)) return { content: 'Erro: envie todos como uma lista de {text, status}.', isError: true };
+  if (!Array.isArray(list)) return { content: L('Erro: envie todos como uma lista de {text, status}.'), isError: true };
   const norm = (st) => (/progress|andamento|doing/i.test(st) ? 'in_progress' : /done|complet|feito|conclu/i.test(st) ? 'done' : 'pending');
   conv.todos = list.filter((t) => t && String(t.text || t.content || '').trim()).slice(0, 40).map((t) => ({ text: String(t.text || t.content).trim(), status: norm(String(t.status || '')) }));
   conv.todosAt = Date.now();
@@ -264,17 +264,17 @@ async function updateTodos(conv, args, signal) {
   if (isNew && conv.todos.length > 1 && S.settings.confirmPlan !== false) {
     conv._planWait = true; conv.todosOpen = true;
     if (conv.id === S.curId) drawTodos();
-    if (conv.id !== S.curId) toast(`"${conv.title}" montou um plano e espera você aprovar`);
+    if (conv.id !== S.curId) toast(L('"{0}" montou um plano e espera você aprovar', conv.title));
     const ans = await new Promise((resolve) => {
       S.planWaits.set(conv.id, resolve);
       signal?.addEventListener('abort', () => resolve('stop'), { once: true });
     });
     S.planWaits.delete(conv.id); conv._planWait = false;
     if (conv.id === S.curId) drawTodos();
-    if (ans === 'stop') return { content: 'O usuário não aprovou o plano e interrompeu. Não execute nada; espere a próxima mensagem dele.', isError: false };
-    return { content: `O usuário aprovou o plano (${conv.todos.length} passos). Pode executar, atualizando a lista a cada passo.`, isError: false };
+    if (ans === 'stop') return { content: L('O usuário não aprovou o plano e interrompeu. Não execute nada; espere a próxima mensagem dele.'), isError: false };
+    return { content: L('O usuário aprovou o plano ({0} passos). Pode executar, atualizando a lista a cada passo.', conv.todos.length), isError: false };
   }
-  return { content: `Lista atualizada: ${done} de ${conv.todos.length} feitas.${now ? ' Em andamento: ' + now.text : ''}`, isError: false };
+  return { content: L('Lista atualizada: {0} de {1} feitas.{2}', done, conv.todos.length, now ? L(' Em andamento: ') + now.text : ''), isError: false };
 }
 S.planWaits = new Map();
 S.closedThink = new Set();
@@ -291,7 +291,7 @@ function drawTodos() {
   const nowItem = list.find((t) => t.status === 'in_progress');
   const head = h('button.td-head' + (c._planWait ? '.ask' : ''), { onclick: () => { c.todosOpen = !open; saveConvs(); drawTodos(); }, 'aria-expanded': String(open) },
     h('span.td-ring', { html: (() => { const C = 2 * Math.PI * 6; return `<svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="6" fill="none" stroke="var(--line-2)" stroke-width="2.2"/><circle cx="8" cy="8" r="6" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round" stroke-dasharray="${(done / list.length * C).toFixed(2)} ${C.toFixed(2)}" transform="rotate(-90 8 8)"/></svg>`; })() }),
-    h('span.td-title', null, all ? 'Tarefas concluídas' : nowItem ? nowItem.text : 'Tarefas'),
+    h('span.td-title', null, all ? L('Tarefas concluídas') : nowItem ? nowItem.text : L('Tarefas')),
     h('span.td-count', null, `${done}/${list.length}`),
     h('span', { html: svg('chev'), style: { display: 'grid', transform: open ? 'rotate(90deg)' : '', transition: 'transform .15s' } }));
   box.append(head);
@@ -300,10 +300,10 @@ function drawTodos() {
     for (const t of list) ul.append(h('li.td.' + t.status, null, h('span.td-box', { html: t.status === 'done' ? svg('check') : '' }), h('span.td-text', null, t.text)));
     box.append(ul);
     if (c._planWait) {
-      box.append(h('div.td-ask', null, h('span', null, 'Seguir com este plano?'),
-        h('button.btn.ghost.sm', { onclick: () => { S.planWaits.get(c.id)?.('stop'); S.runs.get(c.id)?.abort(); setEditorText('Ajuste o plano: '); focusEditor(); } }, 'Ajustar'),
-        h('button.btn.primary.sm', { onclick: () => S.planWaits.get(c.id)?.('go') }, ic('check'), 'Continuar')));
-    } else if (all || !running(c)) box.append(h('div.td-foot', null, h('button.btn.ghost.sm', { onclick: () => { c.todos = []; saveConvs(); drawTodos(); } }, 'Limpar lista')));
+      box.append(h('div.td-ask', null, h('span', null, L('Seguir com este plano?')),
+        h('button.btn.ghost.sm', { onclick: () => { S.planWaits.get(c.id)?.('stop'); S.runs.get(c.id)?.abort(); setEditorText(L('Ajuste o plano: ')); focusEditor(); } }, L('Ajustar')),
+        h('button.btn.primary.sm', { onclick: () => S.planWaits.get(c.id)?.('go') }, ic('check'), L('Continuar'))));
+    } else if (all || !running(c)) box.append(h('div.td-foot', null, h('button.btn.ghost.sm', { onclick: () => { c.todos = []; saveConvs(); drawTodos(); } }, L('Limpar lista'))));
   }
 }
 
@@ -335,30 +335,30 @@ function drawQueue() {
   if (!q.length) return;
   const busy = running(c);
   box.append(h('div.q-head', null, ic('list'),
-    h('span', null, c.queuePaused && !busy ? `Fila pausada (${q.length})` : `Na fila (${q.length})`),
-    h('span.muted', null, c.queuePaused && !busy ? ' · a resposta foi interrompida' : busy ? ' · enviadas quando a resposta atual terminar (⚡ ou Ctrl+Enter: logo depois do passo atual)' : ''),
+    h('span', null, c.queuePaused && !busy ? L('Fila pausada ({0})', q.length) : L('Na fila ({0})', q.length)),
+    h('span.muted', null, c.queuePaused && !busy ? L(' · a resposta foi interrompida') : busy ? L(' · enviadas quando a resposta atual terminar (⚡ ou Ctrl+Enter: logo depois do passo atual)') : ''),
     h('span.spacer'),
-    c.queuePaused && !busy ? h('button.btn.sm.primary', { onclick: () => nextInQueue(c, false) }, ic('send'), 'Retomar') : null,
-    q.length > 1 ? h('button.btn.ghost.sm', { onclick: () => { c.queue = []; saveConvs(); drawQueue(); renderComposer(); } }, 'Limpar') : null));
+    c.queuePaused && !busy ? h('button.btn.sm.primary', { onclick: () => nextInQueue(c, false) }, ic('send'), L('Retomar')) : null,
+    q.length > 1 ? h('button.btn.ghost.sm', { onclick: () => { c.queue = []; saveConvs(); drawQueue(); renderComposer(); } }, L('Limpar')) : null));
   q.forEach((it, i) => {
     const text = (it.content || '').replace(/\s+/g, ' ').trim() || it.parts.map((p) => p.name).filter(Boolean).join(', ');
     box.append(h('div.q-item', null,
       h('span.q-n', null, String(i + 1)),
-      it.now ? h('span.q-now', { title: 'Entra logo depois do passo atual' }, ic('zap'), 'próximo passo') : null,
+      it.now ? h('span.q-now', { title: L('Entra logo depois do passo atual') }, ic('zap'), L('próximo passo')) : null,
       h('span.q-text', { title: it.content }, text),
-      h('button.icon-btn.sm' + (it.now ? '.on' : ''), { title: it.now ? 'Voltar a esperar a resposta terminar' : 'Executar logo depois do passo atual (sem esperar a resposta inteira)', 'aria-label': 'Executar no próximo passo', html: svg('zap'), onclick: () => {
+      h('button.icon-btn.sm' + (it.now ? '.on' : ''), { title: it.now ? L('Voltar a esperar a resposta terminar') : L('Executar logo depois do passo atual (sem esperar a resposta inteira)'), 'aria-label': L('Executar no próximo passo'), html: svg('zap'), onclick: () => {
         it.now = !it.now; saveConvs(); drawQueue();
         if (it.now && !running(c)) nextInQueue(c, false);
       } }),
-      i > 0 ? h('button.icon-btn.sm', { title: 'Subir', 'aria-label': 'Subir', html: svg('up'), onclick: () => { [q[i - 1], q[i]] = [q[i], q[i - 1]]; saveConvs(); drawQueue(); } }) : null,
-      h('button.icon-btn.sm', { title: 'Editar (volta para a caixa de texto)', 'aria-label': 'Editar', html: svg('edit'), onclick: () => {
+      i > 0 ? h('button.icon-btn.sm', { title: L('Subir'), 'aria-label': L('Subir'), html: svg('up'), onclick: () => { [q[i - 1], q[i]] = [q[i], q[i - 1]]; saveConvs(); drawQueue(); } }) : null,
+      h('button.icon-btn.sm', { title: L('Editar (volta para a caixa de texto)'), 'aria-label': L('Editar'), html: svg('edit'), onclick: () => {
         q.splice(i, 1); saveConvs(); drawQueue();
         const ed = editor();
         if (editorEmpty()) { ed.innerHTML = ''; ed.append(...partsToNodes(it.parts)); }
         else ed.append(document.createElement('br'), ...partsToNodes(it.parts));
         ed.focus(); renderComposer();
       } }),
-      h('button.icon-btn.sm', { title: 'Tirar da fila', 'aria-label': 'Tirar da fila', html: svg('x'), onclick: () => { q.splice(i, 1); saveConvs(); drawQueue(); renderComposer(); } })));
+      h('button.icon-btn.sm', { title: L('Tirar da fila'), 'aria-label': L('Tirar da fila'), html: svg('x'), onclick: () => { q.splice(i, 1); saveConvs(); drawQueue(); renderComposer(); } })));
   });
 }
 
@@ -375,7 +375,7 @@ function collectRefs(conv) {
 
 function userContent(m) {
   let c = m.content || '';
-  if (m.refs?.length) c += `${c ? '\n\n' : ''}[Caminhos referenciados]\n` + m.refs.map((r) => `- ${r.path}${r.dir ? ' (pasta)' : ''}`).join('\n');
+  if (m.refs?.length) c += L('{0}[Caminhos referenciados]\n', c ? '\n\n' : '') + m.refs.map((r) => `- ${r.path}${r.dir ? L(' (pasta)') : ''}`).join('\n');
   return c;
 }
 
@@ -404,10 +404,10 @@ function apiMessages(conv, system) {
   let summaryDone = !(cut && conv.summary);
   const pushSummary = () => {
     if (summaryDone) return; summaryDone = true;
-    if (out[out.length - 1]?.role === 'user') out.push({ role: 'assistant', content: 'Certo, vou trabalhar nisso.' });
-    out.push({ role: 'user', content: (head ? '[Resumo automático do meio da conversa, gerado para caber no contexto]\n\n' : '[Resumo automático da conversa anterior, gerado para caber no contexto]\n\n') + conv.summary });
+    if (out[out.length - 1]?.role === 'user') out.push({ role: 'assistant', content: L('Certo, vou trabalhar nisso.') });
+    out.push({ role: 'user', content: (head ? L('[Resumo automático do meio da conversa, gerado para caber no contexto]\n\n') : L('[Resumo automático da conversa anterior, gerado para caber no contexto]\n\n')) + conv.summary });
     // mantém a alternância usuário/assistente que alguns templates exigem
-    out.push({ role: 'assistant', content: 'Entendido. Vou continuar a partir desse resumo.' });
+    out.push({ role: 'assistant', content: L('Entendido. Vou continuar a partir desse resumo.') });
   };
   if (!head) pushSummary();
   for (const m of msgs) {
@@ -416,11 +416,11 @@ function apiMessages(conv, system) {
     if (m.role === 'user' && m.hidden && m.note) { out.push({ role: 'user', content: m.content }); continue; }
     if (m.role === 'user' && m.hidden) {
       if (m._images?.length && m.__i > lastAssistant) out.push({ role: 'user', content: [{ type: 'text', text: m.content }, ...m._images.map((url) => ({ type: 'image_url', image_url: { url } }))] });
-      else out.push({ role: 'user', content: m.content + ' [imagem omitida do histórico]' });
+      else out.push({ role: 'user', content: m.content + L(' [imagem omitida do histórico]') });
       continue;
     }
     if (m.role === 'user') {
-      const text = userContent(m) + (m.use?.length && !m.auto?.undone ? `\n\n(Use ${m.use.join(' e ')} para isso.)` : '') + (m.plan ? PLAN_NOTE : '');
+      const text = userContent(m) + (m.use?.length && !m.auto?.undone ? L('\n\n(Use {0} para isso.)', m.use.join(' e ')) : '') + (m.plan ? PLAN_NOTE : '');
       const imgs = m.__i === lastUserIdx && visionOn() ? (m.refs || []).filter(isImgRef).map((r) => S.imgData.get(r.path)).filter(Boolean) : [];
       out.push({ role: 'user', content: imgs.length ? [{ type: 'text', text }, ...imgs.map((url) => ({ type: 'image_url', image_url: { url } }))] : text });
     }
@@ -439,9 +439,9 @@ function apiMessages(conv, system) {
       out.push(o);
       for (const t of calls) {
         const r = msgs.find((x) => x.role === 'tool' && x.tool_call_id === t.id);
-        let c = r && (r.apiContent || r.content) ? (r.apiContent || r.content) : 'Execução cancelada pelo usuário.';
-        if (broken.has(t.id)) c = 'A chamada foi interrompida antes de os argumentos terminarem de ser gerados (JSON incompleto) e não foi executada.' + (r?.content ? '\n' + r.content : '');
-        if (r?.short && c.length > 1500) c = c.slice(0, 1500) + '\n[... resultado antigo encurtado pela compactação]';
+        let c = r && (r.apiContent || r.content) ? (r.apiContent || r.content) : L('Execução cancelada pelo usuário.');
+        if (broken.has(t.id)) c = L('A chamada foi interrompida antes de os argumentos terminarem de ser gerados (JSON incompleto) e não foi executada.') + (r?.content ? '\n' + r.content : '');
+        if (r?.short && c.length > 1500) c = c.slice(0, 1500) + L('\n[... resultado antigo encurtado pela compactação]');
         out.push({ role: 'tool', tool_call_id: t.id, content: c });
       }
     }
@@ -457,27 +457,27 @@ function reqPrint(conv, system, tools, msgs) {
   return { sys: system || '', tools: (tools || []).map((t) => t.function?.name || ''), toolsHash: strHash(JSON.stringify(tools || [])), msgs: msgs.map((m) => strHash(JSON.stringify(m))), roles: msgs.map((m) => m.role), imgs: msgs.map((m) => Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url')), cut: conv.compactCut || 0, compactions: conv.compactions || 0, slot: conv._slot, started: S.llama?.startedAt || 0, side: S.sideShared || 0 };
 }
 function cacheWhy(prev, now) {
-  if (!prev) return { why: 'é o primeiro pedido desta conversa desde que o studio abriu', start: 0 };
-  if (prev.started !== now.started) return { why: 'o llama-server reiniciou ou trocou de modelo', start: 0 };
-  if (prev.compactions !== now.compactions || prev.cut !== now.cut) return { why: 'a conversa foi compactada', start: 1 };
+  if (!prev) return { why: L('é o primeiro pedido desta conversa desde que o studio abriu'), start: 0 };
+  if (prev.started !== now.started) return { why: L('o llama-server reiniciou ou trocou de modelo'), start: 0 };
+  if (prev.compactions !== now.compactions || prev.cut !== now.cut) return { why: L('a conversa foi compactada'), start: 1 };
   if (prev.sys !== now.sys) {
     const a = prev.sys.split('\n'); const b = now.sys.split('\n'); let i = 0;
     while (i < a.length && i < b.length && a[i] === b[i]) i++;
     const line = (b[i] || a[i] || '').trim();
-    return { why: 'as instruções mudaram' + (line ? ` (a partir de "${line.slice(0, 50)}${line.length > 50 ? '…' : ''}")` : ''), start: 0 };
+    return { why: L('as instruções mudaram') + (line ? L(' (a partir de "{0}{1}")', line.slice(0, 50), line.length > 50 ? '…' : '') : ''), start: 0 };
   }
   if (prev.toolsHash !== now.toolsHash) {
     const add = now.tools.filter((t) => !prev.tools.includes(t)); const del = prev.tools.filter((t) => !now.tools.includes(t));
     const list = (xs, sign) => xs.length ? `${sign}${xs.length}: ${xs.slice(0, 2).join(', ')}${xs.length > 2 ? '…' : ''}` : '';
-    return { why: 'as ferramentas mudaram' + ((add.length || del.length) ? ` (${[list(add, '+'), list(del, '−')].filter(Boolean).join('; ')})` : ' (parâmetros diferentes)'), start: 0 };
+    return { why: L('as ferramentas mudaram') + ((add.length || del.length) ? ` (${[list(add, '+'), list(del, '−')].filter(Boolean).join('; ')})` : L(' (parâmetros diferentes)')), start: 0 };
   }
   for (let i = 0; i < prev.msgs.length && i < now.msgs.length; i++) {
     if (prev.msgs[i] === now.msgs[i]) continue;
-    if (prev.imgs[i] && !now.imgs[i]) return { why: 'uma imagem saiu do histórico (só vai no turno em que foi enviada)', start: i };
-    return { why: `a mensagem ${i} do histórico mudou (${prev.roles[i] === 'assistant' ? 'resposta do modelo' : prev.roles[i] === 'tool' ? 'resultado de ferramenta' : 'mensagem'})`, start: i };
+    if (prev.imgs[i] && !now.imgs[i]) return { why: L('uma imagem saiu do histórico (só vai no turno em que foi enviada)'), start: i };
+    return { why: L('a mensagem {0} do histórico mudou ({1})', i, prev.roles[i] === 'assistant' ? L('resposta do modelo') : prev.roles[i] === 'tool' ? L('resultado de ferramenta') : L('mensagem')), start: i };
   }
-  if (prev.slot !== now.slot) return { why: 'a conversa mudou de slot no servidor', start: 0 };
-  if (prev.side !== now.side) return { why: 'o auditor ou outro pedido lateral usou o mesmo slot (o servidor tem um slot só; com --parallel 2 ou mais eles ficam separados)', start: 0 };
+  if (prev.slot !== now.slot) return { why: L('a conversa mudou de slot no servidor'), start: 0 };
+  if (prev.side !== now.side) return { why: L('o auditor ou outro pedido lateral usou o mesmo slot (o servidor tem um slot só; com --parallel 2 ou mais eles ficam separados)'), start: 0 };
   return { why: '', start: -1 };
 }
 
@@ -493,7 +493,7 @@ async function streamCompletion(conv, system, tools, msg, signal) {
   // quanto veio do cache no último pedido, e por que o resto foi relido
   if (msg._pp?.total) {
     const read = Math.max(0, msg._pp.total - msg._pp.cache);
-    conv.cacheLast = { total: msg._pp.total, cache: msg._pp.cache, read, ms: msg._pp.time_ms || 0, why: read > Math.max(2000, msg._pp.total * 0.3) ? (msg._why || 'o servidor não tinha esse trecho guardado (modelos com camadas recorrentes, como Qwen3.5/3.6, só voltam até o último ponto salvo)') : '' };
+    conv.cacheLast = { total: msg._pp.total, cache: msg._pp.cache, read, ms: msg._pp.time_ms || 0, why: read > Math.max(2000, msg._pp.total * 0.3) ? (msg._why || L('o servidor não tinha esse trecho guardado (modelos com camadas recorrentes, como Qwen3.5/3.6, só voltam até o último ponto salvo)')) : '' };
     drawCtxMeter();
   }
   return r;

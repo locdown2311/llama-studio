@@ -10,7 +10,7 @@ pub async fn run(ws: &Path, command: &str, cwd: &str, timeout_s: u64) -> Result<
     }
     let dir = crate::app::resolve(ws, if cwd.is_empty() { "." } else { cwd });
     if !dir.is_dir() {
-        return Err(format!("Pasta não encontrada: {}", dir.display()));
+        return Err(LF!("Pasta não encontrada: {}", "Folder not found: {}", dir.display()));
     }
     #[cfg(windows)]
     let mut cmd = {
@@ -35,7 +35,7 @@ pub async fn run(ws: &Path, command: &str, cwd: &str, timeout_s: u64) -> Result<
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
     let t0 = Instant::now();
-    let mut child = cmd.spawn().map_err(|e| format!("Não consegui iniciar o shell: {e}"))?;
+    let mut child = cmd.spawn().map_err(|e| LF!("Não consegui iniciar o shell: {e}", "Could not start the shell: {e}"))?;
     let mut out = child.stdout.take().unwrap();
     let mut err = child.stderr.take().unwrap();
     let read_out = async {
@@ -67,9 +67,9 @@ pub async fn run(ws: &Path, command: &str, cwd: &str, timeout_s: u64) -> Result<
                 text.push_str(&e);
             }
             if text.is_empty() {
-                text = "(sem saída)".into();
+                text = L!("(sem saída)", "(no output)").into();
             }
-            Ok(format!("[código de saída {} em {:.1}s, pasta {}]\n{}", code.map(|c| c.to_string()).unwrap_or("?".into()), t0.elapsed().as_secs_f32(), dir.display(), text))
+            Ok(LF!("[código de saída {} em {:.1}s, pasta {}]\n{}", "[exit code {} in {:.1}s, folder {}]\n{}", code.map(|c| c.to_string()).unwrap_or("?".into()), t0.elapsed().as_secs_f32(), dir.display(), text))
         }
         Err(_) => Err(format!("Tempo esgotado ({}s). O comando foi encerrado.", limit.as_secs())),
     }

@@ -122,9 +122,9 @@ async fn latest_release(app: &App) -> Result<Value, String> {
     }
     let (status, body) = fetch(app, &format!("https://api.github.com/repos/{REPO}/releases/latest"), true, Duration::from_secs(20))
         .await
-        .map_err(|e| format!("Sem conexão com o GitHub: {e}"))?;
+        .map_err(|e| LF!("Sem conexão com o GitHub: {e}", "No connection to GitHub: {e}"))?;
     if status == 404 {
-        return Err("Ainda não há nenhuma versão publicada.".into());
+        return Err(L!("Ainda não há nenhuma versão publicada.", "No version has been published yet.").into());
     }
     if !(200..300).contains(&status) {
         return Err(format!("GitHub respondeu {status}"));
@@ -174,12 +174,12 @@ async fn download(app: &App, url: &str) -> Result<Vec<u8>, String> {
 /// Confere o SHA-256 do arquivo baixado com o SHA256SUMS.txt da mesma release.
 /// Sem a lista (ou sem a linha do arquivo) não troca nada.
 async fn verify(app: &App, rel: &Value, name: &str, bytes: &[u8]) -> Result<(), String> {
-    let url = asset_url(rel, "SHA256SUMS.txt").ok_or("Esta versão não publica o SHA256SUMS.txt; por segurança não vou instalar sem conferir.")?;
+    let url = asset_url(rel, "SHA256SUMS.txt").ok_or(L!("Esta versão não publica o SHA256SUMS.txt; por segurança não vou instalar sem conferir.", "This version does not publish SHA256SUMS.txt; for safety I will not install without checking."))?;
     let sums = download(app, &url).await?;
-    let want = expected_hash(&String::from_utf8_lossy(&sums), name).ok_or(format!("O SHA256SUMS.txt não tem a linha do {name}; não vou instalar sem conferir."))?;
+    let want = expected_hash(&String::from_utf8_lossy(&sums), name).ok_or(LF!("O SHA256SUMS.txt não tem a linha do {name}; não vou instalar sem conferir.", "SHA256SUMS.txt has no line for {name}; I will not install without checking."))?;
     let got = sha256_hex(bytes);
     if got != want {
-        return Err(format!("O {name} baixado não confere com o SHA256SUMS.txt (esperado {want}, veio {got}). Nada foi trocado; tente de novo."));
+        return Err(LF!("O {name} baixado não confere com o SHA256SUMS.txt (esperado {want}, veio {got}). Nada foi trocado; tente de novo.", "The downloaded {name} does not match SHA256SUMS.txt (expected {want}, got {got}). Nothing was replaced; try again."));
     }
     Ok(())
 }
@@ -200,24 +200,24 @@ fn sha256_hex(bytes: &[u8]) -> String {
 /// Baixa e aplica a interface nova (não precisa reiniciar).
 pub async fn apply_ui(app: &App) -> Result<String, String> {
     let rel = latest_release(app).await?;
-    let url = asset_url(&rel, "ui.zip").ok_or("Esta versão não tem ui.zip.")?;
+    let url = asset_url(&rel, "ui.zip").ok_or(L!("Esta versão não tem ui.zip.", "This version has no ui.zip."))?;
     let bytes = download(app, &url).await?;
     verify(app, &rel, "ui.zip", &bytes).await?;
     let dir = ui_dir(app);
     let tmp = app.root.join("ui.novo");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
-    zip::ZipArchive::new(std::io::Cursor::new(bytes)).and_then(|mut z| z.extract(&tmp)).map_err(|e| format!("ui.zip inválido: {e}"))?;
+    zip::ZipArchive::new(std::io::Cursor::new(bytes)).and_then(|mut z| z.extract(&tmp)).map_err(|e| LF!("ui.zip inválido: {e}", "Invalid ui.zip: {e}"))?;
     // aceita o zip com ou sem uma pasta "ui" dentro
     let src = if tmp.join("index.html").is_file() { tmp.clone() } else { tmp.join("ui") };
     if !src.join("index.html").is_file() {
-        return Err("ui.zip não tem index.html.".into());
+        return Err(L!("ui.zip não tem index.html.", "ui.zip has no index.html.").into());
     }
     let v: Value = crate::app::read_json(&src.join("version.json")).unwrap_or(json!({}));
     if let Some(min) = v["minExe"].as_str() {
         if newer(min, exe_version()) {
             let _ = std::fs::remove_dir_all(&tmp);
-            return Err(format!("Esta interface precisa do executável {min} ou mais novo. Atualize o programa inteiro."));
+            return Err(LF!("Esta interface precisa do executável {min} ou mais novo. Atualize o programa inteiro.", "This interface needs executable {min} or newer. Update the whole program."));
         }
     }
     let old = app.root.join("ui.antigo");
@@ -239,23 +239,23 @@ pub fn reset_ui(app: &App) {
 /// Baixa o executável novo, troca pelo atual e reinicia.
 pub async fn apply_exe(app: &App) -> Result<(), String> {
     let rel = latest_release(app).await?;
-    let url = asset_url(&rel, "llama-studio.exe").ok_or("Esta versão não tem llama-studio.exe.")?;
+    let url = asset_url(&rel, "llama-studio.exe").ok_or(L!("Esta versão não tem llama-studio.exe.", "This version has no llama-studio.exe."))?;
     let bytes = download(app, &url).await?;
     if bytes.len() < 1_000_000 || &bytes[..2] != b"MZ" {
-        return Err("O arquivo baixado não parece um executável válido.".into());
+        return Err(L!("O arquivo baixado não parece um executável válido.", "The downloaded file does not look like a valid executable.").into());
     }
     verify(app, &rel, "llama-studio.exe", &bytes).await?;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let dir = exe.parent().unwrap_or(Path::new("."));
     let new = dir.join("llama-studio.novo.exe");
     let old = dir.join("llama-studio.antigo.exe");
-    std::fs::write(&new, &bytes).map_err(|e| format!("Não consegui gravar o novo executável: {e}"))?;
+    std::fs::write(&new, &bytes).map_err(|e| LF!("Não consegui gravar o novo executável: {e}", "Could not write the new executable: {e}"))?;
     let _ = std::fs::remove_file(&old);
     // o Windows deixa renomear um programa em execução, mas não apagar
-    std::fs::rename(&exe, &old).map_err(|e| format!("Não consegui trocar o executável: {e}"))?;
+    std::fs::rename(&exe, &old).map_err(|e| LF!("Não consegui trocar o executável: {e}", "Could not replace the executable: {e}"))?;
     if let Err(e) = std::fs::rename(&new, &exe) {
         let _ = std::fs::rename(&old, &exe);
-        return Err(format!("Não consegui trocar o executável: {e}"));
+        return Err(LF!("Não consegui trocar o executável: {e}", "Could not replace the executable: {e}"));
     }
     // a interface baixada antes pode ser mais velha que a do novo executável
     if ui_override_version(app).is_some_and(|v| !newer(&v, rel["tag_name"].as_str().unwrap_or("").trim_start_matches('v'))) {
@@ -272,7 +272,7 @@ pub async fn apply_exe(app: &App) -> Result<(), String> {
         // fora do job object deste processo, senão morreria junto
         c.creation_flags(crate::DETACHED_FLAGS);
     }
-    c.spawn().map_err(|e| format!("Não consegui abrir a versão nova: {e}"))?;
+    c.spawn().map_err(|e| LF!("Não consegui abrir a versão nova: {e}", "Could not open the new version: {e}"))?;
     Ok(())
 }
 

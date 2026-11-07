@@ -96,6 +96,16 @@ const SKILL_TOOL: Def = d("read_skill_file", "", false, false, "Lê um arquivo a
     r#"{"type":"object","properties":{"skill":{"type":"string","description":"id da skill"},"path":{"type":"string"},"offset":{"type":"integer"},"limit":{"type":"integer"}},"required":["skill","path"]}"#);
 
 
+/// Descrição e esquema no idioma do studio.
+fn text_of(d: &Def) -> (&'static str, &'static str) {
+    if crate::i18n::en() {
+        if let Some(t) = crate::tools_en::def_en(d.name) {
+            return t;
+        }
+    }
+    (d.desc, d.params)
+}
+
 fn def(name: &str) -> Option<&'static Def> {
     DEFS.iter().find(|d| d.name == name).or(if name == SKILL_TOOL.name { Some(&SKILL_TOOL) } else { None })
 }
@@ -145,11 +155,13 @@ pub fn build_tools(app: &App, groups: &[String], servers: &[String], with_skills
     for dd in DEFS {
         let forced = lazy_on && dd.name == "search_tools";
         if (forced || groups.iter().any(|g| g == dd.group)) && allowed(dd.name) {
-            add(dd.name.into(), dd.desc.into(), serde_json::from_str(dd.params).unwrap(), json!({"source": if dd.client { "client" } else { "builtin" }, "group": dd.group, "label": dd.name, "mutating": dd.mutating}));
+            let (desc, params) = text_of(dd);
+            add(dd.name.into(), desc.into(), serde_json::from_str(params).unwrap(), json!({"source": if dd.client { "client" } else { "builtin" }, "group": dd.group, "label": dd.name, "mutating": dd.mutating}));
         }
     }
     if with_skills && allowed(SKILL_TOOL.name) {
-        add(SKILL_TOOL.name.into(), SKILL_TOOL.desc.into(), serde_json::from_str(SKILL_TOOL.params).unwrap(), json!({"source":"builtin","group":"read","label":SKILL_TOOL.name,"mutating":false}));
+        let (desc, params) = text_of(&SKILL_TOOL);
+        add(SKILL_TOOL.name.into(), desc.into(), serde_json::from_str(params).unwrap(), json!({"source":"builtin","group":"read","label":SKILL_TOOL.name,"mutating":false}));
     }
     let mut index = HashMap::new();
     let mut catalog: Vec<(String, Vec<String>)> = vec![];
@@ -218,13 +230,15 @@ pub fn build_tools(app: &App, groups: &[String], servers: &[String], with_skills
     let catalog_text = if catalog.is_empty() {
         String::new()
     } else {
-        let body: Vec<String> = catalog.iter().map(|(s, v)| if big_servers.contains(s) { format!("## {s} (só nomes; search_tools com query mostra o que cada uma faz)\n{}", v.join(", ")) } else { format!("## {s}\n{}", v.join("\n")) }).collect();
+        let body: Vec<String> = catalog.iter().map(|(s, v)| if big_servers.contains(s) { LF!("## {s} (só nomes; search_tools com query mostra o que cada uma faz)\n{}", "## {s} (names only; search_tools with query shows what each one does)\n{}", v.join(", ")) } else { format!("## {s}\n{}", v.join("\n")) }).collect();
         let hint = if big.is_empty() {
             String::new()
         } else {
-            format!("\n\nO conector {} tem ferramentas demais para carregar todas; escolha no catálogo as que precisa com search_tools.", big.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "))
+            LF!("\n\nO conector {} tem ferramentas demais para carregar todas; escolha no catálogo as que precisa com search_tools.", "\n\nThe connector {} has too many tools to load them all; pick the ones you need from the catalog with search_tools.", big.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "))
         };
-        format!("Catálogo de ferramentas dos conectores ativos (ainda não carregadas). Para usar uma, chame antes search_tools com names=[...] e ela fica disponível no passo seguinte. Para descobrir qual usar, search_tools com query (só mostra, não carrega). Carregue só as que for usar.\n\n{}{hint}", body.join("\n\n"))
+        LF!("Catálogo de ferramentas dos conectores ativos (ainda não carregadas). Para usar uma, chame antes search_tools com names=[...] e ela fica disponível no passo seguinte. Para descobrir qual usar, search_tools com query (só mostra, não carrega). Carregue só as que for usar.\n\n{}{hint}", "Catalog of the active connectors' tools (not loaded yet). To use one, first call search_tools with names=[...] and it becomes available in the next step. To find out which one to use, search_tools with query (only shows, does not load). Load only the ones you will use.
+
+{}{hint}", body.join("\n\n"))
     };
     json!({"tools": tools, "meta": meta, "catalog": catalog_text})
 }
@@ -327,17 +341,17 @@ pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[Strin
     let has = |g: &str| groups.iter().any(|x| x == g);
     let mut parts = vec![];
     if !now.is_empty() {
-        parts.push(format!("Data de hoje: {now}."));
+        parts.push(LF!("Data de hoje: {now}.", "Today's date: {now}."));
     }
-    parts.push(format!("Sistema do usuário: {}.", if app::IS_WIN { "Windows" } else { std::env::consts::OS }));
+    parts.push(LF!("Sistema do usuário: {}.", "User's system: {}.", if app::IS_WIN { "Windows" } else { std::env::consts::OS }));
     if has("read") || has("write") || has("edit") || has("shell") {
-        parts.push(format!(
-            "Pasta de trabalho: {}\nAs ferramentas de arquivo usam caminhos relativos a essa pasta e só escrevem dentro dela. Leia um arquivo antes de editá-lo.\nEconomize contexto: arquivo grande vem como sumário; leia só os trechos (offset/limit) e procure dentro dele com search_files. Para mudar, use edit_file (start_line/end_line ou edits), nunca reescreva o arquivo inteiro. Não leia arquivos pelo terminal (Get-Content, cat, type).",
+        parts.push(LF!(
+            "Pasta de trabalho: {}\nAs ferramentas de arquivo usam caminhos relativos a essa pasta e só escrevem dentro dela. Leia um arquivo antes de editá-lo.\nEconomize contexto: arquivo grande vem como sumário; leia só os trechos (offset/limit) e procure dentro dele com search_files. Para mudar, use edit_file (start_line/end_line ou edits), nunca reescreva o arquivo inteiro. Não leia arquivos pelo terminal (Get-Content, cat, type).", "Workspace: {}\nThe file tools use paths relative to this folder and only write inside it. Read a file before editing it.\nSave context: a large file comes as an outline; read only the parts you need (offset/limit) and search inside it with search_files. To change it, use edit_file (start_line/end_line or edits), never rewrite the whole file. Do not read files through the terminal (Get-Content, cat, type).",
             ws.display()
         ));
         if !refs.is_empty() {
             let list: Vec<String> = refs.iter().map(|r| format!("- {r}")).collect();
-            parts.push(format!("O usuário referenciou estes caminhos (você pode lê-los usando o caminho absoluto):\n{}", list.join("\n")));
+            parts.push(LF!("O usuário referenciou estes caminhos (você pode lê-los usando o caminho absoluto):\n{}", "The user referenced these paths (you can read them using the absolute path):\n{}", list.join("\n")));
         }
     }
     if has("shell") {
@@ -345,33 +359,33 @@ pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[Strin
         // via "uv/uvx" na lista e tentava rodar tudo com uvx)
         let mut tips: Vec<&str> = vec![];
         if crate::bins::which("rg").is_some() {
-            tips.push("buscar texto em arquivos: rg");
+            tips.push(L!("buscar texto em arquivos: rg", "search text in files: rg"));
         }
         if crate::bins::which("fd").is_some() {
             tips.push("achar arquivos pelo nome: fd");
         }
         if crate::bins::which("uv").is_some() {
-            tips.push("rodar um script Python: uv run script.py (não use uvx)");
+            tips.push(L!("rodar um script Python: uv run script.py (não use uvx)", "run a Python script: uv run script.py (do not use uvx)"));
         }
         if !tips.is_empty() {
-            parts.push(format!("Terminal: PowerShell; use comandos dele para o resto. Atalhos instalados: {}.", tips.join("; ")));
+            parts.push(LF!("Terminal: PowerShell; use comandos dele para o resto. Atalhos instalados: {}.", "Terminal: PowerShell; use its commands for everything else. Installed shortcuts: {}.", tips.join("; ")));
         }
         if !app.mcp.status_json().is_empty() {
-            parts.push("Quando o pedido indicar um conector ou habilidade (Conector:nome, Habilidade:nome), use exatamente esse; não tente outros caminhos antes dele.".into());
-            parts.push("Conectores MCP já estão rodando no studio: para o que um conector faz, chame as ferramentas dele (nome_do_conector__ferramenta, ou ache com search_tools). Nunca inicie o servidor de um conector pelo terminal (uvx, npx, python, node).".into());
+            parts.push(L!("Quando o pedido indicar um conector ou habilidade (Conector:nome, Habilidade:nome), use exatamente esse; não tente outros caminhos antes dele.", "When the request points to a connector or skill (Connector:name, Skill:name), use exactly that one; do not try other paths before it.").into());
+            parts.push(L!("Conectores MCP já estão rodando no studio: para o que um conector faz, chame as ferramentas dele (nome_do_conector__ferramenta, ou ache com search_tools). Nunca inicie o servidor de um conector pelo terminal (uvx, npx, python, node).", "MCP connectors are already running in the studio: for what a connector does, call its tools (connector_name__tool, or find them with search_tools). Never start a connector's server from the terminal (uvx, npx, python, node).").into());
         }
     }
     if has("browser") {
-        parts.push("Navegador: as ferramentas browser_* controlam uma janela própria do Edge que o usuário vê. Leia a página (browser_read) e use os números dos elementos para clicar e digitar.".into());
+        parts.push(L!("Navegador: as ferramentas browser_* controlam uma janela própria do Edge que o usuário vê. Leia a página (browser_read) e use os números dos elementos para clicar e digitar.", "Browser: the browser_* tools control a separate Edge window the user sees. Read the page (browser_read) and use the element numbers to click and type.").into());
     }
     if has("computer") {
-        parts.push("Computador: as ferramentas computer_* controlam a área de trabalho do usuário. Prefira computer_elements (lista numerada) a coordenadas. Confirme o resultado depois de cada ação. Se o programa tem conector MCP (x64dbg, dnspy, Unity...), use as ferramentas do conector em vez de controlar a janela dele.".into());
+        parts.push(L!("Computador: as ferramentas computer_* controlam a área de trabalho do usuário. Prefira computer_elements (lista numerada) a coordenadas. Confirme o resultado depois de cada ação. Se o programa tem conector MCP (x64dbg, dnspy, Unity...), use as ferramentas do conector em vez de controlar a janela dele.", "Computer: the computer_* tools control the user's desktop. Prefer computer_elements (numbered list) over coordinates. Check the result after each action. If the program has an MCP connector (x64dbg, dnspy, Unity...), use the connector's tools instead of controlling its window.").into());
     }
     if has("todo") {
-        parts.push("Tarefas com vários passos: comece criando a lista com update_todos e mantenha-a atualizada; ela mostra ao usuário o que já foi feito e o que falta. Não termine com itens pendentes sem explicar por quê.".into());
+        parts.push(L!("Tarefas com vários passos: comece criando a lista com update_todos e mantenha-a atualizada; ela mostra ao usuário o que já foi feito e o que falta. Não termine com itens pendentes sem explicar por quê.", "Tasks with several steps: start by creating the list with update_todos and keep it updated; it shows the user what is done and what is left. Do not finish with pending items without explaining why.").into());
     }
     if has("notebook") {
-        parts.push("Caderno de investigação: registre com notebook o que descobrir de duradouro (endereços, funções, hipóteses e se foram confirmadas) e consulte com notebook list antes de refazer uma investigação.".into());
+        parts.push(L!("Caderno de investigação: registre com notebook o que descobrir de duradouro (endereços, funções, hipóteses e se foram confirmadas) e consulte com notebook list antes de refazer uma investigação.", "Investigation notebook: record with notebook what you find that lasts (addresses, functions, hypotheses and whether they were confirmed) and check notebook list before redoing an investigation.").into());
     }
     if map && (has("read") || has("shell")) {
         let m = crate::projmap::context_text(app, ws);
@@ -380,12 +394,12 @@ pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[Strin
         }
     }
     if has("explore") {
-        parts.push("Para investigações longas, delegue a subagentes com a ferramenta explore (vários em paralelo, se fizer sentido) e trabalhe com os relatórios.".into());
+        parts.push(L!("Para investigações longas, delegue a subagentes com a ferramenta explore (vários em paralelo, se fizer sentido) e trabalhe com os relatórios.", "For long investigations, delegate to subagents with the explore tool (several in parallel, if it makes sense) and work with the reports.").into());
     }
     if has("toolsearch") {
         let hidden: Vec<String> = app.mcp.status_json().iter().filter(|s| s["status"] == "connected").map(|s| format!("{} ({} ferramentas)", s["name"].as_str().unwrap_or(""), s["tools"].as_array().map(|a| a.len()).unwrap_or(0))).collect();
         if !hidden.is_empty() {
-            parts.push(format!("Conectores MCP disponíveis: {}. Se precisar de uma ferramenta que não está na sua lista, use search_tools.", hidden.join(", ")));
+            parts.push(LF!("Conectores MCP disponíveis: {}. Se precisar de uma ferramenta que não está na sua lista, use search_tools.", "Available MCP connectors: {}. If you need a tool that is not in your list, use search_tools.", hidden.join(", ")));
         }
     }
     let mut active = vec![];
@@ -393,11 +407,11 @@ pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[Strin
         if let Some(s) = skills::get(app, id) {
             let text = std::fs::read_to_string(s.dir.join("SKILL.md")).unwrap_or_default();
             let (_, body) = skills::parse_frontmatter(&text);
-            let files = if s.files.is_empty() { String::new() } else { format!("Arquivos auxiliares (leia com read_skill_file): {}\n", s.files.join(", ")) };
+            let files = if s.files.is_empty() { String::new() } else { LF!("Arquivos auxiliares (leia com read_skill_file): {}\n", "Helper files (read with read_skill_file): {}\n", s.files.join(", ")) };
             if lazy && body.len() > 1500 {
                 // só o resumo; o corpo é lido quando a tarefa pedir
-                active.push(format!(
-                    "<skill id=\"{}\" name=\"{}\">\n{}\nAntes de seguir esta skill, leia as instruções completas com read_skill_file(skill=\"{}\", path=\"SKILL.md\").\n{files}</skill>",
+                active.push(LF!(
+                    "<skill id=\"{}\" name=\"{}\">\n{}\nAntes de seguir esta skill, leia as instruções completas com read_skill_file(skill=\"{}\", path=\"SKILL.md\").\n{files}</skill>", "<skill id=\"{}\" name=\"{}\">\n{}\nBefore following this skill, read the full instructions with read_skill_file(skill=\"{}\", path=\"SKILL.md\").\n{files}</skill>",
                     s.id, s.name, cut(s.description.trim(), 400), s.id
                 ));
             } else {
@@ -406,7 +420,9 @@ pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[Strin
         }
     }
     if !active.is_empty() {
-        parts.push(format!("O usuário ativou as skills abaixo. Siga as instruções de cada uma sempre que a tarefa se encaixar nela.\n\n{}", active.join("\n\n")));
+        parts.push(LF!("O usuário ativou as skills abaixo. Siga as instruções de cada uma sempre que a tarefa se encaixar nela.\n\n{}", "The user turned on the skills below. Follow each one's instructions whenever the task fits it.
+
+{}", active.join("\n\n")));
     }
     parts.join("\n\n")
 }
@@ -420,7 +436,7 @@ pub struct ToolOut {
 fn out(r: Result<(String, Vec<String>), String>) -> ToolOut {
     match r {
         Ok((c, images)) => ToolOut { content: app::truncate(c, 40000), is_error: false, images },
-        Err(e) => ToolOut { content: format!("Erro: {e}"), is_error: true, images: vec![] },
+        Err(e) => ToolOut { content: LF!("Erro: {e}", "Error: {e}"), is_error: true, images: vec![] },
     }
 }
 
@@ -467,7 +483,7 @@ pub async fn call(app: &Arc<App>, ws: PathBuf, name: &str, args: Value, allow: &
         let res = res.map(|t| {
             let note = if fixed != s(&args, "command") { format!("[executado como: {fixed}]\n") } else { String::new() };
             let hint = if command.trim_start().starts_with("uvx") && looks_failed(&t) {
-                "\n[dica: uvx baixa e roda um pacote Python pelo nome; se o pacote não existir ou não for preciso, use comandos do PowerShell]"
+                L!("\n[dica: uvx baixa e roda um pacote Python pelo nome; se o pacote não existir ou não for preciso, use comandos do PowerShell]", "\n[tip: uvx downloads and runs a Python package by name; if the package does not exist or is not needed, use PowerShell commands]")
             } else {
                 ""
             };
@@ -476,7 +492,7 @@ pub async fn call(app: &Arc<App>, ws: PathBuf, name: &str, args: Value, allow: &
         return out(res.map(|t| (t, vec![])));
     }
     if def(name).is_some_and(|d| d.client) {
-        return out(Err(format!("{name} é executada pela interface, não pelo servidor.")));
+        return out(Err(LF!("{name} é executada pela interface, não pelo servidor.", "{name} is run by the interface, not by the server.")));
     }
     if def(name).is_some() {
         let allow: Vec<PathBuf> = allow.iter().map(PathBuf::from).collect();
@@ -492,7 +508,7 @@ pub async fn call(app: &Arc<App>, ws: PathBuf, name: &str, args: Value, allow: &
     if let Some(schema) = mcp_schema(app, name) {
         match fit_args(&schema, &mut args) {
             Ok(()) => {}
-            Err(msg) => return ToolOut { content: format!("Erro: argumentos inválidos para {name}. {msg}\n{}", describe_params(&schema)), is_error: true, images: vec![] },
+            Err(msg) => return ToolOut { content: LF!("Erro: argumentos inválidos para {name}. {msg}\n{}", "Error: invalid arguments for {name}. {msg}\n{}", describe_params(&schema)), is_error: true, images: vec![] },
         }
     }
     match app.mcp.call_by_tool(name, args).await {
@@ -500,7 +516,7 @@ pub async fn call(app: &Arc<App>, ws: PathBuf, name: &str, args: Value, allow: &
             let content = if compact_on { crate::compact::compact(&text, &crate::compact::saidas_dir(app), name, 12000).text } else { app::truncate(text, 24000) };
             ToolOut { content, is_error: is_err, images }
         }
-        Err(e) => ToolOut { content: format!("Erro: {e}"), is_error: true, images: vec![] },
+        Err(e) => ToolOut { content: LF!("Erro: {e}", "Error: {e}"), is_error: true, images: vec![] },
     }
 }
 
@@ -512,19 +528,19 @@ fn mcp_schema(app: &App, name: &str) -> Option<Value> {
 /// Lista legível dos parâmetros, para o modelo corrigir a chamada.
 fn describe_params(schema: &Value) -> String {
     let req: Vec<&str> = schema["required"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
-    let Some(props) = schema["properties"].as_object() else { return "Esta ferramenta não recebe parâmetros.".into() };
+    let Some(props) = schema["properties"].as_object() else { return L!("Esta ferramenta não recebe parâmetros.", "This tool takes no parameters.").into() };
     if props.is_empty() {
-        return "Esta ferramenta não recebe parâmetros.".into();
+        return L!("Esta ferramenta não recebe parâmetros.", "This tool takes no parameters.").into();
     }
     let lines: Vec<String> = props
         .iter()
         .map(|(k, p)| {
             let ty = p["type"].as_str().unwrap_or("valor");
             let d = p["description"].as_str().map(|d| format!(": {}", cut(d, 160))).unwrap_or_default();
-            format!("- {k} ({ty}{}){d}", if req.contains(&k.as_str()) { ", obrigatório" } else { "" })
+            format!("- {k} ({ty}{}){d}", if req.contains(&k.as_str()) { L!(", obrigatório", ", required") } else { "" })
         })
         .collect();
-    format!("Parâmetros esperados:\n{}", lines.join("\n"))
+    LF!("Parâmetros esperados:\n{}", "Expected parameters:\n{}", lines.join("\n"))
 }
 
 /// Ajusta tipos simples (número em texto e vice-versa) e recusa nomes desconhecidos ou obrigatórios faltando.
@@ -588,7 +604,7 @@ fn fit_args(schema: &Value, args: &mut Value) -> Result<(), String> {
                 m.push(format!("Faltou: {}.", missing.join(", ")));
             }
             if !unknown.is_empty() {
-                m.push(format!("Não existem: {}.", unknown.join(", ")));
+                m.push(LF!("Não existem: {}.", "Do not exist: {}.", unknown.join(", ")));
             }
             Err(m.join(" "))
         }
@@ -601,7 +617,7 @@ fn fit_args(schema: &Value, args: &mut Value) -> Result<(), String> {
 fn read_text(file: &Path, size: u64, a: &Value) -> Result<String, String> {
     let buf = std::fs::read(file).map_err(|x| x.to_string())?;
     if looks_binary(&buf) {
-        return Ok(format!("Arquivo binário ({}): {}. Não dá para ler como texto.", fmt_size(size), file.display()));
+        return Ok(LF!("Arquivo binário ({}): {}. Não dá para ler como texto.", "Binary file ({}): {}. It cannot be read as text.", fmt_size(size), file.display()));
     }
     let text = String::from_utf8_lossy(&buf);
     let text = text.trim_start_matches('\u{feff}');
@@ -614,7 +630,7 @@ fn read_text(file: &Path, size: u64, a: &Value) -> Result<String, String> {
         let marks = outline(&ext, &lines);
         if marks.len() >= 3 {
             let body: Vec<String> = marks.iter().map(|(n, l)| format!("{n}: {l}")).collect();
-            return Ok(format!("[{} linhas, {}. Sumário com o número da linha; leia os trechos com offset/limit ou procure com search_files (path = este arquivo)]\n{}", total, fmt_size(size), body.join("\n")));
+            return Ok(LF!("[{} linhas, {}. Sumário com o número da linha; leia os trechos com offset/limit ou procure com search_files (path = este arquivo)]\n{}", "[{} lines, {}. Outline with line numbers; read the parts with offset/limit or search with search_files (path = this file)]\n{}", total, fmt_size(size), body.join("\n")));
         }
         let a2 = json!({"offset": 1, "limit": BIG_LINES});
         return read_text(file, size, &a2);
@@ -635,8 +651,8 @@ fn read_text(file: &Path, size: u64, a: &Value) -> Result<String, String> {
     let mut out = slice.join("\n");
     let end = off - 1 + slice.len();
     if off > 1 || end < total {
-        let more = if end < total { format!("; continue com offset={}", end + 1) } else { String::new() };
-        out = format!("[linhas {off}-{end} de {total}{more}]\n{out}");
+        let more = if end < total { LF!("; continue com offset={}", "; continue with offset={}", end + 1) } else { String::new() };
+        out = LF!("[linhas {off}-{end} de {total}{more}]\n{out}", "[lines {off}-{end} of {total}{more}]\n{out}");
     }
     Ok(out)
 }
@@ -664,7 +680,7 @@ fn rewrite_hint(before: &str, after: &str) -> String {
     if changed * 3 > a.len() {
         return String::new();
     }
-    format!("\n[dica: o arquivo tem {} linhas e só ~{changed} mudaram (a partir da linha {}). Da próxima vez use edit_file com start_line/end_line ou edits: gasta bem menos que reescrever tudo]", a.len(), pre + 1)
+    LF!("\n[dica: o arquivo tem {} linhas e só ~{changed} mudaram (a partir da linha {}). Da próxima vez use edit_file com start_line/end_line ou edits: gasta bem menos que reescrever tudo]", "\n[tip: the file has {} lines and only ~{changed} changed (from line {}). Next time use edit_file with start_line/end_line or edits: much cheaper than rewriting everything]", a.len(), pre + 1)
 }
 
 /// Comando que só despeja um arquivo grande inteiro (Get-Content x, cat x, type x): manda para read_file.
@@ -710,7 +726,7 @@ fn whole_read(ws: &Path, cwd: &str, cmd: &str) -> Option<String> {
     if lines <= BIG_LINES && md.len() as usize <= BIG_BYTES {
         return None;
     }
-    Some(format!("{p} tem {lines} linhas ({}): ler inteiro pelo terminal enche o contexto. Use read_file com path=\"{p}\" (devolve um sumário com números de linha) e depois offset/limit no trecho, ou search_files com path=\"{p}\" e content=... para achar as linhas. Se precisar mesmo de uma parte pelo terminal: Get-Content {p} -TotalCount 100.", fmt_size(md.len())))
+    Some(LF!("{p} tem {lines} linhas ({}): ler inteiro pelo terminal enche o contexto. Use read_file com path=\"{p}\" (devolve um sumário com números de linha) e depois offset/limit no trecho, ou search_files com path=\"{p}\" e content=... para achar as linhas. Se precisar mesmo de uma parte pelo terminal: Get-Content {p} -TotalCount 100.", "{p} has {lines} lines ({}): reading it whole through the terminal fills the context. Use read_file with path=\"{p}\" (returns an outline with line numbers) and then offset/limit on the part, or search_files with path=\"{p}\" and content=... to find the lines. If you really need a part through the terminal: Get-Content {p} -TotalCount 100.", fmt_size(md.len())))
 }
 const BIG_BYTES: usize = 40 * 1024;
 
@@ -741,7 +757,7 @@ fn outline(ext: &str, lines: &[&str]) -> Vec<(usize, String)> {
         if re.is_match(l) {
             out.push((i + 1, cut(l.trim_end(), 110)));
             if out.len() >= 300 {
-                out.push((0, "... (sumário cortado; procure com search_files)".into()));
+                out.push((0, L!("... (sumário cortado; procure com search_files)", "... (outline cut; search with search_files)").into()));
                 break;
             }
         }
@@ -778,7 +794,7 @@ fn search_rg(ws: &Path, start: &Path, name: &str, pattern: &str) -> Option<Strin
         lines.push(format!("{}:{}", rel_to(ws, &start.join(file)), rest));
     }
     let n = text.lines().count();
-    Some(lines.join("\n") + &if n > SEARCH_MAX { format!("\n[mostrando {SEARCH_MAX} de {n}; refine a busca (name, path ou regex mais específica)]") } else { String::new() })
+    Some(lines.join("\n") + &if n > SEARCH_MAX { LF!("\n[mostrando {SEARCH_MAX} de {n}; refine a busca (name, path ou regex mais específica)]", "\n[showing {SEARCH_MAX} of {n}; narrow the search (name, path or a more specific regex)]") } else { String::new() })
 }
 
 fn s<'a>(a: &'a Value, k: &str) -> &'a str {
@@ -798,7 +814,7 @@ fn resolve_read(app: &App, ws: &Path, p: &str, allow: &[PathBuf]) -> Result<Path
     {
         return Ok(full);
     }
-    Err(format!("Acesso negado: \"{p}\" está fora da pasta de trabalho ({}).", ws.display()))
+    Err(LF!("Acesso negado: \"{p}\" está fora da pasta de trabalho ({}).", "Access denied: \"{p}\" is outside the workspace ({}).", ws.display()))
 }
 
 /// Controlar pela tela um programa que tem conector (ex.: a janela do x64dbg) é lento e erra muito:
@@ -812,8 +828,8 @@ fn app_has_connector(app: &App, args: &Value) -> Option<String> {
             continue;
         }
         let tools: Vec<String> = sv["tools"].as_array().into_iter().flatten().filter_map(|t| t["name"].as_str()).take(8).map(|t| format!("{}__{}", safe_name(name), safe_name(t))).collect();
-        return Some(format!(
-            "Não controlei a tela: o programa \"{name}\" tem conector conectado no studio. Use as ferramentas dele ({}{}); são mais rápidas e precisas que clicar na janela. Se precisar de uma que não está carregada, use search_tools.",
+        return Some(LF!(
+            "Não controlei a tela: o programa \"{name}\" tem conector conectado no studio. Use as ferramentas dele ({}{}); são mais rápidas e precisas que clicar na janela. Se precisar de uma que não está carregada, use search_tools.", "I did not control the screen: the program \"{name}\" has a connector connected in the studio. Use its tools ({}{}); they are faster and more precise than clicking the window. If you need one that is not loaded, use search_tools.",
             tools.join(", "),
             if tools.len() == 8 { ", ..." } else { "" }
         ));
@@ -843,17 +859,17 @@ fn connector_launch(app: &App, cmd: &str) -> Option<String> {
             let name = sv["name"].as_str().unwrap_or("");
             let tools: Vec<String> = sv["tools"].as_array().into_iter().flatten().filter_map(|t| t["name"].as_str()).take(6).map(|t| format!("{}__{}", safe_name(name), safe_name(t))).collect();
             return Some(match sv["status"].as_str().unwrap_or("") {
-                "connected" => format!("Não executei: esse comando inicia o conector \"{name}\", que já está rodando no studio. Chame as ferramentas dele diretamente ({}{}), ou use search_tools.", tools.join(", "), if tools.len() == 6 { ", ..." } else { "" }),
-                "disabled" => format!("Não executei: esse comando inicia o conector \"{name}\", que está desligado. Peça ao usuário para ligá-lo em Conectores e então use as ferramentas dele."),
-                "connecting" => format!("Não executei: esse comando inicia o conector \"{name}\", que está conectando agora. Espere um pouco e use as ferramentas dele (search_tools mostra quais são)."),
-                st => format!("Não executei: esse comando inicia o conector \"{name}\", que está com problema ({st}{}). Rodar pelo terminal não resolve: avise o usuário para abrir Conectores, ver o registro do \"{name}\" e reconectar.",
+                "connected" => LF!("Não executei: esse comando inicia o conector \"{name}\", que já está rodando no studio. Chame as ferramentas dele diretamente ({}{}), ou use search_tools.", "Not run: this command starts the connector \"{name}\", which is already running in the studio. Call its tools directly ({}{}), or use search_tools.", tools.join(", "), if tools.len() == 6 { ", ..." } else { "" }),
+                "disabled" => LF!("Não executei: esse comando inicia o conector \"{name}\", que está desligado. Peça ao usuário para ligá-lo em Conectores e então use as ferramentas dele.", "Not run: this command starts the connector \"{name}\", which is turned off. Ask the user to turn it on in Connectors and then use its tools."),
+                "connecting" => LF!("Não executei: esse comando inicia o conector \"{name}\", que está conectando agora. Espere um pouco e use as ferramentas dele (search_tools mostra quais são).", "Not run: this command starts the connector \"{name}\", which is connecting right now. Wait a moment and use its tools (search_tools shows which they are)."),
+                st => LF!("Não executei: esse comando inicia o conector \"{name}\", que está com problema ({st}{}). Rodar pelo terminal não resolve: avise o usuário para abrir Conectores, ver o registro do \"{name}\" e reconectar.", "Not run: this command starts the connector \"{name}\", which has a problem ({st}{}). Running it from the terminal does not help: tell the user to open Connectors, check the \"{name}\" log and reconnect.",
                     sv["error"].as_str().filter(|e| !e.is_empty()).map(|e| format!(": {}", e.chars().take(200).collect::<String>())).unwrap_or_default()),
             });
         }
     }
     // servidor MCP genérico que nem está cadastrado
     if low.contains("modelcontextprotocol") || low.contains("mcp") && (low.contains("server") || low.contains("-mcp") || low.contains("mcp-")) {
-        return Some("Não executei: isso parece iniciar um servidor MCP, que fica esperando conexão e não responde pelo terminal. Use as ferramentas dos conectores que já estão no studio (search_tools ajuda a achar), ou peça ao usuário para cadastrar esse conector em Conectores.".into());
+        return Some(L!("Não executei: isso parece iniciar um servidor MCP, que fica esperando conexão e não responde pelo terminal. Use as ferramentas dos conectores que já estão no studio (search_tools ajuda a achar), ou peça ao usuário para cadastrar esse conector em Conectores.", "Not run: this looks like it starts an MCP server, which waits for a connection and does not answer through the terminal. Use the tools of the connectors already in the studio (search_tools helps find them), or ask the user to add this connector in Connectors.").into());
     }
     None
 }
@@ -885,7 +901,7 @@ fn looks_failed(t: &str) -> bool {
 pub(crate) fn resolve_write(ws: &Path, p: &str) -> Result<PathBuf, String> {
     let full = resolve(ws, p);
     if !is_inside(ws, &full) || app::normalize(&full) == app::normalize(ws) {
-        return Err(format!("Só posso escrever dentro da pasta de trabalho ({}).", ws.display()));
+        return Err(LF!("Só posso escrever dentro da pasta de trabalho ({}).", "I can only write inside the workspace ({}).", ws.display()));
     }
     Ok(full)
 }
@@ -920,7 +936,7 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
             for it in items.iter().take(SHOW) {
                 let n = it.file_name().to_string_lossy().into_owned();
                 if it.path().is_dir() {
-                    lines.push(format!("[pasta] {n}/"));
+                    lines.push(LF!("[pasta] {n}/", "[folder] {n}/"));
                 } else {
                     let size = it.metadata().map(|m| fmt_size(m.len())).unwrap_or_default();
                     lines.push(format!("{n}  ({size})"));
@@ -930,15 +946,15 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
                 // o resto vira contagem por tipo; para achar algo, search_files
                 let mut by: std::collections::BTreeMap<String, usize> = Default::default();
                 for it in &items[SHOW..] {
-                    let k = if it.path().is_dir() { "pastas".to_string() } else { it.path().extension().map(|x| format!(".{}", x.to_string_lossy().to_lowercase())).unwrap_or_else(|| "sem extensão".into()) };
+                    let k = if it.path().is_dir() { L!("pastas", "folders").to_string() } else { it.path().extension().map(|x| format!(".{}", x.to_string_lossy().to_lowercase())).unwrap_or_else(|| L!("sem extensão", "no extension").into()) };
                     *by.entry(k).or_default() += 1;
                 }
                 let mut v: Vec<_> = by.into_iter().collect();
                 v.sort_by(|a, b| b.1.cmp(&a.1));
                 let parts: Vec<String> = v.iter().take(8).map(|(k, n)| format!("{n} {k}")).collect();
-                lines.push(format!("... e mais {} itens ({}). Para achar algo aqui, use search_files com name.", items.len() - SHOW, parts.join(", ")));
+                lines.push(LF!("... e mais {} itens ({}). Para achar algo aqui, use search_files com name.", "... and {} more items ({}). To find something here, use search_files with name.", items.len() - SHOW, parts.join(", ")));
             }
-            Ok(format!("{}\n{}", dir.display(), if lines.is_empty() { "(vazia)".into() } else { lines.join("\n") }))
+            Ok(format!("{}\n{}", dir.display(), if lines.is_empty() { L!("(vazia)", "(empty)").into() } else { lines.join("\n") }))
         }
         "read_file" => {
             let file = resolve_read(app, ws, s(a, "path"), allow)?;
@@ -949,7 +965,7 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
                 return run_builtin(app, ws, "list_directory", &json!({"path": file.to_string_lossy()}), &al);
             }
             if md.len() > 20 * 1024 * 1024 {
-                return Err(format!("Arquivo grande demais ({}).", fmt_size(md.len())));
+                return Err(LF!("Arquivo grande demais ({}).", "File too large ({}).", fmt_size(md.len())));
             }
             read_text(&file, md.len(), a)
         }
@@ -966,7 +982,7 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
             let content = if before.as_deref().is_some_and(|b| b.contains("\r\n")) && !content.contains('\r') { crlf_content = content.replace('\n', "\r\n"); crlf_content.as_str() } else { content };
             std::fs::write(&file, content).map_err(e)?;
             let hint = before.map(|b| rewrite_hint(&b, content)).unwrap_or_default();
-            Ok(format!("{}: {} ({}){hint}", if existed { "Substituído" } else { "Criado" }, rel_to(ws, &file), fmt_size(content.len() as u64)))
+            Ok(format!("{}: {} ({}){hint}", if existed { L!("Substituído", "Replaced") } else { L!("Criado", "Created") }, rel_to(ws, &file), fmt_size(content.len() as u64)))
         }
         "edit_file" => {
             let file = resolve_write(ws, s(a, "path"))?;
@@ -980,7 +996,7 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
                 let mut lines: Vec<&str> = text.split('\n').collect();
                 let total = lines.len();
                 if start > total + 1 || end + 1 < start || end > total {
-                    return Err(format!("Linhas fora do arquivo ({total} linhas)."));
+                    return Err(LF!("Linhas fora do arquivo ({total} linhas).", "Lines outside the file ({total} lines)."));
                 }
                 // confere o lugar: números de uma leitura antiga erram depois de inserir linhas acima
                 let want = norm_ws(s(a, "expect"));
@@ -989,7 +1005,7 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
                     if !at(start - 1).starts_with(&want) {
                         let moved = (0..total).filter(|&i| at(i).starts_with(&want)).min_by_key(|&i| (i as i64 - (start as i64 - 1)).abs());
                         let near: Vec<String> = (start.saturating_sub(1)..(start + 2).min(total)).map(|i| format!("{}: {}", i + 1, cut(lines[i].trim_end_matches('\r'), 100))).collect();
-                        return Err(format!("A linha {start} não começa com \"{}\". Nada foi alterado.{}\nO que está lá agora:\n{}", cut(&want, 60), moved.map(|i| format!(" Esse texto está agora na linha {} (diferença de {}).", i + 1, i as i64 + 1 - start as i64)).unwrap_or_default(), near.join("\n")));
+                        return Err(LF!("A linha {start} não começa com \"{}\". Nada foi alterado.{}\nO que está lá agora:\n{}", "Line {start} does not start with \"{}\". Nothing was changed.{}\nWhat is there now:\n{}", cut(&want, 60), moved.map(|i| LF!(" Esse texto está agora na linha {} (diferença de {}).", " That text is now on line {} (off by {}).", i + 1, i as i64 + 1 - start as i64)).unwrap_or_default(), near.join("\n")));
                     }
                 }
                 let before = lines[start - 1..end].iter().map(|l| l.trim_end_matches('\r')).collect::<Vec<_>>();
@@ -1001,9 +1017,9 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
                 let refs: Vec<&str> = nl.iter().map(|x| x.as_str()).collect();
                 lines.splice(start - 1..end, refs);
                 std::fs::write(&file, lines.join("\n")).map_err(e)?;
-                let what = if end < start { format!("{added} linha(s) inserida(s) antes da {start}") } else { format!("linhas {start}-{end} trocadas por {added}") };
+                let what = if end < start { LF!("{added} linha(s) inserida(s) antes da {start}", "{added} line(s) inserted before line {start}") } else { LF!("linhas {start}-{end} trocadas por {added}", "lines {start}-{end} replaced by {added}") };
                 let first = before.first().map(|l| cut(l.trim(), 70)).unwrap_or_default();
-                return Ok(format!("Editado: {} ({what}{})", rel_to(ws, &file), if first.is_empty() { String::new() } else { format!("; antes começava com: {first}") }));
+                return Ok(LF!("Editado: {} ({what}{})", "Edited: {} ({what}{})", rel_to(ws, &file), if first.is_empty() { String::new() } else { LF!("; antes começava com: {first}", "; it used to start with: {first}") }));
             }
             // várias trocas de uma vez (tudo ou nada)
             let pairs: Vec<(String, String)> = match a.get("edits").and_then(Value::as_array) {
@@ -1016,28 +1032,28 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
             for (i, (old, new)) in pairs.iter().enumerate() {
                 let tag = if pairs.len() > 1 { format!("Troca {}: ", i + 1) } else { String::new() };
                 if old.is_empty() {
-                    return Err(format!("{tag}old_text vazio. Para trocar por número de linha, use start_line/end_line."));
+                    return Err(LF!("{tag}old_text vazio. Para trocar por número de linha, use start_line/end_line.", "{tag}empty old_text. To replace by line number, use start_line/end_line."));
                 }
                 // o modelo costuma mandar \n onde o arquivo tem \r\n
                 let old_f = if crlf && !old.contains('\r') && !out.contains(old.as_str()) { old.replace('\n', "\r\n") } else { old.clone() };
                 let new_f = if old_f != *old { new.replace('\n', "\r\n") } else { new.clone() };
                 let count = out.matches(old_f.as_str()).count();
                 if count == 0 {
-                    return Err(format!("{tag}old_text não encontrado no arquivo. Leia o trecho de novo (offset/limit) e copie exato.{}", if pairs.len() > 1 { " Nada foi alterado." } else { "" }));
+                    return Err(LF!("{tag}old_text não encontrado no arquivo. Leia o trecho de novo (offset/limit) e copie exato.{}", "{tag}old_text not found in the file. Read the part again (offset/limit) and copy it exactly.{}", if pairs.len() > 1 { L!(" Nada foi alterado.", " Nothing was changed.") } else { "" }));
                 }
                 if count > 1 && !all {
-                    return Err(format!("{tag}old_text aparece {count} vezes. Inclua mais contexto ou use replace_all.{}", if pairs.len() > 1 { " Nada foi alterado." } else { "" }));
+                    return Err(LF!("{tag}old_text aparece {count} vezes. Inclua mais contexto ou use replace_all.{}", "{tag}old_text appears {count} times. Include more context or use replace_all.{}", if pairs.len() > 1 { L!(" Nada foi alterado.", " Nothing was changed.") } else { "" }));
                 }
                 out = if all { n += count; out.replace(old_f.as_str(), &new_f) } else { n += 1; out.replacen(old_f.as_str(), &new_f, 1) };
             }
             std::fs::write(&file, &out).map_err(e)?;
             let big_old = pairs.iter().map(|(o, _)| o.lines().count()).max().unwrap_or(0) > 25;
-            Ok(format!("Editado: {} ({n} substituição(ões)){}", rel_to(ws, &file), if big_old { "\n[dica: para trocar um bloco grande, use start_line/end_line com só o texto novo; não precisa repetir o antigo]" } else { "" }))
+            Ok(LF!("Editado: {} ({n} substituição(ões)){}", "Edited: {} ({n} replacement(s)){}", rel_to(ws, &file), if big_old { L!("\n[dica: para trocar um bloco grande, use start_line/end_line com só o texto novo; não precisa repetir o antigo]", "\n[tip: to replace a large block, use start_line/end_line with only the new text; no need to repeat the old one]") } else { "" }))
         }
         "create_directory" => {
             let dir = resolve_write(ws, s(a, "path"))?;
             std::fs::create_dir_all(&dir).map_err(e)?;
-            Ok(format!("Pasta criada: {}", rel_to(ws, &dir)))
+            Ok(LF!("Pasta criada: {}", "Folder created: {}", rel_to(ws, &dir)))
         }
         "search_files" => {
             let p = s(a, "path");
@@ -1046,14 +1062,14 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
             let content_re = if s(a, "content").is_empty() {
                 None
             } else {
-                Some(regex_lite::Regex::new(&format!("(?i){}", s(a, "content"))).map_err(|x| format!("Regex inválida: {x}"))?)
+                Some(regex_lite::Regex::new(&format!("(?i){}", s(a, "content"))).map_err(|x| LF!("Regex inválida: {x}", "Invalid regex: {x}"))?)
             };
             if let (Some(re), true) = (&content_re, start.is_file()) {
                 let text = std::fs::read(&start).map_err(e)?;
                 let text = String::from_utf8_lossy(&text);
                 let all: Vec<(usize, &str)> = text.split('\n').enumerate().filter(|(_, l)| re.is_match(l)).collect();
                 let hits: Vec<String> = all.iter().take(SEARCH_MAX).map(|(i, l)| format!("{}: {}", i + 1, cut(l.trim_end_matches('\r'), 180))).collect();
-                let more = if all.len() > SEARCH_MAX { format!("\n[mostrando {SEARCH_MAX} de {}; refine a regex]", all.len()) } else { String::new() };
+                let more = if all.len() > SEARCH_MAX { LF!("\n[mostrando {SEARCH_MAX} de {}; refine a regex]", "\n[showing {SEARCH_MAX} of {}; narrow the regex]", all.len()) } else { String::new() };
                 return Ok(if hits.is_empty() { "Nada encontrado.".into() } else { format!("{}\n{}{more}", rel_to(ws, &start), hits.join("\n")) });
             }
             if content_re.is_some() {
@@ -1107,18 +1123,18 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
                 Ok("Nada encontrado.".into())
             } else {
                 let full = results.len() >= SEARCH_MAX;
-                Ok(results.join("\n") + &if full { format!("\n[limite de {SEARCH_MAX} resultados; refine a busca]") } else { String::new() })
+                Ok(results.join("\n") + &if full { LF!("\n[limite de {SEARCH_MAX} resultados; refine a busca]", "\n[limit of {SEARCH_MAX} results; narrow the search]") } else { String::new() })
             }
         }
         "read_skill_file" => {
             let sk = skills::get(app, s(a, "skill")).ok_or_else(|| {
                 let ids: Vec<String> = skills::list(app).iter().map(|k| format!("{} ({})", k.id, k.name)).collect();
-                format!("Skill não encontrada: \"{}\". Use um destes ids: {}", s(a, "skill"), ids.join(", "))
+                LF!("Skill não encontrada: \"{}\". Use um destes ids: {}", "Skill not found: \"{}\". Use one of these ids: {}", s(a, "skill"), ids.join(", "))
             })?;
             let p = s(a, "path");
             let file = resolve(&sk.dir, if p.is_empty() { "SKILL.md" } else { p });
             if !is_inside(&sk.dir, &file) {
-                return Err("Caminho fora da pasta da skill.".into());
+                return Err(L!("Caminho fora da pasta da skill.", "Path outside the skill folder.").into());
             }
             if file.is_dir() {
                 let names: Vec<String> = std::fs::read_dir(&file).map_err(e)?.flatten().map(|x| file_name(&x.path())).collect();

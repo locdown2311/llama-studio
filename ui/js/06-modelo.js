@@ -3,23 +3,23 @@
 
 /* ============================================================ raciocínio por conversa e slot */
 const THINK_OPTS = [
-  ['eco', 'Econômico', 'Pensa no começo de cada pedido e quando algo falha; nos outros passos age direto. Gasta bem menos tokens.'],
-  ['auto', 'Padrão do modelo', 'O modelo decide (como vem no template dele).'],
-  ['on', 'Pensar', 'Raciocina antes de responder. Melhor para tarefas difíceis.'],
-  ['off', 'Responder direto', 'Sem raciocínio: bem mais rápido para pedidos simples.'],
+  ['eco', L('Econômico'), L('Pensa no começo de cada pedido e quando algo falha; nos outros passos age direto. Gasta bem menos tokens.')],
+  ['auto', L('Padrão do modelo'), L('O modelo decide (como vem no template dele).')],
+  ['on', L('Pensar'), L('Raciocina antes de responder. Melhor para tarefas difíceis.')],
+  ['off', L('Responder direto'), L('Sem raciocínio: bem mais rápido para pedidos simples.')],
 ];
 /* ------------------------------------------------------------ modo plano */
 // O modelo só investiga e escreve um plano; nada é alterado até o usuário aprovar.
 // O aviso vai na mensagem do usuário (e não no prompt de sistema) para não invalidar o cache.
-const PLAN_NOTE = '\n\n[Modo plano] Não altere nada ainda: não escreva nem edite arquivos, não rode comandos e não use ferramentas que mudem algo. '
-  + 'Investigue só com leitura (e subagentes exploradores, se ajudar) e responda com um plano numerado: o que vai mudar, em quais arquivos, em que ordem, os riscos e como verificar. '
-  + 'Termine perguntando se pode executar.';
+const PLAN_NOTE = L('\n\n[Modo plano] Não altere nada ainda: não escreva nem edite arquivos, não rode comandos e não use ferramentas que mudem algo. ')
+  + L('Investigue só com leitura (e subagentes exploradores, se ajudar) e responda com um plano numerado: o que vai mudar, em quais arquivos, em que ordem, os riscos e como verificar. ')
+  + L('Termine perguntando se pode executar.');
 function planOf(c) { return c ? !!c.plan : !!S.draftPlan; }
 function togglePlan() {
   const c = cur();
   if (c) { c.plan = !c.plan; saveConvs(); } else S.draftPlan = !S.draftPlan;
   updatePickers();
-  toast(planOf(c) ? 'Modo plano: o modelo investiga e propõe um plano, sem alterar nada' : 'Modo plano desligado');
+  toast(planOf(c) ? L('Modo plano: o modelo investiga e propõe um plano, sem alterar nada') : L('Modo plano desligado'));
 }
 /** A resposta em `b` veio de um pedido em modo plano e o plano ainda não foi executado. */
 function planPending(conv, b) {
@@ -29,7 +29,7 @@ function planPending(conv, b) {
 }
 async function runPlan(conv) {
   conv.plan = false; saveConvs(); updatePickers();
-  const text = 'Plano aprovado. Pode executar.';
+  const text = L('Plano aprovado. Pode executar.');
   await submit(conv, { content: text, parts: [{ t: 'text', v: text }], refs: [] });
 }
 
@@ -53,7 +53,7 @@ function requestExtras(conv) {
 function fillThinkPop() {
   const pop = $('#pop-think'); pop.innerHTML = '';
   const cur0 = thinkOf(cur());
-  pop.append(h('div.pop-head', null, h('span', null, 'Raciocínio nesta conversa')));
+  pop.append(h('div.pop-head', null, h('span', null, L('Raciocínio nesta conversa'))));
   for (const [v, l, d] of THINK_OPTS) {
     pop.append(h('button.menu-item' + (v === cur0 ? '.sel' : ''), { onclick: () => {
       const c = cur(); if (c) { c.think = v; saveConvs(); } else S.draftThink = v;
@@ -72,7 +72,7 @@ function kvKey() {
   for (let i = 0; i < str.length; i++) h = ((h * 33) ^ str.charCodeAt(i)) >>> 0;
   return h.toString(36);
 }
-function kvFile(c) { return `${c.id}-${kvKey()}.bin`; }
+function kvFile(c) { return L('{0}-{1}.bin', c.id, kvKey()); }
 
 async function assignSlot(conv) {
   conv._slot = null;
@@ -94,13 +94,13 @@ async function assignSlot(conv) {
   const prev = sl.owner[best] && sl.owner[best] !== conv.id ? S.convs.find((c) => c.id === sl.owner[best]) : null;
   try {
     if (prev && (prev.ctx?.tokens || 0) >= 3000) {
-      conv._waitingModel = true; conv._waitText = 'Guardando o cache da outra conversa...'; scheduleRender();
+      conv._waitingModel = true; conv._waitText = L('Guardando o cache da outra conversa...'); scheduleRender();
       await api(`/slots/${best}?action=save`, { filename: kvFile(prev) });
       (prev.kv ||= {})[key] = Date.now();
       api('/api/kvcache/prune', { keep: 6 }).catch(() => {});
     }
     if (conv.kv?.[key]) {
-      conv._waitingModel = true; conv._waitText = 'Recuperando o cache desta conversa...'; scheduleRender();
+      conv._waitingModel = true; conv._waitText = L('Recuperando o cache desta conversa...'); scheduleRender();
       try { await api(`/slots/${best}?action=restore`, { filename: kvFile(conv) }); }
       catch { delete conv.kv[key]; }
     }
@@ -117,13 +117,14 @@ function ctxBreakdown(system, ctxText, catalog, tools, meta) {
   const tk = (x) => Math.ceil((typeof x === 'string' ? x.length : JSON.stringify(x).length) / 3.2);
   const parts = {};
   const add = (k, n) => { parts[k] = (parts[k] || 0) + n; };
-  const skillsAt = ctxText.indexOf('O usuário ativou as skills');
-  add('Instruções', tk(system) - (catalog ? tk(catalog) : 0) - (skillsAt >= 0 ? tk(ctxText.slice(skillsAt)) : 0));
-  if (skillsAt >= 0) add('Habilidades', tk(ctxText.slice(skillsAt)));
-  if (catalog) add('Catálogo de conectores', tk(catalog));
+  // o texto vem do programa, no idioma escolhido
+  const skillsAt = Math.max(ctxText.indexOf('O usuário ativou as skills'), ctxText.indexOf('The user turned on the skills'));
+  add(L('Instruções'), tk(system) - (catalog ? tk(catalog) : 0) - (skillsAt >= 0 ? tk(ctxText.slice(skillsAt)) : 0));
+  if (skillsAt >= 0) add(L('Habilidades'), tk(ctxText.slice(skillsAt)));
+  if (catalog) add(L('Catálogo de conectores'), tk(catalog));
   for (const t of tools) {
     const m = meta[t.function.name] || {};
-    add(m.source === 'mcp' ? 'Conector ' + m.server : 'Ferramentas internas', tk(t));
+    add(m.source === 'mcp' ? L('Conector ') + m.server : L('Ferramentas internas'), tk(t));
   }
   return Object.entries(parts).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
 }
@@ -155,7 +156,7 @@ function drawCtxMeter() {
   el.className = 'ctx-meter ' + lvl;
   el.hidden = !nCtx;
   el.innerHTML = `<svg viewBox="0 0 18 18" width="18" height="18"><circle cx="9" cy="9" r="${R}" class="trk"/><circle cx="9" cy="9" r="${R}" class="val" stroke-dasharray="${(pct / 100 * C).toFixed(2)} ${C.toFixed(2)}" transform="rotate(-90 9 9)"/></svg><span>${used ? (exact ? '' : '~') + Math.round(pct) + '%' : '0%'}</span>`;
-  el.title = `Contexto: ${used.toLocaleString('pt-BR')} de ${nCtx.toLocaleString('pt-BR')} tokens (${pct.toFixed(0)}%)${exact ? '' : ', estimado'}. Clique para detalhes.`;
+  el.title = L('Contexto: {0} de {1} tokens ({2}%){3}. Clique para detalhes.', used.toLocaleString(LOCALE), nCtx.toLocaleString(LOCALE), pct.toFixed(0), exact ? '' : L(', estimado'));
 }
 
 function fillCtxPop() {
@@ -167,22 +168,22 @@ function fillCtxPop() {
   const pct = nCtx ? used / nCtx * 100 : 0;
   const sys = c?.ctxSys || 0;
   const row = (k, v) => h('div.ctx-row', null, h('span', null, k), h('b', null, v));
-  const bar = h('div.ctx-bar', null, h('i', { style: { width: Math.min(100, pct) + '%' } }), h('em', { style: { left: at + '%' }, title: 'Compactação automática' }));
+  const bar = h('div.ctx-bar', null, h('i', { style: { width: Math.min(100, pct) + '%' } }), h('em', { style: { left: at + '%' }, title: L('Compactação automática') }));
   bar.classList.add(pct >= at ? 'hi' : pct >= at * 0.75 ? 'mid' : 'lo');
   add(
-    h('div.pop-title', null, 'Contexto da conversa'),
+    h('div.pop-title', null, L('Contexto da conversa')),
     bar,
-    row('Em uso', `${exact ? '' : '~'}${used.toLocaleString('pt-BR')} tokens (${pct.toFixed(0)}%)`),
-    row('Limite do modelo', nCtx.toLocaleString('pt-BR')),
-    sys ? row('Instruções e ferramentas', '~' + sys.toLocaleString('pt-BR')) : null,
-    c?.ctxParts?.length ? h('div.ctx-parts', null, c.ctxParts.slice(0, 7).map(([k, n]) => h('div.ctx-row.sub', null, h('span', null, k), h('b', null, '~' + n.toLocaleString('pt-BR'))))) : null,
-    row('Compacta sozinho em', S.settings.autoCompact ? `${at}% (${Math.round(nCtx * at / 100).toLocaleString('pt-BR')})` : 'desligado'),
-    c?.compactions ? row('Compactações feitas', String(c.compactions)) : null,
-    c?.cacheLast ? row('Último pedido: do cache', c.cacheLast.cache.toLocaleString('pt-BR')) : null,
-    c?.cacheLast ? row('Último pedido: lido de novo', c.cacheLast.read.toLocaleString('pt-BR')) : null,
-    c?.cacheLast?.why ? h('div.ctx-why', null, `Releu ${c.cacheLast.read.toLocaleString('pt-BR')} tokens${c.cacheLast.ms ? ` em ${Math.round(c.cacheLast.ms / 1000)}s` : ''} porque ${c.cacheLast.why}.`) : null,
-    h('div.ctx-note', null, exact ? 'Medido pelo llama-server na última resposta.' : 'Estimativa: a medida exata chega com a próxima resposta.'),
-    h('button.btn.sm', { disabled: !c || !c.messages.length, onclick: () => { closePops(); compactNow(c); } }, ic('archive'), 'Compactar agora'));
+    row(L('Em uso'), L('{0}{1} tokens ({2}%)', exact ? '' : '~', used.toLocaleString(LOCALE), pct.toFixed(0))),
+    row(L('Limite do modelo'), nCtx.toLocaleString(LOCALE)),
+    sys ? row(L('Instruções e ferramentas'), '~' + sys.toLocaleString(LOCALE)) : null,
+    c?.ctxParts?.length ? h('div.ctx-parts', null, c.ctxParts.slice(0, 7).map(([k, n]) => h('div.ctx-row.sub', null, h('span', null, k), h('b', null, '~' + n.toLocaleString(LOCALE))))) : null,
+    row(L('Compacta sozinho em'), S.settings.autoCompact ? `${at}% (${Math.round(nCtx * at / 100).toLocaleString(LOCALE)})` : 'desligado'),
+    c?.compactions ? row(L('Compactações feitas'), String(c.compactions)) : null,
+    c?.cacheLast ? row(L('Último pedido: do cache'), c.cacheLast.cache.toLocaleString(LOCALE)) : null,
+    c?.cacheLast ? row(L('Último pedido: lido de novo'), c.cacheLast.read.toLocaleString(LOCALE)) : null,
+    c?.cacheLast?.why ? h('div.ctx-why', null, L('Releu {0} tokens{1} porque {2}.', c.cacheLast.read.toLocaleString(LOCALE), c.cacheLast.ms ? L(' em {0}s', Math.round(c.cacheLast.ms / 1000)) : '', c.cacheLast.why)) : null,
+    h('div.ctx-note', null, exact ? L('Medido pelo llama-server na última resposta.') : L('Estimativa: a medida exata chega com a próxima resposta.')),
+    h('button.btn.sm', { disabled: !c || !c.messages.length, onclick: () => { closePops(); compactNow(c); } }, ic('archive'), L('Compactar agora')));
 }
 
 
@@ -217,7 +218,7 @@ async function streamRaw(messages, tools, msg, signal, onDelta, extra = {}) {
     }
     if (t != null) {
       let m = t; try { const j = JSON.parse(t); m = j.error?.message || j.error || t; } catch { /* texto */ }
-      throw new Error(`llama-server respondeu ${res.status}: ${String(m).slice(0, 600)}`);
+      throw new Error(L('llama-server respondeu {0}: {1}', res.status, String(m).slice(0, 600)));
     }
   }
   const reader = res.body.getReader();
@@ -267,7 +268,7 @@ function needsApproval(info, conv) {
    'auto'     sob demanda (catálogo + search_tools); citado no pedido, vai completo só se for pequeno
    'lazy'     sempre sob demanda: o modelo busca e carrega só as que vai usar
    'eager'    sempre completo (todas as ferramentas com os parâmetros) */
-const MCP_LOAD = [['auto', 'Automático', 'Sob demanda; citado no pedido, vai completo se tiver até 12 ferramentas visíveis.'], ['lazy', 'Sob demanda', 'Só o catálogo; o modelo busca e carrega as ferramentas que for usar.'], ['eager', 'Completo', 'Todas as ferramentas com os parâmetros, sempre. Gasta mais contexto.']];
+const MCP_LOAD = [['auto', L('Automático'), L('Sob demanda; citado no pedido, vai completo se tiver até 12 ferramentas visíveis.')], ['lazy', L('Sob demanda'), L('Só o catálogo; o modelo busca e carrega as ferramentas que for usar.')], ['eager', L('Completo'), L('Todas as ferramentas com os parâmetros, sempre. Gasta mais contexto.')]];
 const EAGER_MAX = 12;
 function mcpLoadOf(name) { return S.settings.mcpLoad?.[name] || 'auto'; }
 function setMcpLoad(name, v) { S.settings.mcpLoad = { ...(S.settings.mcpLoad || {}), [name]: v }; if (v === 'auto') delete S.settings.mcpLoad[name]; store.set('settings', S.settings); }

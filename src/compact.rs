@@ -124,8 +124,8 @@ pub fn compact(text: &str, save_dir: &Path, label: &str, limit: usize) -> Compac
     }
     let file = save(save_dir, label, &c);
     let omitted = tail - head;
-    let text = format!(
-        "{}\n\n[... {omitted} linhas omitidas (linhas {} a {} de {}){}]\n\n{}",
+    let text = LF!(
+        "{}\n\n[... {omitted} linhas omitidas (linhas {} a {} de {}){}]\n\n{}", "{}\n\n[... {omitted} lines left out (lines {} to {} of {}){}]\n\n{}",
         lines[..head].join("\n"),
         head + 1,
         tail,
@@ -138,7 +138,7 @@ pub fn compact(text: &str, save_dir: &Path, label: &str, limit: usize) -> Compac
 
 fn note(file: &Option<PathBuf>) -> String {
     match file {
-        Some(f) => format!(". Saída completa em {}: use read_file com offset/limit ou search_files se precisar do trecho", f.display()),
+        Some(f) => LF!(". Saída completa em {}: use read_file com offset/limit ou search_files se precisar do trecho", ". Full output in {}: use read_file with offset/limit or search_files if you need that part", f.display()),
         None => String::new(),
     }
 }

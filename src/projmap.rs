@@ -69,7 +69,7 @@ pub fn build(app: &App, ws: &Path) -> Value {
         }
         bytes += e.metadata().map(|m| m.len()).unwrap_or(0);
         let name = e.file_name().to_string_lossy().to_string();
-        let ext = Path::new(&name).extension().map(|x| format!(".{}", x.to_string_lossy().to_lowercase())).unwrap_or_else(|| "(sem extensão)".into());
+        let ext = Path::new(&name).extension().map(|x| format!(".{}", x.to_string_lossy().to_lowercase())).unwrap_or_else(|| L!("(sem extensão)", "(no extension)").into());
         *exts.entry(ext.clone()).or_default() += 1;
         let rel = e.path().strip_prefix(ws).unwrap_or(e.path());
         let mut comps = rel.components();
@@ -91,7 +91,7 @@ pub fn build(app: &App, ws: &Path) -> Value {
         v.into_iter().take(n).map(|(e, c)| format!("{e} {c}")).collect::<Vec<_>>().join(", ")
     };
     let mut out = String::new();
-    out.push_str(&format!("{}{} arquivos ({}). Tipos: {}.\n", if cut { "mais de " } else { "" }, total.min(MAX_FILES), fmt_size(bytes), top_ext(&exts, 8)));
+    out.push_str(&format!("{}{} arquivos ({}). Tipos: {}.\n", if cut { L!("mais de ", "over ") } else { "" }, total.min(MAX_FILES), fmt_size(bytes), top_ext(&exts, 8)));
     let mut dirs: Vec<(&String, &(usize, BTreeMap<String, usize>))> = tops.iter().collect();
     dirs.sort_by(|a, b| b.1 .0.cmp(&a.1 .0));
     if !dirs.is_empty() {
@@ -100,13 +100,13 @@ pub fn build(app: &App, ws: &Path) -> Value {
             out.push_str(&format!("- {d}/ ({n}: {})\n", top_ext(e, 3)));
         }
         if dirs.len() > 14 {
-            out.push_str(&format!("- ... e mais {} pastas\n", dirs.len() - 14));
+            out.push_str(&LF!("- ... e mais {} pastas\n", "- ... and {} more folders\n", dirs.len() - 14));
         }
     }
     if !root_files.is_empty() {
         root_files.sort();
         let shown: Vec<&String> = root_files.iter().take(20).collect();
-        out.push_str(&format!("Na raiz: {}{}\n", shown.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "), if root_files.len() > 20 { ", ..." } else { "" }));
+        out.push_str(&LF!("Na raiz: {}{}\n", "At the root: {}{}\n", shown.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "), if root_files.len() > 20 { ", ..." } else { "" }));
     }
     for k in &keys {
         let rel = k.strip_prefix(ws).unwrap_or(k).to_string_lossy().replace('\\', "/");
@@ -154,7 +154,7 @@ pub fn get(app: &App, ws: &Path, refresh: bool) -> Value {
 /// Texto para o contexto do modelo (vazio se não houver mapa ainda).
 pub fn context_text(app: &App, ws: &Path) -> String {
     let Some(v) = load(app, ws) else { return String::new() };
-    let mut s = String::from("Mapa da pasta de trabalho (pré-leitura automática; pode estar um pouco desatualizado):\n");
+    let mut s = String::from(L!("Mapa da pasta de trabalho (pré-leitura automática; pode estar um pouco desatualizado):\n", "Workspace map (automatic pre-read; may be slightly out of date):\n"));
     if let Some(sum) = v["summary"].as_str() {
         s.push_str(sum);
         s.push_str("\n\n");

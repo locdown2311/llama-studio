@@ -42,6 +42,8 @@ pub struct Config {
     pub hf_token: String,
     /// Configurações de personalização da interface
     pub ui_settings: Value,
+    /// idioma da interface e do que o modelo recebe: "pt" ou "en" (vazio = ainda não escolhido)
+    pub lang: String,
 }
 
 impl Default for Config {
@@ -81,6 +83,7 @@ impl Default for Config {
                 "layout": "compact",
                 "widgets": ["statusbar", "toolbar", "sidebar", "panels", "tabs"]
             }),
+            lang: String::new(),
         }
     }
 }
@@ -130,6 +133,13 @@ impl App {
         if !Path::new(&config.workspace).is_dir() {
             config.workspace = home_dir().to_string_lossy().into_owned();
         }
+        // primeira vez: o idioma escolhido no instalador
+        if config.lang.is_empty() {
+            if let Some(l) = crate::i18n::from_installer(&app_dir) {
+                config.lang = l;
+            }
+        }
+        crate::i18n::set(&config.lang);
         if let Ok(u) = std::env::var("STUDIO_LLAMA_URL") {
             config.llama_url = u.trim_end_matches('/').to_string();
         }

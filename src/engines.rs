@@ -14,22 +14,27 @@ pub struct Variant {
     pub id: &'static str,
     /// "llama" (ggml-org/llama.cpp) ou "ik" (builds do ik_llama.cpp feitas no CI deste repositório)
     pub family: &'static str,
-    pub name: &'static str,
-    pub desc: &'static str,
+    name_t: (&'static str, &'static str),
+    desc_t: (&'static str, &'static str),
     /// padrão do nome do pacote principal
     pat: &'static str,
     /// padrão do pacote de runtime (CUDA)
     runtime: Option<&'static str>,
 }
 
+impl Variant {
+    pub fn name(&self) -> &'static str { if crate::i18n::en() { self.name_t.1 } else { self.name_t.0 } }
+    pub fn desc(&self) -> &'static str { if crate::i18n::en() { self.desc_t.1 } else { self.desc_t.0 } }
+}
+
 pub const VARIANTS: &[Variant] = &[
-    Variant { id: "vulkan", family: "llama", name: "Vulkan", desc: "AMD, NVIDIA e Intel. A escolha mais segura para placas de vídeo.", pat: r"-bin-win-vulkan-x64\.zip$", runtime: None },
-    Variant { id: "cuda", family: "llama", name: "CUDA", desc: "Placas NVIDIA. Em geral o mais rápido nelas; vem com as bibliotecas de runtime.", pat: r"-bin-win-cuda-(\d[\d.]*)-x64\.zip$", runtime: Some(r"^cudart-llama-bin-win-cuda-{V}-x64\.zip$") },
-    Variant { id: "rocm", family: "llama", name: "ROCm (HIP)", desc: "Placas AMD Radeon compatíveis com ROCm. Pode ser mais rápido que o Vulkan na leitura do prompt.", pat: r"-bin-win-(rocm|hip)[^/]*-x64\.zip$", runtime: None },
-    Variant { id: "sycl", family: "llama", name: "SYCL", desc: "Placas Intel Arc e iGPUs Intel recentes.", pat: r"-bin-win-sycl-x64\.zip$", runtime: None },
-    Variant { id: "cpu", family: "llama", name: "Só CPU", desc: "Sem placa de vídeo. Funciona em qualquer computador.", pat: r"-bin-win-cpu-x64\.zip$", runtime: None },
-    Variant { id: "ik-cpu", family: "ik", name: "CPU", desc: "ik_llama.cpp: bem mais rápido que o llama.cpp para MoE na CPU e quantizações IQ_K.", pat: r"^ik_llama-.*-bin-win-cpu-x64\.zip$", runtime: None },
-    Variant { id: "ik-vulkan", family: "ik", name: "Vulkan", desc: "ik_llama.cpp com Vulkan (AMD, NVIDIA, Intel). Suporte mais novo que o de CUDA.", pat: r"^ik_llama-.*-bin-win-vulkan-x64\.zip$", runtime: None },
+    Variant { id: "vulkan", family: "llama", name_t: ("Vulkan", "Vulkan"), desc_t: ("AMD, NVIDIA e Intel. A escolha mais segura para placas de vídeo.", "AMD, NVIDIA and Intel. The safest choice for graphics cards."), pat: r"-bin-win-vulkan-x64\.zip$", runtime: None },
+    Variant { id: "cuda", family: "llama", name_t: ("CUDA", "CUDA"), desc_t: ("Placas NVIDIA. Em geral o mais rápido nelas; vem com as bibliotecas de runtime.", "NVIDIA cards. Usually the fastest on them; comes with the runtime libraries."), pat: r"-bin-win-cuda-(\d[\d.]*)-x64\.zip$", runtime: Some(r"^cudart-llama-bin-win-cuda-{V}-x64\.zip$") },
+    Variant { id: "rocm", family: "llama", name_t: ("ROCm (HIP)", "ROCm (HIP)"), desc_t: ("Placas AMD Radeon compatíveis com ROCm. Pode ser mais rápido que o Vulkan na leitura do prompt.", "AMD Radeon cards compatible with ROCm. Can be faster than Vulkan at reading the prompt."), pat: r"-bin-win-(rocm|hip)[^/]*-x64\.zip$", runtime: None },
+    Variant { id: "sycl", family: "llama", name_t: ("SYCL", "SYCL"), desc_t: ("Placas Intel Arc e iGPUs Intel recentes.", "Intel Arc cards and recent Intel iGPUs."), pat: r"-bin-win-sycl-x64\.zip$", runtime: None },
+    Variant { id: "cpu", family: "llama", name_t: ("Só CPU", "CPU only"), desc_t: ("Sem placa de vídeo. Funciona em qualquer computador.", "No graphics card. Works on any computer."), pat: r"-bin-win-cpu-x64\.zip$", runtime: None },
+    Variant { id: "ik-cpu", family: "ik", name_t: ("CPU", "CPU"), desc_t: ("ik_llama.cpp: bem mais rápido que o llama.cpp para MoE na CPU e quantizações IQ_K.", "ik_llama.cpp: much faster than llama.cpp for MoE on the CPU and IQ_K quantizations."), pat: r"^ik_llama-.*-bin-win-cpu-x64\.zip$", runtime: None },
+    Variant { id: "ik-vulkan", family: "ik", name_t: ("Vulkan", "Vulkan"), desc_t: ("ik_llama.cpp com Vulkan (AMD, NVIDIA, Intel). Suporte mais novo que o de CUDA.", "ik_llama.cpp with Vulkan (AMD, NVIDIA, Intel). Newer support than CUDA."), pat: r"^ik_llama-.*-bin-win-vulkan-x64\.zip$", runtime: None },
 ];
 
 fn engines_dir(app: &App) -> PathBuf {
@@ -173,8 +178,8 @@ pub async fn list(app: &App, check: bool) -> Value {
                 Ok(rels) => {
                     for v in VARIANTS.iter().filter(|v| v.family == fam) {
                         avail.push(match pick(&rels, v) {
-                            Some((tag, label, size, _)) => json!({"id": v.id, "family": fam, "name": v.name, "desc": v.desc, "tag": tag, "label": label, "size": size}),
-                            None => json!({"id": v.id, "family": fam, "name": v.name, "desc": v.desc, "missing": true}),
+                            Some((tag, label, size, _)) => json!({"id": v.id, "family": fam, "name": v.name(), "desc": v.desc(), "tag": tag, "label": label, "size": size}),
+                            None => json!({"id": v.id, "family": fam, "name": v.name(), "desc": v.desc(), "missing": true}),
                         });
                     }
                 }
@@ -224,9 +229,9 @@ pub fn cancel(id: &str) {
 pub async fn install(app: &Arc<App>, variant: &str, activate: bool) -> Result<Value, String> {
     let v = VARIANTS.iter().find(|v| v.id == variant).ok_or("Motor desconhecido.")?;
     let rels = releases(app, v.family).await?;
-    let (tag, _, size, files) = pick(&rels, v).ok_or_else(|| format!("Não há pacote {} para Windows nas releases recentes do llama.cpp.", v.name))?;
+    let (tag, _, size, files) = pick(&rels, v).ok_or_else(|| LF!("Não há pacote {} para Windows nas releases recentes do llama.cpp.", "There is no {} package for Windows in the recent llama.cpp releases.", v.name()))?;
     if JOBS.lock().unwrap().iter().any(|j| j.variant == variant && *j.status.lock().unwrap() == "downloading") {
-        return Err("Esse motor já está sendo baixado.".into());
+        return Err(L!("Esse motor já está sendo baixado.", "That engine is already downloading.").into());
     }
     let job = Arc::new(Job {
         id: format!("e{}", crate::app::now_ms()),
@@ -271,11 +276,11 @@ async fn run(app: &App, j: &Job, files: &[(String, u64)], dir: &Path) -> Result<
         let zip = tmp.join(format!("pacote{i}.zip"));
         download(app, j, url, &zip).await?;
         let f = std::fs::File::open(&zip).map_err(|e| e.to_string())?;
-        zip::ZipArchive::new(f).and_then(|mut z| z.extract(&tmp)).map_err(|e| format!("Pacote inválido: {e}"))?;
+        zip::ZipArchive::new(f).and_then(|mut z| z.extract(&tmp)).map_err(|e| LF!("Pacote inválido: {e}", "Invalid package: {e}"))?;
         let _ = std::fs::remove_file(&zip);
     }
     // o llama-server pode vir dentro de uma subpasta
-    let exe = walkdir::WalkDir::new(&tmp).max_depth(3).into_iter().flatten().find(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case(&server_name())).map(|e| e.path().to_path_buf()).ok_or("O pacote não tem o llama-server.")?;
+    let exe = walkdir::WalkDir::new(&tmp).max_depth(3).into_iter().flatten().find(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case(&server_name())).map(|e| e.path().to_path_buf()).ok_or(L!("O pacote não tem o llama-server.", "The package does not have the llama-server."))?;
     let src = exe.parent().unwrap().to_path_buf();
     let _ = std::fs::remove_dir_all(dir);
     std::fs::rename(&src, dir).map_err(|e| e.to_string())?;
@@ -293,9 +298,9 @@ async fn download(app: &App, j: &Job, url: &str, dest: &Path) -> Result<(), Stri
         if j.cancel.load(Ordering::SeqCst) {
             return Err("cancelado".into());
         }
-        let c = tokio::time::timeout(Duration::from_secs(90), resp.chunk()).await.map_err(|_| "A conexão parou de responder.".to_string())?.map_err(|e| crate::update::chain(&e))?;
+        let c = tokio::time::timeout(Duration::from_secs(90), resp.chunk()).await.map_err(|_| L!("A conexão parou de responder.", "The connection stopped responding.").to_string())?.map_err(|e| crate::update::chain(&e))?;
         let Some(c) = c else { break };
-        f.write_all(&c).await.map_err(|e| format!("Erro ao gravar (disco cheio?): {e}"))?;
+        f.write_all(&c).await.map_err(|e| LF!("Erro ao gravar (disco cheio?): {e}", "Error writing (disk full?): {e}"))?;
         j.done.fetch_add(c.len() as u64, Ordering::Relaxed);
     }
     f.flush().await.map_err(|e| e.to_string())
@@ -304,7 +309,7 @@ async fn download(app: &App, j: &Job, url: &str, dest: &Path) -> Result<(), Stri
 /// Aponta o llama-server para este executável e reinicia se estiver rodando.
 pub async fn use_engine(app: &Arc<App>, exe: &Path) -> Result<Value, String> {
     if !exe.is_file() {
-        return Err("Esse motor não está instalado.".into());
+        return Err(L!("Esse motor não está instalado.", "That engine is not installed.").into());
     }
     let mut c = app.llama.cfg();
     c.server_exe = exe.to_string_lossy().to_string();
@@ -326,10 +331,10 @@ pub async fn use_engine(app: &Arc<App>, exe: &Path) -> Result<Value, String> {
 pub fn remove(app: &App, id: &str) -> Result<(), String> {
     let dir = engines_dir(app).join(id);
     if !crate::app::is_inside(&engines_dir(app), &dir) || id.contains(['/', '\\']) {
-        return Err("Motor inválido.".into());
+        return Err(L!("Motor inválido.", "Invalid engine.").into());
     }
     if same(&dir.join(server_name()), Path::new(&app.llama.cfg().server_exe)) {
-        return Err("Esse é o motor em uso. Troque para outro antes de remover.".into());
+        return Err(L!("Esse é o motor em uso. Troque para outro antes de remover.", "That is the engine in use. Switch to another one before removing it.").into());
     }
-    std::fs::remove_dir_all(&dir).map_err(|e| format!("Não consegui remover (está em uso?): {e}"))
+    std::fs::remove_dir_all(&dir).map_err(|e| LF!("Não consegui remover (está em uso?): {e}", "Could not remove it (is it in use?): {e}"))
 }

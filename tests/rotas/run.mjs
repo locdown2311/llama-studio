@@ -7,10 +7,11 @@ const dir = path.dirname(fileURLToPath(import.meta.url));
 const js = path.join(dir, '../../ui/js');
 const src = fs.readdirSync(js).filter((f) => f.endsWith('.js')).sort().map((f) => fs.readFileSync(path.join(js, f), 'utf8')).join('\n');
 const a = src.indexOf('const ROUTES = ['); const b = src.indexOf('async function autoRoute', a);
-const { routeProfiles, routeExtras } = new Function(src.slice(a, b) + '; return { routeProfiles, routeExtras };')();
+// L(): textos de tela (idioma); aqui basta o português
+const { routeProfiles, routeExtras } = new Function('const L = (s, ...a) => s.replace(/\\{(\\d+)\\}/g, (m, i) => a[i] ?? "");\n' + src.slice(a, b) + '; return { routeProfiles, routeExtras };')();
 const diff = (got, exp) => [got.filter((x) => !exp.includes(x)), exp.filter((x) => !got.includes(x))];
 let total = 0, ok = 0, extra = 0, miss = 0;
-for (const f of ['treino', 'validacao1', 'validacao2', 'validacao4', 'extras']) {
+for (const f of ['treino', 'validacao1', 'validacao2', 'validacao4', 'extras', 'ingles']) {
   const mod = await import('./' + f + '.mjs');
   const { skills = [], mcps = [] } = mod;
   for (const [t, ep, em, es] of mod.default) {
@@ -31,7 +32,7 @@ console.log(`equilibrado: ${ok}/${total} frases certas · ligou a mais: ${extra}
 
 // os outros níveis: cauteloso nunca pode ligar algo que o equilibrado não ligaria; liberal só mede
 let cautExtra = 0, cautMiss = 0, libExtra = 0, libMiss = 0, n = 0;
-for (const f of ['treino', 'validacao1', 'validacao2', 'validacao4', 'extras']) {
+for (const f of ['treino', 'validacao1', 'validacao2', 'validacao4', 'extras', 'ingles']) {
   const mod = await import('./' + f + '.mjs');
   for (const [t, ep] of mod.default) {
     n++;

@@ -34,6 +34,8 @@ O Llama Studio transforma o `llama-server` num agente que trabalha no seu comput
    - **ik_llama.cpp**: fork mais rápido para MoE com camadas na CPU, compilado pelo CI deste projeto.
 3. No mesmo guia, baixe um modelo GGUF do Hugging Face.
 
+O instalador começa perguntando o idioma (português do Brasil ou inglês) e o studio já abre nele.
+
 O instalador não pede administrador: instala em `%LOCALAPPDATA%\Programs\Llama Studio` e, se faltar, instala o WebView2. Depois disso, o próprio programa avisa quando há versão nova e se atualiza sozinho.
 
 > Já tem o llama.cpp numa pasta? Coloque o `llama-studio.exe` numa subpasta dela (`llama\llama-studio\`) e ele encontra o `llama-server.exe` e o `llama-gui.json` sozinho.
@@ -97,6 +99,8 @@ O instalador não pede administrador: instala em `%LOCALAPPDATA%\Programs\Llama 
 ### Configurações
 Um painel só, com menu lateral em quatro grupos: **Geral** (Modelo, Ferramentas, Recursos automáticos, Contexto), **Recursos** (Servidor, Conectores, Habilidades, Personalidades, Utilitários), **Segurança** (Segurança, Auditor) e **Sistema** (Aparência, Janela, Compartilhar, Atualizações, Avançado). Os itens da barra lateral são atalhos para as páginas de Recursos. Tudo salva sozinho, e o studio volta na última subpágina aberta.
 
+**Idioma:** português do Brasil ou inglês, escolhido no instalador, no guia de boas-vindas ou em Configurações › Aparência e idioma (a tela recarrega). Vale para tudo: interface, menu da bandeja, mensagens do programa e o que o modelo recebe (instruções, descrições das ferramentas e resultados delas). Os recursos automáticos entendem pedidos nas duas línguas, qualquer que seja o idioma escolhido.
+
 Com o **Modo avançado** (em Avançado) aparece a subpágina **Testes**, com funções experimentais:
 - **Escalar para um modelo maior**: depois de 2 a 4 falhas seguidas de ferramenta, ou da mesma chamada falhando de novo, o studio troca o modelo carregado por um maior escolhido por você. O modelo maior recebe uma nota sobre o que deu errado e continua a tarefa de onde parou. Depois, a conversa volta ao modelo dela no próximo pedido (ou fica no maior, se preferir). Não escala se outra conversa estiver usando o servidor.
 
@@ -152,6 +156,7 @@ cargo build --release
 | `src/` | Servidor local (axum), cliente MCP, gerenciador do llama-server, ferramentas, downloads, janela e bandeja |
 | `ui/` | Interface (HTML, CSS e JS sem build), embutida no executável |
 | `ui/js/` | O JavaScript da interface, um arquivo por assunto (`01-base.js` … `16-inicio.js`). São scripts comuns que dividem o mesmo escopo e carregam na ordem do número; código que roda ao carregar só pode usar o que vem de arquivos anteriores. |
+| `ui/i18n/` | Traduções. O texto em português é a chave: na interface `L('texto', ...)` com `{0}`, `{1}`; no Rust `L!(pt, en)` e `LF!(pt, en, args)` (`src/i18n.rs`). As descrições das ferramentas em inglês ficam em `src/tools_en.rs`. |
 | `tests/` | `rotas/`: frases que conferem os recursos automáticos. `ordem/`: confere a regra de ordem dos arquivos de `ui/js`. Os dois rodam no CI. |
 | `installer/` | Instalador (Inno Setup) |
 | `.github/workflows/ik-llama.yml` | Compila o ik_llama.cpp para Windows e publica como pré-release `ik-*` |

@@ -88,7 +88,7 @@ impl Browser {
         }
         let alive = http.get(format!("http://127.0.0.1:{PORT}/json/version")).timeout(Duration::from_secs(2)).send().await.is_ok();
         if !alive {
-            let exe = find_exe().ok_or("Não encontrei o Edge nem o Chrome neste computador.")?;
+            let exe = find_exe().ok_or(L!("Não encontrei o Edge nem o Chrome neste computador.", "Could not find Edge or Chrome on this computer."))?;
             let _ = std::fs::create_dir_all(&self.profile);
             let mut c = std::process::Command::new(&exe);
             c.arg(format!("--remote-debugging-port={PORT}"))
@@ -104,7 +104,7 @@ impl Browser {
                 use std::os::windows::process::CommandExt;
                 c.creation_flags(0x0000_0020); // prioridade normal
             }
-            c.spawn().map_err(|e| format!("Não consegui abrir o navegador: {e}"))?;
+            c.spawn().map_err(|e| LF!("Não consegui abrir o navegador: {e}", "Could not open the browser: {e}"))?;
             let mut ok = false;
             for _ in 0..60 {
                 tokio::time::sleep(Duration::from_millis(250)).await;
@@ -114,11 +114,11 @@ impl Browser {
                 }
             }
             if !ok {
-                return Err("O navegador abriu, mas não respondeu ao controle remoto. Feche outras janelas do Edge abertas com o perfil do studio e tente de novo.".into());
+                return Err(L!("O navegador abriu, mas não respondeu ao controle remoto. Feche outras janelas do Edge abertas com o perfil do studio e tente de novo.", "The browser opened but did not answer remote control. Close other Edge windows open with the studio profile and try again.").into());
             }
         }
         let url = Self::page_ws_url(http).await?;
-        let (ws, _) = tokio_tungstenite::connect_async(url.as_str()).await.map_err(|e| format!("Falha ao conectar ao navegador: {e}"))?;
+        let (ws, _) = tokio_tungstenite::connect_async(url.as_str()).await.map_err(|e| LF!("Falha ao conectar ao navegador: {e}", "Failed to connect to the browser: {e}"))?;
         *s = Some(Session { ws, next: 1 });
         Ok(())
     }
@@ -136,7 +136,7 @@ impl Browser {
                 if attempt == 0 {
                     continue;
                 }
-                return Err("Conexão com o navegador perdida.".into());
+                return Err(L!("Conexão com o navegador perdida.", "Connection to the browser lost.").into());
             }
             let r = tokio::time::timeout(Duration::from_secs(40), async {
                 while let Some(m) = s.ws.next().await {
@@ -155,7 +155,7 @@ impl Browser {
             match r {
                 Ok(Some(v)) => {
                     if let Some(e) = v.get("error") {
-                        return Err(e["message"].as_str().unwrap_or("erro do navegador").to_string());
+                        return Err(e["message"].as_str().unwrap_or(L!("erro do navegador", "browser error")).to_string());
                     }
                     return Ok(v["result"].clone());
                 }
@@ -167,16 +167,16 @@ impl Browser {
                     }
                     return Err("A aba do navegador foi fechada.".into());
                 }
-                Err(_) => return Err(format!("O navegador não respondeu a {method}.")),
+                Err(_) => return Err(LF!("O navegador não respondeu a {method}.", "The browser did not answer {method}.")),
             }
         }
-        Err("Conexão com o navegador perdida.".into())
+        Err(L!("Conexão com o navegador perdida.", "Connection to the browser lost.").into())
     }
 
     async fn eval(&self, http: &reqwest::Client, expr: &str) -> Result<Value, String> {
         let r = self.cmd(http, "Runtime.evaluate", json!({"expression": expr, "awaitPromise": true, "returnByValue": true})).await?;
         if let Some(ex) = r.get("exceptionDetails") {
-            let msg = ex.pointer("/exception/description").and_then(Value::as_str).or_else(|| ex["text"].as_str()).unwrap_or("erro no script");
+            let msg = ex.pointer("/exception/description").and_then(Value::as_str).or_else(|| ex["text"].as_str()).unwrap_or(L!("erro no script", "script error"));
             return Err(msg.to_string());
         }
         Ok(r.pointer("/result/value").cloned().unwrap_or(Value::Null))
@@ -200,11 +200,11 @@ impl Browser {
         let text = d["text"].as_str().unwrap_or("");
         let mut t: String = text.chars().take(max_text).collect();
         if text.chars().count() > max_text {
-            t.push_str(&format!("\n[... texto cortado; a página tem {} caracteres]", text.chars().count()));
+            t.push_str(&LF!("\n[... texto cortado; a página tem {} caracteres]", "\n[... text cut; the page has {} characters]", text.chars().count()));
         }
         let items: Vec<&str> = d["items"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
-        Ok(format!(
-            "Título: {}\nURL: {}\n\nTexto da página:\n{}\n\nElementos interativos (use o número em browser_click / browser_type):\n{}",
+        Ok(LF!(
+            "Título: {}\nURL: {}\n\nTexto da página:\n{}\n\nElementos interativos (use o número em browser_click / browser_type):\n{}", "Title: {}\nURL: {}\n\nPage text:\n{}\n\nInteractive elements (use the number in browser_click / browser_type):\n{}",
             d["title"].as_str().unwrap_or(""),
             d["url"].as_str().unwrap_or(""),
             t,
@@ -228,7 +228,7 @@ impl Browser {
                 let _ = self.cmd(http, "Page.bringToFront", json!({})).await;
                 let r = self.cmd(http, "Page.navigate", json!({"url": url})).await?;
                 if let Some(e) = r.get("errorText").and_then(Value::as_str) {
-                    return Err(format!("Não consegui abrir {url}: {e}"));
+                    return Err(LF!("Não consegui abrir {url}: {e}", "Could not open {url}: {e}"));
                 }
                 self.wait_load(http).await;
                 Ok((self.snapshot(http, 8000).await?, vec![]))
@@ -237,17 +237,17 @@ impl Browser {
             "browser_click" => {
                 let r = self.eval(http, &format!("(() => {{ const e = document.querySelector('[data-sid=\"{id}\"]'); if (!e) return 'nao'; e.scrollIntoView({{block:'center'}}); e.click(); return 'ok'; }})()")).await?;
                 if r != "ok" {
-                    return Err(format!("Elemento [{id}] não encontrado. Chame browser_read para atualizar a lista."));
+                    return Err(LF!("Elemento [{id}] não encontrado. Chame browser_read para atualizar a lista.", "Element [{id}] not found. Call browser_read to refresh the list."));
                 }
                 self.wait_load(http).await;
-                Ok((format!("Cliquei em [{id}].\n\n{}", self.snapshot(http, 6000).await?), vec![]))
+                Ok((LF!("Cliquei em [{id}].\n\n{}", "Clicked [{id}].\n\n{}", self.snapshot(http, 6000).await?), vec![]))
             }
             "browser_type" => {
                 let r = self
                     .eval(http, &format!("(() => {{ const e = document.querySelector('[data-sid=\"{id}\"]'); if (!e) return 'nao'; e.scrollIntoView({{block:'center'}}); e.focus(); if (e.select) e.select(); else if (e.isContentEditable) document.execCommand('selectAll'); return 'ok'; }})()"))
                     .await?;
                 if r != "ok" {
-                    return Err(format!("Elemento [{id}] não encontrado. Chame browser_read para atualizar a lista."));
+                    return Err(LF!("Elemento [{id}] não encontrado. Chame browser_read para atualizar a lista.", "Element [{id}] not found. Call browser_read to refresh the list."));
                 }
                 self.cmd(http, "Input.insertText", json!({"text": s("text")})).await?;
                 if a.get("submit").and_then(Value::as_bool).unwrap_or(false) {
@@ -255,9 +255,9 @@ impl Browser {
                         self.cmd(http, "Input.dispatchKeyEvent", json!({"type": t, "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13, "text": if t == "char" { "\r" } else { "" }})).await?;
                     }
                     self.wait_load(http).await;
-                    return Ok((format!("Digitei em [{id}] e enviei.\n\n{}", self.snapshot(http, 6000).await?), vec![]));
+                    return Ok((LF!("Digitei em [{id}] e enviei.\n\n{}", "Typed into [{id}] and submitted.\n\n{}", self.snapshot(http, 6000).await?), vec![]));
                 }
-                Ok((format!("Digitei em [{id}]."), vec![]))
+                Ok((LF!("Digitei em [{id}].", "Typed into [{id}]."), vec![]))
             }
             "browser_press" => {
                 let key = s("key");
@@ -291,7 +291,7 @@ impl Browser {
                 use base64::Engine;
                 let bytes = base64::engine::general_purpose::STANDARD.decode(b64).map_err(|e| e.to_string())?;
                 let path = save_capture(ws_dir, "navegador", &bytes)?;
-                Ok((format!("Captura salva em {}", path.display()), vec![format!("data:image/jpeg;base64,{b64}")]))
+                Ok((LF!("Captura salva em {}", "Screenshot saved to {}", path.display()), vec![format!("data:image/jpeg;base64,{b64}")]))
             }
             "browser_eval" => {
                 let v = self.eval(http, &s("code")).await?;
