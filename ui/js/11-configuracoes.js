@@ -286,6 +286,8 @@ function apiSection(put, field, saved) {
       ...apis.map(card),
       field(apis.length ? L('Outra API') : L('Provedor'), add, apis.length ? L('Dá para ter várias e mandar cada função para uma, espalhando os limites dos planos grátis.') : null),
       h('div.field', null, h('label', null, L('Quem faz cada função')), ...roleRows,
+        apiFor('explorer') ? h('label.tcard', null, h('span.tc-main', null, h('span.tc-title', null, L('Delegar mais aos exploradores')), h('span.tc-desc', null, L('Com os exploradores numa API, o modelo é orientado a mandar a investigação para eles (vários em paralelo) em vez de ler tudo sozinho. Economiza o contexto e o tempo do modelo local.'))),
+          h('span.switch', null, h('input', { type: 'checkbox', checked: S.settings.exploreMore !== false, onchange: (e) => put({ exploreMore: e.target.checked }) }), h('span'))) : null,
         h('small', null, L('Planos grátis costumam poder usar o que você manda para treinar modelos (o Gemini grátis avisa isso). Deixe no modelo local o que tiver dado sensível.'))));
   };
   draw();

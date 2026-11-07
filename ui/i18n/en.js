@@ -1480,5 +1480,8 @@ const I18N_EN = {
 "; a API falhou ({0}) e usou o modelo local": "; the API failed ({0}) and the local model was used",
 "Esperando o primeiro sinal... {0} s": "Waiting for the first signal... {0} s",
 "Respondeu: \"{0}\" · primeiro sinal em {1} s · total {2} s": "Answered: \"{0}\" · first signal in {1} s · total {2} s",
-"Pensando ({0} caracteres de raciocínio) · primeiro sinal em {1} s · {2} s": "Thinking ({0} reasoning characters) · first signal in {1} s · {2} s"
+"Pensando ({0} caracteres de raciocínio) · primeiro sinal em {1} s · {2} s": "Thinking ({0} reasoning characters) · first signal in {1} s · {2} s",
+"Os subagentes explore rodam numa API externa: não usam o modelo local nem o contexto desta conversa. Para investigar (achar arquivos, entender uma pasta, ler mais de 2 ou 3 arquivos, pesquisar na web), prefira delegar a explore em vez de ler você mesmo. Quando houver partes independentes, chame explore várias vezes na MESMA resposta: eles rodam em paralelo. Leia você mesmo só o trecho exato que vai editar.": "The explore subagents run on an external API: they do not use the local model or this chat's context. To investigate (find files, understand a folder, read more than 2 or 3 files, search the web), prefer delegating to explore instead of reading yourself. When there are independent parts, call explore several times in the SAME answer: they run in parallel. Read yourself only the exact part you are going to edit.",
+"Delegar mais aos exploradores": "Delegate more to the explorers",
+"Com os exploradores numa API, o modelo é orientado a mandar a investigação para eles (vários em paralelo) em vez de ler tudo sozinho. Economiza o contexto e o tempo do modelo local.": "With the explorers on an API, the model is guided to send the investigation to them (several in parallel) instead of reading everything itself. Saves the local model's context and time."
 };

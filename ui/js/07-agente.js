@@ -296,6 +296,8 @@ function guardBudget(conv, msg, g, step) {
   if (last) noteOn(last, L('[Nota do studio: restam 2 passos com ferramentas nesta resposta. Termine o que der e feche dizendo em poucas linhas o que foi feito e o que falta; o usuário pode mandar continuar.]'));
 }
 
+const EXPLORE_MORE_NOTE = L('Os subagentes explore rodam numa API externa: não usam o modelo local nem o contexto desta conversa. Para investigar (achar arquivos, entender uma pasta, ler mais de 2 ou 3 arquivos, pesquisar na web), prefira delegar a explore em vez de ler você mesmo. Quando houver partes independentes, chame explore várias vezes na MESMA resposta: eles rodam em paralelo. Leia você mesmo só o trecho exato que vai editar.');
+
 async function runAgent(conv) {
   const ac = new AbortController();
   S.runs.set(conv.id, ac);
@@ -354,6 +356,8 @@ async function runAgent(conv) {
       S.settings.systemPrompt.trim(),
       // o Caveman já cobre (e aperta mais) a instrução de respostas enxutas
       S.settings.concise !== false && !['on', 'ultra'].includes(packLevels().caveman) ? CONCISE_NOTE : '',
+      // exploradores numa API: não gastam o modelo local nem o contexto desta conversa, então vale delegar mais
+      groups.includes('explore') && apiFor('explorer') && S.settings.exploreMore !== false ? EXPLORE_MORE_NOTE : '',
       persona?.prompt?.trim() ? L('# Personalidade: {0}\n{1}', persona.name, persona.prompt.trim()) : '',
       proj?.instructions?.trim() ? L('# Instruções do projeto "{0}"\n{1}', proj.name, proj.instructions.trim()) : '',
       ctx.text,
