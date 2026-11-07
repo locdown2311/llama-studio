@@ -488,7 +488,7 @@ function scheduleRender() {
   if (S.runs.size) renderConvListSoon();
   if (rafPending) return;
   rafPending = true;
-  requestAnimationFrame(() => { rafPending = false; renderMessages(true); updateBusy(); syncMade(); });
+  requestAnimationFrame(() => { rafPending = false; renderMessages(true); updateBusy(); syncMade(); sendRing(); });
 }
 
 const renderConvListSoon = debounce(() => renderConvList(), 300);
@@ -554,6 +554,53 @@ function fmtStamp(t) {
   const d = new Date(t);
   const p = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** Quanto falta para a primeira palavra: o llama-server conta o prompt lido (return_progress). */
+function promptProgress(msg) {
+  const p = msg?._pp;
+  if (!p || !(p.total > p.cache)) return null;
+  const done = Math.max(0, p.processed - p.cache); const all = p.total - p.cache;
+  const frac = Math.min(1, done / all);
+  const rate = p.time_ms > 300 && done > 0 ? done / p.time_ms : 0; // tokens por ms
+  const left = rate && frac < 1 ? Math.ceil((all - done) / rate / 1000) : 0;
+  return { frac, done, all, left, cached: p.cache };
+}
+function fmtLeft(s) { return s >= 90 ? `~${Math.round(s / 60)} min` : `~${s}s`; }
+function waitProgress(msg) {
+  const pp = promptProgress(msg);
+  const secs = msg?._t0 ? Math.floor((Date.now() - msg._t0) / 1000) : 0;
+  waitTicker();
+  if (!pp) {
+    return h('div.wprog.indet', null, h('div.wprog-bar', null, h('i')),
+      h('div.wprog-txt', null, msg?._pp ? 'Contexto já estava pronto; começando a responder' : 'Preparando a resposta', secs >= 2 ? ` · ${secs}s` : ''));
+  }
+  const pct = Math.round(pp.frac * 100);
+  const txt = pp.frac >= 1 ? 'Contexto lido; começando a responder'
+    : `Lendo o contexto: ${pp.done.toLocaleString('pt-BR')} de ${pp.all.toLocaleString('pt-BR')} tokens · ${pct}%${pp.left ? ' · faltam ' + fmtLeft(pp.left) : ''}`;
+  return h('div.wprog' + (pp.frac >= 1 ? '.full' : ''), { title: pp.cached ? `${pp.cached.toLocaleString('pt-BR')} tokens já estavam no cache e não precisam ser lidos de novo.` : '' },
+    h('div.wprog-bar', null, h('i', { style: { width: pct + '%' } })), h('div.wprog-txt', null, txt));
+}
+/* sem atualização do servidor por um tempo (modelo pensando no prompt), o relógio continua andando */
+let waitTimer = 0;
+function waitTicker() {
+  if (waitTimer) return;
+  waitTimer = setInterval(() => {
+    if (!S.runs.size) { clearInterval(waitTimer); waitTimer = 0; return; }
+    scheduleRender();
+  }, 1000);
+}
+
+/** Anel em volta do botão de parar: enche enquanto o llama-server lê o prompt. */
+function sendRing() {
+  const send = $('#send'); if (!send) return;
+  const c = cur(); const live = c && running(c);
+  const last = live ? [...c.messages].reverse().find((m) => m.role === 'assistant') : null;
+  const waiting = live && last && !last.content && !last.reasoning && !last.tool_calls?.length;
+  const pp = waiting ? promptProgress(last) : null;
+  send.classList.toggle('ring', !!waiting);
+  send.classList.toggle('ring-indet', !!waiting && !pp);
+  send.style.setProperty('--p', pp ? Math.round(pp.frac * 100) + '%' : '0%');
 }
 
 function renderBlock(b, conv, isLast) {
@@ -678,7 +725,7 @@ function renderAI(b, conv, isLast) {
     : live && conv._compacting ? 'Compactando a conversa para caber no contexto...' : '';
   if (nowLabel) steps.push(tlItem('wait.now', h('span', { html: svg('loader', 'spin') }), h('div.tl-wait', null, nowLabel)));
   const waiting = live && !nowLabel && !finalMd && (!steps.length || (last && !last.content && !last.reasoning && !last.tool_calls?.length && toolMsgs.length));
-  if (waiting) steps.push(tlItem('wait.now', h('span.tl-dot'), h('div.typing', null, h('i'), h('i'), h('i'))));
+  if (waiting) steps.push(tlItem('wait.now', h('span.tl-dot'), waitProgress(last)));
   if (steps.length) {
     const tl = h('div.tl' + (live ? '.live' : ''));
     const key = 'tl-all-' + b.start;

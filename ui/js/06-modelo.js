@@ -174,9 +174,13 @@ function fillCtxPop() {
 }
 
 
+let noProgress = false;
 async function streamRaw(messages, tools, msg, signal, onDelta, extra = {}) {
   const { _fixed, ...rest } = extra;
+  // return_progress: o llama-server conta quanto do prompt já leu (barra de progresso antes da 1ª palavra)
   const body = { messages, stream: true, cache_prompt: true, ...rest };
+  if (!noProgress) body.return_progress = true;
+  msg._t0 = Date.now(); msg._pp = null;
   if (tools.length) body.tools = tools;
   const st = S.settings;
   if (!_fixed) {
@@ -185,15 +189,24 @@ async function streamRaw(messages, tools, msg, signal, onDelta, extra = {}) {
     if (st.maxTokens !== '' && st.maxTokens != null) body.max_tokens = Number(st.maxTokens);
   }
 
-  const res = await fetch('/v1/chat/completions', {
+  const post = () => fetch('/v1/chat/completions', {
     method: 'POST', signal,
     headers: { 'Content-Type': 'application/json', 'X-Studio': '1' },
     body: JSON.stringify(body),
   });
+  let res = await post();
   if (!res.ok) {
-    const t = await res.text();
-    let m = t; try { const j = JSON.parse(t); m = j.error?.message || j.error || t; } catch { /* texto */ }
-    throw new Error(`llama-server respondeu ${res.status}: ${String(m).slice(0, 600)}`);
+    let t = await res.text();
+    // servidor que não é o llama.cpp e recusa o campo: tenta de novo sem ele e não manda mais
+    if (body.return_progress && res.status >= 400 && res.status < 500 && /return_progress|unrecognized|unknown (field|param)|extra (inputs|fields)/i.test(t)) {
+      noProgress = true; delete body.return_progress;
+      res = await post();
+      if (res.ok) t = null; else t = await res.text();
+    }
+    if (t != null) {
+      let m = t; try { const j = JSON.parse(t); m = j.error?.message || j.error || t; } catch { /* texto */ }
+      throw new Error(`llama-server respondeu ${res.status}: ${String(m).slice(0, 600)}`);
+    }
   }
   const reader = res.body.getReader();
   const dec = new TextDecoder();
@@ -210,6 +223,7 @@ async function streamRaw(messages, tools, msg, signal, onDelta, extra = {}) {
       if (!data || data === '[DONE]') continue;
       let j; try { j = JSON.parse(data); } catch { continue; }
       if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
+      if (j.prompt_progress) { msg._pp = j.prompt_progress; onDelta?.(); }
       const d = j.choices?.[0]?.delta;
       if (d) {
         if (d.reasoning_content) msg.reasoning += d.reasoning_content;

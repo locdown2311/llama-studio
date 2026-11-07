@@ -200,6 +200,7 @@ function updateSendBtn() {
   const queueMode = busy && !editorEmpty();
   send.innerHTML = svg(queueMode ? 'list' : busy ? 'stop' : 'send');
   send.classList.toggle('stop', busy && !queueMode);
+  sendRing();
   send.classList.toggle('queue', queueMode);
   send.title = queueMode ? 'Pôr na fila (Enter) · Esc para parar a resposta' : busy ? 'Parar (Esc)' : 'Enviar (Enter)';
   send.setAttribute('aria-label', send.title);
