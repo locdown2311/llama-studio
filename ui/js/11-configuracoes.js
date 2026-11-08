@@ -3,6 +3,7 @@
 
 /* ============================================================ configurações */
 function renderSettings() {
+  const ola = 0;
   const st = S.settings;
   // tudo salva sozinho ao mudar; um aviso discreto confirma
   let saveT = 0;
