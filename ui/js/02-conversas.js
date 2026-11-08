@@ -10,6 +10,9 @@ const DEFAULT_PERSONAS = [
 if (!Array.isArray(S.personas)) S.personas = DEFAULT_PERSONAS.map((p) => ({ ...p }));
 const PERSONA_COLORS = ['#5b5bd6', '#c2410c', '#2f9e58', '#b4366b', '#0e7490', '#7c4dcc', '#a16207', '#475569'];
 
+// estado compartilhado para uso do NIM (usado/total)
+let nimUsage = { used: 0, total: 40 };
+
 function saveProjects() { store.set('projects', S.projects); }
 function savePersonas() { store.set('personas', S.personas); }
 function projectOf(c) { return c?.projectId ? S.projects.find((p) => p.id === c.projectId) || null : null; }
@@ -558,32 +561,80 @@ function updateNimStatusChat() {
       const level = getNimLevel(used, total);
       const pct = Math.min(100, Math.max(0, Math.round((used / total) * 100)));
 
-      // atualizar indicador no cabeçalho
-      const ind = $('#chat-nim-indicator');
-      if (ind) {
-        ind.className = 'chat-nim-indicator ' + level;
-        $('#nim-status-text').textContent = L('NIM: {0} / {1}', used.toLocaleString(), total.toLocaleString());
-        const fill = ind.querySelector('.fill');
-        if (fill) fill.style.width = pct + '%';
-      }
+      // atualizar estado global de NIM
+      nimUsage = { used, total };
 
-      // atualizar indicador flutuante
-      const floatInd = $('#chat-nim-floating');
-      if (floatInd) {
-        floatInd.textContent = used.toLocaleString() + '/' + total.toLocaleString();
-        floatInd.className = 'chat-nim-floating ' + level;
+      // atualizar indicador no ai-status (unificado)
+      const status = $('#ai-status');
+      if (status) {
+        status.innerHTML = '';
+        const durSpan = document.createElement('span');
+        durSpan.textContent = L('Duração');
+        status.appendChild(durSpan);
+        const durB = document.createElement('b');
+        durB.textContent = fmtMs(/* elapsed time would go here */ 0);
+        status.appendChild(durB);
+        const tpsSpan = document.createElement('span');
+        tpsSpan.className = 'muted';
+        tpsSpan.textContent = `${last?.tps?.toFixed(1) || 0} tok/s`;
+        status.appendChild(tpsSpan);
+        // NIM usage info
+        const nimSpan = document.createElement('span');
+        nimSpan.style.marginLeft = '10px';
+        nimSpan.style.fontSize = '0.85em';
+        nimSpan.innerHTML = L('NIM: {0} / {1}', used.toLocaleString(), total.toLocaleString());
+        const fill = document.createElement('div');
+        fill.style.width = '0%';
+        fill.style.height = '8px';
+        fill.style.background = '#555';
+        fill.style.borderRadius = '3px';
+        fill.style.marginLeft = '4px';
+        fill.style.overflow = 'hidden';
+        const bar = document.createElement('div');
+        bar.style.width = pct + '%';
+        bar.style.height = '100%';
+        bar.style.background = pct >= 80 ? '#e53e3e' : pct >= 50 ? '#e67e22' : '#27ae60';
+        bar.style.transition = 'width 0.3s';
+        fill.appendChild(bar);
+        nimSpan.appendChild(fill);
+        status.appendChild(nimSpan);
       }
     })
     .catch((e) => {
       console.warn('NIM status error:', e.message);
       // em caso de erro, mostra estado: used=0, total=40 → nível 'low' (0% uso)
-      let used = 0, total = 40;
-      const level = getNimLevel(used, total);
-      const pct = 0;
-      const ind = $('#chat-nim-indicator');
-      if (ind) { ind.className = 'chat-nim-indicator ' + level; ind.querySelector('.txt').textContent = L('NIM off'); }
-      const floatInd = $('#chat-nim-floating');
-      if (floatInd) { floatInd.textContent = '0/40'; floatInd.className = 'chat-nim-floating ' + level; }
+      const status = $('#ai-status');
+      if (status) {
+        status.innerHTML = '';
+        const durSpan = document.createElement('span');
+        durSpan.textContent = L('Duração');
+        status.appendChild(durSpan);
+        const durB = document.createElement('b');
+        durB.textContent = '0 ms';
+        status.appendChild(durB);
+        const tpsSpan = document.createElement('span');
+        tpsSpan.className = 'muted';
+        tpsSpan.textContent = '0 tok/s';
+        status.appendChild(tpsSpan);
+        const nimSpan = document.createElement('span');
+        nimSpan.style.marginLeft = '10px';
+        nimSpan.style.fontSize = '0.85em';
+        nimSpan.innerHTML = L('NIM: 0 / 40');
+        const fill = document.createElement('div');
+        fill.style.width = '0%';
+        fill.style.height = '8px';
+        fill.style.background = '#555';
+        fill.style.borderRadius = '3px';
+        fill.style.marginLeft = '4px';
+        fill.style.overflow = 'hidden';
+        const bar = document.createElement('div');
+        bar.style.width = '0%';
+        bar.style.height = '100%';
+        bar.style.background = '#27ae60';
+        fill.appendChild(bar);
+        nimSpan.appendChild(fill);
+        status.appendChild(nimSpan);
+      }
     });
 }
 /* ------------------------------------------------------------ chat */
@@ -786,7 +837,7 @@ function renderAI(b, conv, isLast) {
 
   const card = h('div.ai-card');
   if (!live && t0 && t1 && t1 - t0 > 1500) {
-    card.append(h('div.ai-status', null, h('span', null, L('Duração')), h('b', null, fmtMs(t1 - t0)), last?.tps ? h('span.muted', null, `${last.tps.toFixed(1)} tok/s`) : null));
+    card.append(h('div.ai-status', null, h('span', null, L('Duração')), h('b', null, fmtMs(t1 - t0)), last?.tps ? h('span.muted', null, `${last.tps.toFixed(1)} tok/s`) : null), nimUsage ? h('span', { style: { marginLeft: '10px', fontSize: '0.85em' } }, L('NIM: {0} / {1}', nimUsage.used.toLocaleString(), nimUsage.total.toLocaleString()), h('div', { style: { width: '0px', height: '8px', background: '#555', borderRadius: '3px', marginLeft: '4px', overflow: 'hidden' } }, h('div', { style: { width: Math.min(100, Math.max(0, Math.round((nimUsage.used / nimUsage.total) * 100))) + '%', height: '100%', background: (nimUsage.used / nimUsage.total >= 0.8 ? '#e53e3e' : (nimUsage.used / nimUsage.total >= 0.5 ? '#e67e22' : '#27ae60')), transition: 'width 0.3s' } }))) : null);
   }
   // linha do tempo: raciocínio, falas intermediárias e ferramentas num trilho só;
   // o texto final (depois da última ferramenta) fica fora, como a resposta.
