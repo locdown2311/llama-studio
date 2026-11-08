@@ -8,7 +8,9 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::{json, Value};
-use std::time::Duration;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use crate::app::{ApiProvider, App};
 
@@ -17,6 +19,56 @@ const LLAMA_ONLY: &[&str] = &["id_slot", "cache_prompt", "return_progress", "cha
 
 fn err(status: StatusCode, msg: String) -> Response {
     (status, Json(json!({ "error": { "message": msg } }))).into_response()
+}
+
+/// Plano do NVIDIA NIM: 40 pedidos por minuto. Ao estourar, a API para por 1 minuto.
+const NIM_MAX_REQS: usize = 40;
+const NIM_WINDOW: Duration = Duration::from_secs(60);
+
+/// Pedidos recentes por provedor (só o NIM usa isso).
+fn nim_hits() -> &'static Mutex<HashMap<String, Vec<Instant>>> {
+    static H: OnceLock<Mutex<HashMap<String, Vec<Instant>>>> = OnceLock::new();
+    H.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Só o NVIDIA NIM (id "nvidia") tem limite de plano.
+fn is_nim(c: &ApiProvider) -> bool {
+    c.id.trim().eq_ignore_ascii_case("nvidia")
+}
+
+/// Conta o pedido. Err = segundos de espera quando o limite de 40/min estourou.
+fn nim_gate(c: &ApiProvider) -> Result<(), u64> {
+    let key = c.id.trim().to_string();
+    let mut m = nim_hits().lock().unwrap_or_else(|e| e.into_inner());
+    let hits = m.entry(key).or_default();
+    nim_gate_at(hits, Instant::now())
+}
+
+/// Janela móvel de 60s: conta o pedido e devolve a espera quando passa de 40.
+fn nim_gate_at(hits: &mut Vec<Instant>, now: Instant) -> Result<(), u64> {
+    hits.retain(|t| now.saturating_duration_since(*t) < NIM_WINDOW);
+    if hits.len() >= NIM_MAX_REQS {
+        let wait = hits.first().map(|t| NIM_WINDOW.saturating_sub(now.saturating_duration_since(*t))).unwrap_or(NIM_WINDOW);
+        return Err(wait.as_secs().max(1));
+    }
+    hits.push(now);
+    Ok(())
+}
+
+/// Falha no envio: limite de plano (NIM) ou erro de rede.
+enum SendErr {
+    /// Segundos para esperar antes de tentar de novo.
+    Limit(u64),
+    Net(reqwest::Error),
+}
+
+impl SendErr {
+    fn msg(self) -> String {
+        match self {
+            SendErr::Limit(s) => LF!("Limite do NVIDIA NIM: 40 pedidos por minuto. Tente de novo em {}s.", "NVIDIA NIM limit: 40 requests per minute. Retry in {}s.", s),
+            SendErr::Net(e) => chain(e),
+        }
+    }
 }
 
 pub fn ready(p: &ApiProvider) -> bool {
@@ -66,10 +118,15 @@ fn client() -> &'static reqwest::Client {
             .expect("cliente das APIs externas")
     })
 }
-async fn send_with_retries(c: &ApiProvider, body_str: &str, max_retries: u32) -> Result<reqwest::Response, reqwest::Error> {
+async fn send_with_retries(c: &ApiProvider, body_str: &str, max_retries: u32) -> Result<reqwest::Response, SendErr> {
     let mut attempt = 0u32;
 
     loop {
+        if is_nim(c) {
+            if let Err(wait) = nim_gate(c) {
+                return Err(SendErr::Limit(wait));
+            }
+        }
         let mut rb = client()
             .post(endpoint(&c.base, "chat/completions"))
             .timeout(Duration::from_secs(300))
@@ -98,7 +155,7 @@ async fn send_with_retries(c: &ApiProvider, body_str: &str, max_retries: u32) ->
                 tokio::time::sleep(Duration::from_millis(delay)).await;
             }
 
-            other => return other,
+            other => return other.map_err(SendErr::Net),
         }
     }
 }
@@ -126,7 +183,7 @@ pub async fn call_provider_direct(app: &App, provider_id: &str, prompt: &str) ->
                 Err(format!("Resposta inesperada: {}", json_resp))
             }
         }
-        Err(e) => Err(chain(e)),
+        Err(e) => Err(e.msg()),
     }
 }
 /// O erro com as causas (o "error sending request" sozinho não diz se foi DNS, TLS, conexão recusada...).
@@ -194,6 +251,7 @@ pub async fn chat(app: &App, id: &str, body: Bytes) -> Response {
     let has_fallback = !c.fallback_model.trim().is_empty() && c.fallback_model.trim() != c.model.trim();
     if has_fallback {
         let needs_fallback = match &sent {
+            Err(SendErr::Limit(_)) => false,
             Err(_) => true,
             Ok(r) => !r.status().is_success(),
         };
@@ -230,7 +288,15 @@ pub async fn chat(app: &App, id: &str, body: Bytes) -> Response {
             out.body(Body::from_stream(resp.bytes_stream())).unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response())
         }
 
-        Err(e) => err(StatusCode::BAD_GATEWAY, LF!("API externa indisponível ({}).", "External API unavailable ({}).", chain(e))),
+        Err(SendErr::Limit(wait)) => {
+            let mut h = axum::http::HeaderMap::new();
+            if let Ok(v) = wait.to_string().parse::<axum::http::HeaderValue>() {
+                h.insert(axum::http::header::RETRY_AFTER, v);
+            }
+            (StatusCode::TOO_MANY_REQUESTS, h, Json(json!({ "error": { "message": SendErr::Limit(wait).msg() } }))).into_response()
+        }
+
+        Err(e) => err(StatusCode::BAD_GATEWAY, LF!("API externa indisponível ({}).", "External API unavailable ({}).", e.msg())),
     }
 }
 
@@ -268,4 +334,26 @@ pub async fn models(app: &App, id: &str) -> Result<Vec<String>, String> {
     ids.sort();
     ids.dedup();
     Ok(ids)
+}
+
+#[cfg(test)]
+mod t {
+    use super::*;
+    #[test]
+    fn nim_limita_40_por_minuto() {
+        let mut hits: Vec<Instant> = Vec::new();
+        let t0 = Instant::now();
+        for i in 0..40 {
+            assert!(nim_gate_at(&mut hits, t0 + Duration::from_millis(i)).is_ok(), "pedido {i} passou");
+        }
+        let wait = nim_gate_at(&mut hits, t0 + Duration::from_millis(40)).unwrap_err();
+        assert!((1..=60).contains(&wait), "espera fora do range: {wait}");
+        // Depois de 60s o pedido mais antigo sai da janela e o limite volta.
+        assert!(nim_gate_at(&mut hits, t0 + Duration::from_secs(61)).is_ok());
+    }
+    #[test]
+    fn so_nvidia_e_limitado() {
+        assert!(is_nim(&ApiProvider { id: "nvidia".into(), ..Default::default() }));
+        assert!(!is_nim(&ApiProvider { id: "openai".into(), base: "https://integrate.api.nvidia.com/v1".into(), ..Default::default() }));
+    }
 }

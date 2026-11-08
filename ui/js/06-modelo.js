@@ -288,7 +288,23 @@ async function streamRaw(messages, tools, msg, signal, onDelta, extra = {}) {
       if (res.ok) t = null; else t = await res.text();
     }
     if (t != null) {
-      let m = t; try { const j = JSON.parse(t); m = j.error?.message || j.error || t; } catch { /* texto */ }
+      let m = t; let waitMs = 0;
+      try { const j = JSON.parse(t); m = j.error?.message || j.error || t;
+        // Detecta erro de rate limit do NVIDIA NIM e extrai tempo de espera em segundos
+        const rateLimitPattern = /Limite do NVIDIA NIM:.+Tente de novo em (\d+)s/;
+        const enRateLimitPattern = /NVIDIA NIM limit:.+Retry in (\d+)s/;
+        const matchPt = m.match(rateLimitPattern);
+        const matchEn = m.match(enRateLimitPattern);
+        if (matchPt) waitMs = parseInt(matchPt[1]) * 1000;
+        else if (matchEn) waitMs = parseInt(matchEn[1]) * 1000;
+        // Também tenta extrair do header Retry-After
+        if (waitMs === 0) {
+          const retryAfter = res.headers.get('Retry-After');
+          if (retryAfter) waitMs = parseInt(retryAfter) * 1000;
+        }
+        // Armazena o tempo de rate limit na mensagem para a UI exibir
+        msg._rateLimitWait = waitMs;
+      } catch { /* texto */ }
       throw new Error(_remote ? L('API externa respondeu {0}: {1}', res.status, String(m).slice(0, 600)) : L('llama-server respondeu {0}: {1}', res.status, String(m).slice(0, 600)));
     }
   }

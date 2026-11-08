@@ -735,6 +735,13 @@ function renderAI(b, conv, isLast) {
   const nowLabel = live && conv._waitingModel ? (conv._waitText || L('Esperando o modelo terminar de carregar. A resposta começa sozinha.'))
     : live && conv._compacting ? L('Compactando a conversa para caber no contexto...') : '';
   if (nowLabel) steps.push(tlItem('wait.now', h('span', { html: svg('loader', 'spin') }), h('div.tl-wait', null, nowLabel)));
+  // Indicador de rate limit do NVIDIA NIM
+  const rateLimitWait = live && last && last._rateLimitWait && !nowLabel;
+  if (rateLimitWait) {
+    const waitSec = Math.max(0, Math.ceil((last._rateLimitWait - Date.now() + (live ? 0 : 1000)) / 1000));
+    const waitText = waitSec > 0 ? L('Aguardando rate limit: {0}s', waitSec) : L('Rate limit pronto, pode enviar novamente.');
+    steps.push(tlItem('wait.now', h('span', { html: svg('loader', 'spin') }), h('div.tl-wait', null, waitText)));
+  }
   const waiting = live && !nowLabel && !finalMd && (!steps.length || (last && !last.content && !last.reasoning && !last.tool_calls?.length && toolMsgs.length));
   if (waiting) steps.push(tlItem('wait.now', h('span.tl-dot'), waitProgress(last)));
   if (steps.length) {
