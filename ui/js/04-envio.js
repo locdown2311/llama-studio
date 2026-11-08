@@ -505,7 +505,17 @@ async function streamCompletion(conv, system, tools, msg, signal) {
   // mais de uma chamada por resposta quando o pedido diz; sem isso vale o que ele acha do template
   const extra = requestExtras(conv);
   if (tools?.length) extra.parallel_tool_calls = true;
-  const r = await streamRaw(msgs, tools, msg, signal, scheduleRender, extra);
+  const mainApi = typeof mainApiForChat === 'function' ? mainApiForChat() : null;
+  let r;
+  if (mainApi) {
+    extra._remote = true;
+    extra._p = mainApi.id;
+    r = await streamRaw(msgs, tools, msg, signal, scheduleRender, extra);
+    apiUse({ calls: 1, tokens: msg.usage?.total_tokens || 0 }, mainApi.id);
+    msg.via = msg._fallbackModel || mainApi.model || '';
+  } else {
+    r = await streamRaw(msgs, tools, msg, signal, scheduleRender, extra);
+  }
   // medida real do servidor: prompt (com o que veio do cache) + resposta
   if (msg.ctxTokens) { conv.ctx = { tokens: msg.ctxTokens, n: conv.messages.length, cut: conv.compactCut || 0 }; drawCtxMeter(); }
   // quanto veio do cache no último pedido, e por que o resto foi relido

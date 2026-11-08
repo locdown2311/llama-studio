@@ -374,12 +374,16 @@ async function runAgent(conv) {
       conv._step = step;
       conv.messages.push(msg);
       scheduleRender();
-      if (step === 0) { await ensureModel(conv, ac.signal); await waitModel(conv, ac.signal); await assignSlot(conv); await preloadImgs(conv); }
+      if (step === 0) {
+        if (!mainApiForChat?.()) { await ensureModel(conv, ac.signal); await waitModel(conv, ac.signal); await assignSlot(conv); }
+        await preloadImgs(conv);
+      }
       if (ac.signal.aborted) throw new DOMException('abort', 'AbortError');
       await maybeCompact(conv, system, tools, ac.signal);
       // enquanto o modelo ainda escreve a chamada de ferramenta, abre a conexão com a API do auditor (e a dos
       // exploradores, se ele chamar explore): o primeiro pedido não espera o aperto de mão TLS
-      const warmAud = apiFor('auditor'), warmExp = apiFor('explorer');
+      const warmAud = apiFor('auditor'), warmExp = apiFor('explorer'), warmMain = mainApiForChat?.()?.id;
+      if (warmMain) apiWarm(warmMain);
       const warmT = warmAud || warmExp ? setInterval(() => {
         if (!msg.tool_calls?.length) return;
         apiWarm(warmAud);

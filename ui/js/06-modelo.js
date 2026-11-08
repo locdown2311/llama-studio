@@ -218,6 +218,14 @@ function apiWarm(pid) {
   api('/api/remote/warm?p=' + encodeURIComponent(pid), {}).catch(() => {});
 }
 function apiById(id) { return (S.info?.apis || []).find((a) => a.id === id); }
+/** API externa usada como modelo principal nas conversas (configurada na aba Testes). */
+function mainApiForChat() {
+  if (!S.settings?.advanced) return null;
+  const cfg = S.settings?.mainApi;
+  if (!cfg?.on || !cfg.provider) return null;
+  const a = apiById(cfg.provider);
+  return a && a.ready ? a : null;
+}
 /** Contagem do dia: pedidos, tokens e falhas (só neste navegador). */
 function apiUse(add, pid) {
   const today = new Date().toISOString().slice(0, 10);
