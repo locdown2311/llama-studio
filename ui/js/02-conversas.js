@@ -506,14 +506,23 @@ function renderChat() {
 
 let nimPollInterval = 0;
 
+function isNimModel() {
+  // Verifica se a API principal configurada é o NVIDIA NIM (provedor "nvidia")
+  const mainApi = mainApiForChat();
+  return mainApi && mainApi.id && mainApi.id.trim().toLowerCase() === 'nvidia';
+}
+
 function maybeStartNimPoll() {
   // só começa se já estivermos na view de chat
   if (!$('#view-chat').classList.contains('active')) return;
   // já está rodando?
   if (nimPollInterval) return;
-  // busca inicial + poll a cada 15s
+  // só inicia se estiver usando modelo NIM
+  if (!isNimModel()) { stopNimPoll(); return; }
+  // busca inicial IMEDIATA (sem esperar o intervalo)
   updateNimStatusChat();
-  nimPollInterval = setInterval(updateNimStatusChat, 15000);
+  // poll a cada 5 segundos (mais responsivo)
+  nimPollInterval = setInterval(updateNimStatusChat, 5000);
 }
 
 function stopNimPoll() {
@@ -530,6 +539,8 @@ function getNimLevel(used, total) {
 }
 
 function updateNimStatusChat() {
+  // verifica se ainda estamos usando modelo NIM
+  if (!isNimModel()) { stopNimPoll(); return; }
   // busca status da API
   api('/api/nim-status')
     .then((data) => {
