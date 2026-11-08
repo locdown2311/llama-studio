@@ -534,8 +534,9 @@ function updateNimStatusChat() {
   api('/api/nim-status')
     .then((data) => {
       if (!data) return;
+      // API retorna: {used, wait_secs, max=40, window_secs=60}
       const used = data.used || 0;
-      const total = data.total || 40; // default 40 se não informado
+      const total = data.max || 40; // usa 'max' da API (padrão 40)
       const level = getNimLevel(used, total);
       const pct = Math.min(100, Math.max(0, Math.round((used / total) * 100)));
 
