@@ -1,4 +1,4 @@
-﻿/* llama studio - projetos, personalidades, lista de conversas e mensagens .*/
+/* llama studio - projetos, personalidades, lista de conversas e mensagens .*/
 'use strict';
 
 /* ============================================================ projetos e personalidades */

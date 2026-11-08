@@ -139,15 +139,8 @@ pub fn list_json(app: &App) -> Value {
 
 /// Carrega o perfil: grava os parâmetros e (re)inicia o llama-server.
 pub async fn activate(app: &Arc<App>, id: &str) -> Result<Value, String> {
-    // 1. Corrigido: 'mut' adicionado aqui
-    let mut list = load(app); 
-    
-    for api in app.cfg().api_providers.iter().filter(|p| crate::remote::ready(p)) {
-        list.push(Profile {
-            id: format!("api_{}", api.id), name: format!("☁️ {} ({})", api.name, api.model),
-            model: format!("remote:{}", api.id), context: 8192, cpu_moe: 0, threads: 0, extra_args: String::new(),
-        });
-    }
+    // 1. Corrigido: 'mut' removido - lista lida apenas para consulta
+    let list = load(app); 
     
     let p = list.iter().find(|p| p.id == id).ok_or(L!("Modelo não encontrado.", "Model not found."))?.clone();
     let is_remote = p.model.starts_with("remote:");
