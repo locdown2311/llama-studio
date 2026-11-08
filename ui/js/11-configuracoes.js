@@ -178,6 +178,8 @@ function apiSection(put, field, saved) {
   const save = async (patch) => {
     try { await api('/api/config', patch); S.info = await api('/api/state'); saved(); draw(); } catch (e) { toast(e.message, 'err'); }
   };
+  // Dados das APIs - declarados antes de serem usados
+  const apis = S.info.apis || [];
   const card = (a) => {
     const pre = presetOf(a.base);
     const key = h('input.input.mono', { type: 'password', autocomplete: 'off', placeholder: a.hasKey ? L('Chave salva (digite para trocar)') : L('Cole a chave da API') });
@@ -187,13 +189,6 @@ function apiSection(put, field, saved) {
     const dl = h('datalist', { id: 'api-models-' + a.id });
     const model = h('input.input.mono', { value: a.model || '', placeholder: L('ex.: o id do modelo'), list: 'api-models-' + a.id });
     model.addEventListener('change', () => save({ apiProvider: { id: a.id, model: model.value.trim() } }));
-    const fallbackId = h('select.select', null, h('option', { value: '' }, L('Nenhum')), ...apis.map((x) => h('option', { value: x.id }, `${apiLabel(x)} · ${x.model}`)));
-    fallbackId.value = a.fallbackId || '';
-    fallbackId.addEventListener('change', () => save({ apiProvider: { id: a.id, fallbackId: fallbackId.value.trim() } }));
-    const retries = h('input.input.mono', { type: 'number', min: 0, max: 10, value: a.retries ?? 0, placeholder: '0' });
-    retries.addEventListener('change', () => save({ apiProvider: { id: a.id, retries: Number(retries.value) || 0 } }));
-    const retryDelayMs = h('input.input.mono', { type: 'number', min: 0, max: 60000, value: a.retryDelayMs ?? 0, placeholder: '0' });
-    retryDelayMs.addEventListener('change', () => save({ apiProvider: { id: a.id, retryDelayMs: Number(retryDelayMs.value) || 0 } }));
     const listBtn = h('button.btn.sm', { type: 'button', onclick: async () => {
       listBtn.disabled = true;
       try { const r = await api('/api/remote/models?p=' + encodeURIComponent(a.id)); dl.innerHTML = ''; r.models.forEach((m) => dl.append(h('option', { value: m }))); toast(L('{0} modelos', r.models.length)); model.focus(); }
@@ -276,6 +271,12 @@ function apiSection(put, field, saved) {
   const draw = () => {
     box.innerHTML = '';
     const apis = S.info.apis || [];
+    // Ordenar: APIs com fallback configurado primeiro
+    const orderedApis = [...apis].sort((a, b) => {
+      if (a.fallbackId && !b.fallbackId) return -1;
+      if (!a.fallbackId && b.fallbackId) return 1;
+      return 0;
+    });
     const add = h('select.select', null, h('option', { value: '' }, L('Adicionar uma API...')), API_PRESETS.map(([id, name]) => h('option', { value: id }, name)));
     add.addEventListener('change', () => {
       const p = API_PRESETS.find((x) => x[0] === add.value); if (!p) return;
@@ -293,7 +294,7 @@ function apiSection(put, field, saved) {
       return h('div.api-role', null, h('div.api-role-main', null, h('b', null, title), h('small.muted', null, desc)), sel);
     });
     box.append(
-      ...apis.map(card),
+      ...orderedApis.map(card),
       field(apis.length ? L('Outra API') : L('Provedor'), add, apis.length ? L('Dá para ter várias e mandar cada função para uma, espalhando os limites dos planos grátis.') : null),
       h('div.field', null, h('label', null, L('Quem faz cada função')), ...roleRows,
         apiFor('explorer') ? h('label.tcard', null, h('span.tc-main', null, h('span.tc-title', null, L('Delegar mais aos exploradores')), h('span.tc-desc', null, L('Com os exploradores numa API, o modelo é orientado a mandar a investigação para eles (vários em paralelo) em vez de ler tudo sozinho. Economiza o contexto e o tempo do modelo local.'))),
