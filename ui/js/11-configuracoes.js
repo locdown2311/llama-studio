@@ -266,10 +266,9 @@ function apiSection(put, field, saved) {
       pre ? null : field(L('Endereço'), base, L('O que vem antes de /chat/completions.')),
       field(L('Chave'), key),
       field(L('Modelo'), h('div.row', null, model, dl, listBtn, test)),
-      field(L('API de fallback'), h('select.select', null, h('option', { value: '' }, L('Nenhum')), ...apis.map((a) => h('option', { value: a.id }, `${apiLabel(a)} · ${a.model}`))), L('ID do provedor para usar se esta falhar todas as tentativas.')),
-      field(L('Tentativas'), h('input.input.mono', { type: 'number', min: 0, max: 10, value: a.retries ?? 0, placeholder: '0' }), L('Número de tentativas antes de usar a API de fallback ou voltar para o modelo local. 0 = usar o retry hard-coded no servidor.')),
-      field(L('Delay entre tentativas (ms)'), h('input.input.mono', { type: 'number', min: 0, max: 60000, value: a.retryDelayMs ?? 0, placeholder: '0' }), L('Delay em ms entre cada tentativa. 0 = usar o delay hard-coded no servidor.')),
-      field(L('Modelo'), h('div.row', null, model, dl, listBtn, test)),
+      field(L('API de fallback'), fallbackId, L('ID do provedor para usar se esta falhar todas as tentativas.')),
+      field(L('Tentativas'), retries, L('Número de tentativas antes de usar a API de fallback ou voltar para o modelo local. 0 = usar o retry hard-coded no servidor.')),
+      field(L('Delay entre tentativas (ms)'), retryDelayMs, L('Delay em ms entre cada tentativa. 0 = usar o delay hard-coded no servidor.')),
       testOut,
       params,
       h('small.muted', null, L('Hoje: {0} pedidos, {1} tokens, {2} falhas (voltaram para o modelo local).', u.calls, u.tokens.toLocaleString(LOCALE), u.fails)));
