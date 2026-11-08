@@ -818,7 +818,33 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .compact-mark[open] .cm-see { display: none; }
 .compact-mark .md { padding: 4px 16px 14px; font-size: 13.5px; }
 
-.conv .wait-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); flex: none; animation: pulse 1s infinite; }
+.conv .wait-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); flex: none; animation: pulse 1s infinite; }.rate-limit-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.rate-limit-progress {
+  flex: 1;
+  height: 4px;
+  background: var(--muted);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.rate-limit-progress::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 100%;
+  background: var(--warn);
+  animation: pulse 2s infinite;
+}
 
 /* aviso de atualização */
 .update-badge { display: flex; align-items: center; gap: 10px; margin: 8px 8px 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--accent-line); background: var(--accent-soft); color: var(--accent-ink); text-align: left; }

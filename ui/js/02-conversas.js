@@ -853,6 +853,7 @@ function renderAI(b, conv, isLast) {
   const finalText = assistants.map((m) => splitThink(m.content).text).filter((t) => t.trim()).join('\n\n');
   return h('div.msg.msg-ai', { dataset: { start: b.start } },
     (() => { const pp = personaOf(conv); return h('div.ai-head', null, h('div.ai-avatar', { style: pp ? { background: pp.color, color: '#fff', borderColor: pp.color } : null }, pp ? (pp.name[0] || 'L').toUpperCase() : 'L'), h('span.ai-name', null, pp ? pp.name : 'llama'), h('span.stamp', null, fmtStamp(t0))); })(),
+    rateLimitWait ? h('div.rate-limit-bar', null, L('Rate limit NIM')) : null,
     card,
     !live ? h('div.chips', null,
       h('button.chip', { onclick: () => navigator.clipboard.writeText(finalText).then(() => toast(L('Resposta copiada'))) }, ic('copy'), L('Copiar')),
