@@ -1511,5 +1511,11 @@ const I18N_EN = {
 "Nenhum erro nesta conversa.": "No errors in this chat.",
 "Nenhuma releitura grande nesta conversa.": "No large re-read in this chat.",
 "Nada aqui ainda.": "Nothing here yet.",
-"Trabalhando...": "Working..."
+"Trabalhando...": "Working...",
+"ex.: modelo reserva se o principal falhar": "e.g.: backup model if the main one fails",
+"1 (padrão)": "1 (default)",
+"Modelo de fallback": "Fallback model",
+"Opcional. Se o modelo principal falhar (400, 404, 429, 500...) ou a API cair, tenta este modelo no mesmo servidor.": "Optional. If the main model fails (400, 404, 429, 500...) or the API drops, tries this model on the same server.",
+"Tentativas de reconexão": "Reconnection attempts",
+"Tentativas de reenvio em caso de falha de conexão, timeout ou erro temporário do servidor (0 a 10, padrão: 1).": "Retry attempts in case of connection failure, timeout or temporary server error (0 to 10, default: 1)."
 };

@@ -247,7 +247,7 @@ async function streamApi(messages, tools, msg, signal, onDelta, extra = {}) {
   try {
     await streamRaw(messages, tools, msg, ac.signal, onDelta, { ...ex, _remote: true });
     apiUse({ calls: 1, tokens: msg.usage?.total_tokens || 0 }, extra._p);
-    msg.via = apiById(extra._p)?.model || '';
+    msg.via = msg._fallbackModel || apiById(extra._p)?.model || '';
   } catch (e) {
     if (signal?.aborted) throw e;
     apiUse({ fails: 1 }, extra._p);
@@ -292,6 +292,8 @@ async function streamRaw(messages, tools, msg, signal, onDelta, extra = {}) {
       throw new Error(_remote ? L('API externa respondeu {0}: {1}', res.status, String(m).slice(0, 600)) : L('llama-server respondeu {0}: {1}', res.status, String(m).slice(0, 600)));
     }
   }
+  const fbModel = res.headers?.get('x-studio-fallback-model');
+  if (fbModel) msg._fallbackModel = fbModel;
   const reader = res.body.getReader();
   const dec = new TextDecoder();
   let buf = '';

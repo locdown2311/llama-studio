@@ -332,10 +332,13 @@ async fn set_config(State(app): S, b: Bytes) -> Res {
                     }
                 };
                 let e = &mut c.api_providers[i];
-                for (k, f) in [("name", &mut e.name), ("base", &mut e.base), ("model", &mut e.model), ("key", &mut e.key)] {
+                for (k, f) in [("name", &mut e.name), ("base", &mut e.base), ("model", &mut e.model), ("fallbackModel", &mut e.fallback_model), ("key", &mut e.key)] {
                     if let Some(x) = p.get(k).and_then(Value::as_str) {
                         *f = x.trim().to_string();
                     }
+                }
+                if let Some(r) = p.get("retries") {
+                    e.retries = r.as_u64().map(|n| (n as u32).min(10));
                 }
                 if let Some(x) = p.get("params").and_then(Value::as_object) {
                     e.params = x.iter().filter(|(_, v)| !v.is_null()).map(|(k, v)| (k.clone(), v.clone())).collect();

@@ -8,6 +8,7 @@ use std::sync::{Arc, OnceLock, RwLock};
 use crate::browser::Browser;
 use crate::llama::Llama;
 use crate::mcp::Mcp;
+use std::collections::HashMap;
 
 pub const IS_WIN: bool = cfg!(windows);
 
@@ -61,8 +62,15 @@ pub struct ApiProvider {
     pub base: String,
     pub key: String,
     pub model: String,
-    /// parâmetros que vão em todo pedido (temperature, top_p, max_tokens, reasoning_effort...); ganham dos do studio
-    pub params: serde_json::Map<String, serde_json::Value>,
+    
+    // Adicionar estes dois campos:
+    #[serde(default)]
+    pub fallback_model: String,
+    #[serde(default)]
+    pub retries: Option<u32>,
+
+    #[serde(default)]
+    pub params: HashMap<String, serde_json::Value>,
 }
 
 impl Default for Config {

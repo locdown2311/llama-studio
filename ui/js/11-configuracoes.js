@@ -187,7 +187,13 @@ function apiSection(put, field, saved) {
     const dl = h('datalist', { id: 'api-models-' + a.id });
     const model = h('input.input.mono', { value: a.model || '', placeholder: L('ex.: o id do modelo'), list: 'api-models-' + a.id });
     model.addEventListener('change', () => save({ apiProvider: { id: a.id, model: model.value.trim() } }));
-    const listBtn = h('button.btn.sm', { type: 'button', onclick: async () => {
+    const fallbackModel = h('input.input.mono', { value: a.fallbackModel || '', placeholder: L('ex.: modelo reserva se o principal falhar'), list: 'api-models-' + a.id });
+    fallbackModel.addEventListener('change', () => save({ apiProvider: { id: a.id, fallbackModel: fallbackModel.value.trim() } }));
+    const retries = h('input.input.mono', { type: 'number', min: '0', max: '10', value: a.retries != null ? a.retries : '', placeholder: L('1 (padrão)') });
+    retries.addEventListener('change', () => {
+      const v = retries.value.trim();
+      save({ apiProvider: { id: a.id, retries: v === '' ? null : Math.max(0, Math.min(10, parseInt(v, 10) || 0)) } });
+    });    const listBtn = h('button.btn.sm', { type: 'button', onclick: async () => {
       listBtn.disabled = true;
       try { const r = await api('/api/remote/models?p=' + encodeURIComponent(a.id)); dl.innerHTML = ''; r.models.forEach((m) => dl.append(h('option', { value: m }))); toast(L('{0} modelos', r.models.length)); model.focus(); }
       catch (e) { toast(e.message, 'err'); }
@@ -259,7 +265,8 @@ function apiSection(put, field, saved) {
       pre ? null : field(L('Endereço'), base, L('O que vem antes de /chat/completions.')),
       field(L('Chave'), key),
       field(L('Modelo'), h('div.row', null, model, dl, listBtn, test)),
-      testOut,
+      testOut,field(L('Modelo de fallback'), fallbackModel, L('Opcional. Se o modelo principal falhar (400, 404, 429, 500...) ou a API cair, tenta este modelo no mesmo servidor.')),
+      field(L('Tentativas de reconexão'), retries, L('Tentativas de reenvio em caso de falha de conexão, timeout ou erro temporário do servidor (0 a 10, padrão: 1).')),
       params,
       h('small.muted', null, L('Hoje: {0} pedidos, {1} tokens, {2} falhas (voltaram para o modelo local).', u.calls, u.tokens.toLocaleString(LOCALE), u.fails)));
   };
