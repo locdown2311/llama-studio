@@ -534,8 +534,8 @@ function getNimLevel(used, total) {
   const pct = (used / total) * 100;
   if (pct >= 80) return 'high';
   if (pct >= 50) return 'medium';
-  if (pct > 0) return 'low';
-  return 'limit';
+  // pct > 0 inclui todos os valores > 0; pct === 0 (zero uso) também é 'low' — faz sentido lógico
+  return 'low';
 }
 
 function updateNimStatusChat() {
@@ -544,17 +544,17 @@ function updateNimStatusChat() {
   // busca status da API
   api('/api/nim-status')
     .then((data) => {
-      // Se não houver dados, mostra estado limite (cínara/limitado)
+      let used, total;
+      // Se não houver dados, usa used=0, total=40 para calcular nível corretamente
+      // (sem forçar 'limit' — permite que 0% seja classificado como 'low')
       if (!data) {
-        const ind = $('#chat-nim-indicator');
-        if (ind) { ind.className = 'chat-nim-indicator limit'; ind.querySelector('.txt').textContent = L('Rate limit ativo'); }
-        const floatInd = $('#chat-nim-floating');
-        if (floatInd) { floatInd.textContent = 'Limite'; floatInd.className = 'chat-nim-floating limit'; }
-        return;
+        used = 0;
+        total = 40;
+      } else {
+        // API retorna: {used, wait_secs, max=40, window_secs=60}
+        used = data.used || 0;
+        total = data.max || 40; // usa 'max' da API (padrão 40)
       }
-      // API retorna: {used, wait_secs, max=40, window_secs=60}
-      const used = data.used || 0;
-      const total = data.max || 40; // usa 'max' da API (padrão 40)
       const level = getNimLevel(used, total);
       const pct = Math.min(100, Math.max(0, Math.round((used / total) * 100)));
 
@@ -576,11 +576,14 @@ function updateNimStatusChat() {
     })
     .catch((e) => {
       console.warn('NIM status error:', e.message);
-      // em caso de erro, mostrar estado limite
+      // em caso de erro, mostra estado: used=0, total=40 → nível 'low' (0% uso)
+      let used = 0, total = 40;
+      const level = getNimLevel(used, total);
+      const pct = 0;
       const ind = $('#chat-nim-indicator');
-      if (ind) { ind.className = 'chat-nim-indicator limit'; ind.querySelector('.txt').textContent = L('Rate limit ativo'); }
+      if (ind) { ind.className = 'chat-nim-indicator ' + level; ind.querySelector('.txt').textContent = L('NIM off'); }
       const floatInd = $('#chat-nim-floating');
-      if (floatInd) { floatInd.textContent = 'Limite'; floatInd.className = 'chat-nim-floating limit'; }
+      if (floatInd) { floatInd.textContent = '0/40'; floatInd.className = 'chat-nim-floating ' + level; }
     });
 }
 /* ------------------------------------------------------------ chat */
