@@ -498,7 +498,73 @@ function renderChat() {
   // painel da direita acompanha a conversa e o projeto atuais
   if (S.wsTab === 'notebook' && S.nbShown !== (cur() ? nbKey(cur()) : null)) drawNotebook();
   if (S.wsTab === 'activity') drawActivity();
+  // iniciar polling do status NIM
+  maybeStartNimPoll();
 }
+
+/* --- indicador NVIDIA NIM --- */
+
+let nimPollInterval = 0;
+
+function maybeStartNimPoll() {
+  // só começa se já estivermos na view de chat
+  if (!$('#view-chat').classList.contains('active')) return;
+  // já está rodando?
+  if (nimPollInterval) return;
+  // busca inicial + poll a cada 15s
+  updateNimStatusChat();
+  nimPollInterval = setInterval(updateNimStatusChat, 15000);
+}
+
+function stopNimPoll() {
+  if (nimPollInterval) { clearInterval(nimPollInterval); nimPollInterval = 0; }
+}
+
+function getNimLevel(used, total) {
+  if (total <= 0) return 'limit';
+  const pct = (used / total) * 100;
+  if (pct >= 80) return 'high';
+  if (pct >= 50) return 'medium';
+  if (pct > 0) return 'low';
+  return 'limit';
+}
+
+function updateNimStatusChat() {
+  // busca status da API
+  api('/api/nim-status')
+    .then((data) => {
+      if (!data) return;
+      const used = data.used || 0;
+      const total = data.total || 40; // default 40 se não informado
+      const level = getNimLevel(used, total);
+      const pct = Math.min(100, Math.max(0, Math.round((used / total) * 100)));
+
+      // atualizar indicador no cabeçalho
+      const ind = $('#chat-nim-indicator');
+      if (ind) {
+        ind.className = 'chat-nim-indicator ' + level;
+        $('#nim-status-text').textContent = L('NIM: {0} / {1}', used.toLocaleString(), total.toLocaleString());
+        const fill = ind.querySelector('.fill');
+        if (fill) fill.style.width = pct + '%';
+      }
+
+      // atualizar indicador flutuante
+      const floatInd = $('#chat-nim-floating');
+      if (floatInd) {
+        floatInd.textContent = used.toLocaleString() + '/' + total.toLocaleString();
+        floatInd.className = 'chat-nim-floating ' + level;
+      }
+    })
+    .catch((e) => {
+      console.warn('NIM status error:', e.message);
+      // em caso de erro, mostrar estado limite
+      const ind = $('#chat-nim-indicator');
+      if (ind) { ind.className = 'chat-nim-indicator limit'; ind.querySelector('.txt').textContent = L('Rate limit ativo'); }
+      const floatInd = $('#chat-nim-floating');
+      if (floatInd) { floatInd.textContent = 'Limite'; floatInd.className = 'chat-nim-floating limit'; }
+    });
+}
+/* ------------------------------------------------------------ chat */
 
 function renderMessages(onlyLast) {
   const box = $('#messages');
