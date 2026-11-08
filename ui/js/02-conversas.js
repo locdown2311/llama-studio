@@ -544,7 +544,14 @@ function updateNimStatusChat() {
   // busca status da API
   api('/api/nim-status')
     .then((data) => {
-      if (!data) return;
+      // Se não houver dados, mostra estado limite (cínara/limitado)
+      if (!data) {
+        const ind = $('#chat-nim-indicator');
+        if (ind) { ind.className = 'chat-nim-indicator limit'; ind.querySelector('.txt').textContent = L('Rate limit ativo'); }
+        const floatInd = $('#chat-nim-floating');
+        if (floatInd) { floatInd.textContent = 'Limite'; floatInd.className = 'chat-nim-floating limit'; }
+        return;
+      }
       // API retorna: {used, wait_secs, max=40, window_secs=60}
       const used = data.used || 0;
       const total = data.max || 40; // usa 'max' da API (padrão 40)
