@@ -212,7 +212,9 @@ svg { display: block; flex: none; width: 16px; height: 16px; }
 
 /* NVIDIA NIM rate limit indicator */
 .chat-nim-indicator {
-  display: none;
+  display: flex; align-items: center; gap: 6px; margin-left: 12px;
+  padding: 4px 8px; border-radius: 6px; background: var(--panel, var(--card)); border: 1px solid var(--line);
+  font-size: 11px; color: var(--text-2); white-space: nowrap;
 }
 .chat-nim-indicator .bar {
   flex: 1; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden;
@@ -221,9 +223,9 @@ svg { display: block; flex: none; width: 16px; height: 16px; }
   height: 100%; border-radius: 3px; transition: width .2s;
 }
 .chat-nim-indicator .txt { margin: 0 4px; font-family: var(--font-mono); }
-.chat-nim-indicator.low { color: var(--skill); border-color: var(--skill); background: rgba(var(--skill-rgb),.1); }
-.chat-nim-indicator.medium { color: var(--accent); border-color: var(--accent); background: rgba(var(--accent-rgb),.1); }
-.chat-nim-indicator.high { color: #e53e3e; border-color: #e53e3e; background: rgba(237,62,62,.1); }
+.chat-nim-indicator.low { color: var(--skill); border-color: var(--skill); }
+.chat-nim-indicator.medium { color: var(--accent); border-color: var(--accent); }
+.chat-nim-indicator.high { color: #e53e3e; border-color: #e53e3e; }
 .chat-nim-indicator.limit { color: #d4c03f; border-color: #d4c03f; background: rgba(212,192,63,.1); }
 
 .chat-nim-floating {
