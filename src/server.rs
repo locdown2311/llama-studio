@@ -340,6 +340,15 @@ async fn set_config(State(app): S, b: Bytes) -> Res {
                 if let Some(x) = p.get("params").and_then(Value::as_object) {
                     e.params = x.iter().filter(|(_, v)| !v.is_null()).map(|(k, v)| (k.clone(), v.clone())).collect();
                 }
+                if let Some(x) = p.get("fallbackId").and_then(Value::as_str) {
+                    e.fallback_id = Some(x.trim().to_string());
+                }
+                if let Some(x) = p.get("retries").and_then(Value::as_u64) {
+                    e.retries = x as u8;
+                }
+                if let Some(x) = p.get("retryDelayMs").and_then(Value::as_u64) {
+                    e.retry_delay_ms = x;
+                }
             }
         }
         if let Some(id) = v.get("apiProviderDelete").and_then(Value::as_str) {

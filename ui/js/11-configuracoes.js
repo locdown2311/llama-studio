@@ -187,6 +187,13 @@ function apiSection(put, field, saved) {
     const dl = h('datalist', { id: 'api-models-' + a.id });
     const model = h('input.input.mono', { value: a.model || '', placeholder: L('ex.: o id do modelo'), list: 'api-models-' + a.id });
     model.addEventListener('change', () => save({ apiProvider: { id: a.id, model: model.value.trim() } }));
+    const fallbackId = h('select.select', null, h('option', { value: '' }, L('Nenhum')), ...apis.map((x) => h('option', { value: x.id }, `${apiLabel(x)} · ${x.model}`)));
+    fallbackId.value = a.fallbackId || '';
+    fallbackId.addEventListener('change', () => save({ apiProvider: { id: a.id, fallbackId: fallbackId.value.trim() } }));
+    const retries = h('input.input.mono', { type: 'number', min: 0, max: 10, value: a.retries ?? 0, placeholder: '0' });
+    retries.addEventListener('change', () => save({ apiProvider: { id: a.id, retries: Number(retries.value) || 0 } }));
+    const retryDelayMs = h('input.input.mono', { type: 'number', min: 0, max: 60000, value: a.retryDelayMs ?? 0, placeholder: '0' });
+    retryDelayMs.addEventListener('change', () => save({ apiProvider: { id: a.id, retryDelayMs: Number(retryDelayMs.value) || 0 } }));
     const listBtn = h('button.btn.sm', { type: 'button', onclick: async () => {
       listBtn.disabled = true;
       try { const r = await api('/api/remote/models?p=' + encodeURIComponent(a.id)); dl.innerHTML = ''; r.models.forEach((m) => dl.append(h('option', { value: m }))); toast(L('{0} modelos', r.models.length)); model.focus(); }
@@ -258,6 +265,10 @@ function apiSection(put, field, saved) {
         h('span.spacer'), pre?.[3] ? h('a.bin-link', { href: pre[3], target: '_blank', rel: 'noopener' }, ic('external'), L('Pegar uma chave grátis')) : null, del),
       pre ? null : field(L('Endereço'), base, L('O que vem antes de /chat/completions.')),
       field(L('Chave'), key),
+      field(L('Modelo'), h('div.row', null, model, dl, listBtn, test)),
+      field(L('API de fallback'), h('select.select', null, h('option', { value: '' }, L('Nenhum')), ...apis.map((a) => h('option', { value: a.id }, `${apiLabel(a)} · ${a.model}`))), L('ID do provedor para usar se esta falhar todas as tentativas.')),
+      field(L('Tentativas'), h('input.input.mono', { type: 'number', min: 0, max: 10, value: a.retries ?? 0, placeholder: '0' }), L('Número de tentativas antes de usar a API de fallback ou voltar para o modelo local. 0 = usar o retry hard-coded no servidor.')),
+      field(L('Delay entre tentativas (ms)'), h('input.input.mono', { type: 'number', min: 0, max: 60000, value: a.retryDelayMs ?? 0, placeholder: '0' }), L('Delay em ms entre cada tentativa. 0 = usar o delay hard-coded no servidor.')),
       field(L('Modelo'), h('div.row', null, model, dl, listBtn, test)),
       testOut,
       params,

@@ -63,6 +63,12 @@ pub struct ApiProvider {
     pub model: String,
     /// parâmetros que vão em todo pedido (temperature, top_p, max_tokens, reasoning_effort...); ganham dos do studio
     pub params: serde_json::Map<String, serde_json::Value>,
+    /// ID do provedor de fallback (opcional)
+    pub fallback_id: Option<String>,
+    /// Número de tentativas antes de fallback (0 = usar o retry hard-coded no chat)
+    pub retries: u8,
+    /// Delay em ms entre tentativas (0 = usar o delay hard-coded no chat)
+    pub retry_delay_ms: u64,
 }
 
 impl Default for Config {

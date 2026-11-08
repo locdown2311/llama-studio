@@ -31,7 +31,7 @@ fn provider(app: &App, id: &str) -> Option<ApiProvider> {
 
 /// Lista para a interface, sem as chaves.
 pub fn public(app: &App) -> Value {
-    json!(app.cfg().api_providers.iter().map(|p| json!({ "id": p.id, "name": p.name, "base": p.base, "model": p.model, "params": p.params, "hasKey": !p.key.trim().is_empty(), "ready": ready(p) })).collect::<Vec<_>>())
+    json!(app.cfg().api_providers.iter().map(|p| json!({ "id": p.id, "name": p.name, "base": p.base, "model": p.model, "params": p.params, "hasKey": !p.key.trim().is_empty(), "ready": ready(p), "fallbackId": p.fallback_id.clone(), "retries": p.retries, "retryDelayMs": p.retry_delay_ms })).collect::<Vec<_>>())
 }
 
 /// Cliente próprio para a internet: respeita o proxy do sistema (o de app.http é só para o llama-server
