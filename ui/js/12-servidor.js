@@ -598,7 +598,56 @@ function drawServerStatus() {
       !l.running && l.state === 'stopped' ? h('button.btn.primary', { onclick: startLlama }, ic('play'), L('Iniciar')) : null,
       l.running ? h('button.btn', { onclick: async () => { try { S.llama = await api('/api/llama/restart', {}); toast('Reiniciando...'); drawServerStatus(); } catch (e) { toast(e.message, 'err'); } } }, ic('refresh'), L('Reiniciar')) : null,
       l.running ? h('button.btn.danger', { onclick: stopLlama }, ic('stop'), L('Parar')) : null,
-      h('button.btn', { onclick: () => navigator.clipboard.writeText(l.command).then(() => toast(L('Comando copiado'))) }, ic('copy'), L('Copiar comando'))));
+      h('button.btn', { onclick: () => navigator.clipboard.writeText(l.command).then(() => toast(L('Comando copiado'))) }, ic('copy'), L('Copiar comando'))),
+    // Indicador de rate limit NIM
+    h('div.srv-nim', { title: L('Status do rate limit NIM') }, [
+      h('span.srv-nim-status', L('Carregando...')),
+      h('div.srv-nim-progress', { style: { width: '0%' } })
+    ])
+  );
+  // Atualizar indicador NIM
+  updateNimStatus();
+}
+
+/** Busca e exibe o status do rate limit NIM na barra de servidor */
+async function updateNimStatus() {
+  try {
+    const r = await api('/api/nim-status', {});
+    if (r && r.content) {
+      const data = JSON.parse(r.content);
+      const used = data.used || 0;
+      const waitSecs = data.wait_secs || 0;
+      const max = data.max || 40;
+      const windowSecs = data.window_secs || 60;
+      const $status = $('.srv-nim-status');
+      const $progress = $('.srv-nim-progress');
+      const margin = max - used;
+      const pct = Math.round((used / max) * 100);
+      let statusTxt;
+      let progressW = '0%';
+      if (waitSecs > 0) {
+        statusTxt = L('Rate limit ativo - aguarde {0}s', waitSecs);
+        // Mostrar countdown até o próximo slot ficar livre
+        const oldestAge = waitSecs; // aproximadamente
+        statusTxt += L(' (próximo livre em ~{0}s)', Math.round(oldestAge));
+        // Progresso baseado no tempo restante vs window
+        progressW = `${Math.round((1 - waitSecs/windowSecs) * 100)}%`;
+      } else if (pct >= 80) {
+        statusTxt = L('Próximo request quase no limite ({0}/{1})', used, max);
+        progressW = `${pct}%`;
+      } else if (pct >= 50) {
+        statusTxt = L('Usando {0}/{1} requests', used, max);
+        progressW = `${pct}%`;
+      } else {
+        statusTxt = L('Próximo request livre - {0}/{1} usados', used, max);
+        progressW = `${pct}%`;
+      }
+      if ($status) $status.textContent = statusTxt;
+      if ($progress) $progress.style.width = progressW;
+    }
+  } catch { /* ignora se API fora do ar */ }
+  // Poll a cada 15 segundos
+  setTimeout(updateNimStatus, 15000);
 }
 
 function drawServerForm() {

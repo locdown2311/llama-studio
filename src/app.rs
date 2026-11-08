@@ -3,7 +3,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, OnceLock, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::time::{Duration, Instant};
 
 use crate::browser::Browser;
 use crate::llama::Llama;
@@ -11,8 +12,10 @@ use crate::mcp::Mcp;
 use std::collections::HashMap;
 
 pub const IS_WIN: bool = cfg!(windows);
+pub const NIM_MAX_REQS: usize = 40;
+pub const NIM_WINDOW: Duration = Duration::from_secs(60);
 
-/// Mensagens para a janela / bandeja (thread principal).
+/// Estado compartilhado, configuração e utilitários de caminho.
 #[derive(Debug, Clone)]
 pub enum UiMsg {
     Show,
@@ -135,6 +138,9 @@ pub struct App {
     pub mcp: Mcp,
     pub browser: Browser,
     pub llama: Llama,
+    /// Contador de requests NIM para rate limiting (40/min).
+    pub nim_hits: OnceLock<Mutex<HashMap<String, Vec<std::time::Instant>>>>,
+
     ui: OnceLock<Box<dyn Fn(UiMsg) + Send + Sync>>,
     pub rt: OnceLock<tokio::runtime::Handle>,
     pub native_window: std::sync::atomic::AtomicBool,
@@ -205,6 +211,7 @@ impl App {
             ui: OnceLock::new(),
             rt: OnceLock::new(),
             native_window: std::sync::atomic::AtomicBool::new(false),
+            nim_hits: OnceLock::new(),
         });
         app.save_config();
         app
@@ -212,6 +219,36 @@ impl App {
 
     pub fn cfg(&self) -> Config {
         self.config.read().unwrap().clone()
+    }
+
+    /// Retorna o contador de requests NIM (usado + tempo restante).
+    pub fn nim_status(&self) -> (u32, u32) {
+        let mut m = self.nim_hits.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap_or_else(|e| e.into_inner());
+        let now = Instant::now();
+        let mut used: u32 = 0;
+        let mut earliest_expiry: Option<Instant> = None;
+        for (_, hits) in m.iter_mut() {
+            // Remove hits fora da janela de 60s
+            hits.retain(|t| now.saturating_duration_since(*t) < NIM_WINDOW);
+            used += hits.len() as u32;
+            for t in hits {
+                let age = now.saturating_duration_since(*t);
+                // Manter o tempo restante até expirar (menor = mais urgente)
+                if earliest_expiry.is_none() || age > earliest_expiry.unwrap().saturating_duration_since(now) {
+                    earliest_expiry = Some(*t);
+                }
+            }
+        }
+        let wait_secs = if used >= NIM_MAX_REQS as u32 {
+            // Todos os slots estão ocupados; wait até o mais velho expirar
+            earliest_expiry.map_or(NIM_WINDOW.as_secs() as u32, |e| {
+                let age = now.saturating_duration_since(e).as_secs();
+                NIM_WINDOW.as_secs().saturating_sub(age).max(1) as u32
+            })
+        } else {
+            0
+        };
+        (used, wait_secs)
     }
 
     pub fn workspace(&self) -> PathBuf {

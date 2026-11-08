@@ -63,6 +63,18 @@ function readCoverage(conv, path, self) {
   return { next, total };
 }
 
+/** Busca o estado atual do rate limit NIM via API. Retorna {used, wait_secs, max, window_secs}. */
+async function fetchNimStatus() {
+  try {
+    const r = await api('/api/nim-status', {});
+    if (r && r.content) {
+      const data = JSON.parse(r.content);
+      return { used: data.used || 0, wait_secs: data.wait_secs || 0, max: data.max || 40, window_secs: data.window_secs || 60 };
+    }
+  } catch { /* ignora erros de rede */ }
+  return { used: 0, wait_secs: 0, max: 40, window_secs: 60 };
+}
+
 /** Esta conversa já recebeu o sumário desse arquivo (read_file sem trecho de um arquivo grande)? */
 function outlineGiven(conv, path, self) {
   const cut = conv.compactCut || 0; const want = normP(path);
@@ -229,12 +241,24 @@ async function runExplorer(args, tctx, tmsg) {
   tmsg.runOn = remote ? { api: apiLabel(apiById(remote) || {}), model: apiById(remote)?.model || '' } : { local: true };
   tmsg.apiTokens = 0;
   const max = Math.max(3, Number(S.settings.explorerSteps) || 20);
-  // Delay para evitar rate limit NIM (40 req/60s): inicial de 5s se total > 3;
-  // 3s entre tópicos; delay extra a cada 3 tópicos se total > 5
-  let totalSteps = max + 1; // inclui o passo final de relatório
+  // Delay para evitar rate limit NIM (40 req/60s): buscar estado da API e ajustar
+  let { used, wait_secs, max: nim_max, window_secs } = await fetchNimStatus();
+  // Se já estamos perto do limite, aumentar delays
+  const margin = nim_max - used; // requisições ainda disponíveis
   let delayInit = totalSteps > 3 ? 5000 : 0;
   let delayBetween = 3000;
   let delayExtra = totalSteps > 5 ? 2000 : 0;
+  // Se quase no limite (used >= 80% do max), dobrar os delays
+  if (margin <= nim_max * 0.2) {
+    delayInit = Math.max(delayInit, 10000);
+    delayBetween = Math.max(delayBetween, 6000);
+    delayExtra = Math.max(delayExtra, 4000);
+  }
+  // Se wait_secs > 0, já temos um atraso explícito; usar o maior do nosso cálculo ou do wait
+  if (wait_secs > 0) {
+    delayInit = Math.max(delayInit, wait_secs * 1000 + 2000);
+    delayBetween = Math.max(delayBetween, wait_secs * 1000);
+  }
   await sleep(delayInit);
   for (let step = 0; step <= max; step++) {
     if (tctx.signal.aborted) return { content: 'Cancelado.', isError: true };

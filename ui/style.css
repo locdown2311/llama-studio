@@ -736,6 +736,10 @@ code { font-size: .9em; }
 .srv-st-main { flex: 1; min-width: 220px; }
 .srv-st-title { font-size: 18px; font-weight: 650; }
 .srv-st-sub { color: var(--text-2); font-size: 13.5px; }
+.srv-nim { margin-top: 6px; font-size: 12px; }
+.srv-nim-status { color: var(--text-2); }
+.srv-nim-progress { height: 3px; background: var(--accent-1); margin-top: 2px; border-radius: 2px; overflow: hidden; }
+.srv-nim-progress::after { content: ''; display: block; height: 100%; width: 0%; background: var(--accent-2); transition: width 0.3s ease; }
 .srv-grid { display: grid; grid-template-columns: minmax(320px, 440px) 1fr; gap: 16px; align-items: start; }
 .inline { display: flex; gap: 8px; }
 .inline .input { flex: 1; min-width: 0; }

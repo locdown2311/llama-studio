@@ -83,6 +83,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/stat", post(stat))
         .route("/api/skills", get(skills_list))
         .route("/api/skills/get", get(skills_get))
+.route("/api/nim-status", get(nim_status_handler))
         .route("/api/skills/save", post(skills_save))
         .route("/api/skills/delete", post(skills_delete))
         .route("/api/skills/import-path", post(skills_import_path))
@@ -651,6 +652,11 @@ async fn skills_get(State(app): S, Query(qs): Q) -> Res {
     v["body"] = json!(b);
     v["meta"] = json!(meta);
     ok(v)
+}
+
+async fn nim_status_handler(State(app): S) -> Res {
+    let (used, wait_secs) = app.nim_status();
+    ok(json!({"used": used, "wait_secs": wait_secs, "max": 40, "window_secs": 60}))
 }
 
 async fn skills_save(State(app): S, b: Bytes) -> Res {
