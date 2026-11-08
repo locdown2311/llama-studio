@@ -117,7 +117,21 @@ fn scan(app: &App, known: &[Profile]) -> Vec<Value> {
 }
 
 pub fn list_json(app: &App) -> Value {
-    let list = load(app);
+    let mut list = load(app);
+    
+    // Injeta APIs remotas na lista
+    for api in app.cfg().api_providers.iter().filter(|p| crate::remote::ready(p)) {
+        list.push(Profile {
+            id: format!("api_{}", api.id),
+            name: format!("☁️ {} ({})", api.name, api.model),
+            model: format!("remote:{}", api.id),
+            context: 8192,
+            cpu_moe: 0,
+            threads: 0,
+            extra_args: String::new(),
+        });
+    }
+
     let active = active_id(app, &list);
     let found = scan(app, &list);
     json!({"models": list, "active": active, "found": found, "defaults": from_cfg(&app.llama.cfg(), "")})
@@ -125,15 +139,29 @@ pub fn list_json(app: &App) -> Value {
 
 /// Carrega o perfil: grava os parâmetros e (re)inicia o llama-server.
 pub async fn activate(app: &Arc<App>, id: &str) -> Result<Value, String> {
-    let list = load(app);
+    // 1. Corrigido: 'mut' adicionado aqui
+    let mut list = load(app); 
+    
+    for api in app.cfg().api_providers.iter().filter(|p| crate::remote::ready(p)) {
+        list.push(Profile {
+            id: format!("api_{}", api.id), name: format!("☁️ {} ({})", api.name, api.model),
+            model: format!("remote:{}", api.id), context: 8192, cpu_moe: 0, threads: 0, extra_args: String::new(),
+        });
+    }
+    
     let p = list.iter().find(|p| p.id == id).ok_or(L!("Modelo não encontrado.", "Model not found."))?.clone();
-    if !Path::new(&p.model).is_file() {
+    let is_remote = p.model.starts_with("remote:");
+    
+    // 2. Corrigido: Mantida apenas a checagem que respeita o is_remote (a antiga foi apagada)
+    if !is_remote && !Path::new(&p.model).is_file() {
         return Err(LF!("O arquivo do modelo não existe: {}", "The model file does not exist: {}", p.model));
     }
+    
     let state = app.llama.state();
     if state.starts_with("external") {
         return Err(L!("O llama-server foi aberto por fora do studio (start.bat antigo ou outro programa). Feche-o para o studio poder trocar de modelo.", "The llama-server was opened outside the studio (old start.bat or another program). Close it so the studio can switch models.").into());
     }
+    
     let mut c = app.llama.cfg();
     let changed = !same_path(&c.model, &p.model) || c.context != p.context || c.cpu_moe != p.cpu_moe || c.threads != p.threads || c.extra_args != p.extra_args;
     c.model = p.model.clone();
@@ -142,6 +170,15 @@ pub async fn activate(app: &Arc<App>, id: &str) -> Result<Value, String> {
     c.threads = p.threads;
     c.extra_args = p.extra_args.clone();
     app.llama.save(c);
+    
+    // 3. Corrigido: Se for API externa, garante que o llama-server local seja desligado e sai da função
+    if is_remote {
+        if app.llama.is_running() {
+            app.llama.stop(); 
+        }
+        return Ok(app.llama.to_json());
+    }
+
     if app.llama.is_running() {
         if !changed {
             return Ok(app.llama.to_json());
@@ -156,6 +193,7 @@ pub async fn activate(app: &Arc<App>, id: &str) -> Result<Value, String> {
         // o Windows demora um pouco para liberar a porta
         tokio::time::sleep(Duration::from_millis(400)).await;
     }
+    
     let mut last = String::new();
     for _ in 0..10 {
         match app.llama.start(app) {
@@ -171,7 +209,7 @@ pub async fn activate(app: &Arc<App>, id: &str) -> Result<Value, String> {
 /// do modelo que estava ativo (ou cria um perfil se o modelo for novo).
 pub fn sync_from_cfg(app: &App, old_model: &str) {
     let c = app.llama.cfg();
-    if c.model.trim().is_empty() {
+    if c.model.trim().is_empty() || c.model.starts_with("remote:") {
         return;
     }
     let mut list = load(app);

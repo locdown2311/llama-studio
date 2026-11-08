@@ -102,6 +102,33 @@ async fn send_with_retries(c: &ApiProvider, body_str: &str, max_retries: u32) ->
         }
     }
 }
+/// Envia um prompt em texto para a API configurada e retorna a string de resposta
+pub async fn call_provider_direct(app: &App, provider_id: &str, prompt: &str) -> Result<String, String> {
+    let Some(c) = provider(app, provider_id).filter(ready) else {
+        return Err("API externa não configurada.".into());
+    };
+
+    let body = json!({
+        "model": c.model.trim(),
+        "messages": [{ "role": "user", "content": prompt }]
+    });
+
+    let max_retries = c.retries.unwrap_or(1).min(10);
+    let sent = send_with_retries(&c, &body.to_string(), max_retries).await;
+
+    match sent {
+        Ok(resp) => {
+            let bytes = resp.bytes().await.map_err(|e| chain(e))?;
+            let json_resp: Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+            if let Some(content) = json_resp["choices"][0]["message"]["content"].as_str() {
+                Ok(content.to_string())
+            } else {
+                Err(format!("Resposta inesperada: {}", json_resp))
+            }
+        }
+        Err(e) => Err(chain(e)),
+    }
+}
 /// O erro com as causas (o "error sending request" sozinho não diz se foi DNS, TLS, conexão recusada...).
 fn chain(e: reqwest::Error) -> String {
     let e = e.without_url();

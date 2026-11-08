@@ -221,12 +221,34 @@ async fn static_file(State(app): S, req: Request) -> Response {
 
 async fn proxy(State(app): S, req: Request) -> Response {
     let (parts, b) = req.into_parts();
-    let base = app.cfg().llama_url;
-    let url = format!("{}{}", base.trim_end_matches('/'), parts.uri.path_and_query().map(|p| p.as_str()).unwrap_or("/"));
+    
+    // Extrai o body do request antecipadamente para podermos redirecionar
     let bytes = match axum::body::to_bytes(b, 64 * 1024 * 1024).await {
         Ok(b) => b,
         Err(e) => return (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
     };
+
+    // INTERCEPTADOR REMOTO: Se o modelo selecionado no dropdown for uma API Externa
+    let current_model = app.llama.cfg().model;
+    if current_model.starts_with("remote:") {
+        let provider_id = current_model.trim_start_matches("remote:");
+        let path = parts.uri.path();
+        
+        if path.ends_with("/chat/completions") || path.ends_with("/completions") {
+            // Manda o request transparente para o crate::remote em vez do llama-server
+            return crate::remote::chat(&app, provider_id, bytes).await;
+        } else if path.ends_with("/models") {
+            return (StatusCode::OK, Json(json!({"data": [{"id": current_model, "object": "model"}]}))).into_response();
+        } else {
+            // Resposta vazia gentil para endpoints locais que não existem em APIs remotas (ex: /tokenize)
+            return (StatusCode::OK, Json(json!({"status": "ok", "ignored_by_remote": true}))).into_response();
+        }
+    }
+
+    // FLUXO NORMAL: Se for um GGUF local, encaminha para o llama-server
+    let base = app.cfg().llama_url;
+    let url = format!("{}{}", base.trim_end_matches('/'), parts.uri.path_and_query().map(|p| p.as_str()).unwrap_or("/"));
+    
     let mut rb = app.http.request(parts.method.clone(), &url);
     for (k, v) in parts.headers.iter() {
         let n = k.as_str();
@@ -814,7 +836,31 @@ async fn tools_list(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     let only = v.get("only").map(|_| strs(&v, "only"));
     let lazy = v.get("lazy").and_then(Value::as_bool).unwrap_or(false);
-    ok(tools::build_tools(&app, &groups_of(&v), &strs(&v, "mcp"), !strs(&v, "skills").is_empty(), &strs(&v, "extra"), only.as_deref(), lazy, &strs(&v, "eager"), &strs(&v, "full")))
+    
+    // Pega as ferramentas normais geradas pelo sistema
+    let mut built = tools::build_tools(&app, &groups_of(&v), &strs(&v, "mcp"), !strs(&v, "skills").is_empty(), &strs(&v, "extra"), only.as_deref(), lazy, &strs(&v, "eager"), &strs(&v, "full"));
+    
+    // Injeta as APIs Remotas como ferramentas na resposta JSON
+    if let Some(tools_arr) = built.get_mut("tools").and_then(Value::as_array_mut) {
+        for p in app.cfg().api_providers.iter().filter(|p| crate::remote::ready(p)) {
+            tools_arr.push(json!({
+                "type": "function",
+                "function": {
+                    "name": format!("remote_api_{}", p.id),
+                    "description": format!("Envia um prompt para o modelo/API remoto: {} ({})", p.name, p.model),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "prompt": { "type": "string", "description": "A instrução a ser enviada para a API" }
+                        },
+                        "required": ["prompt"]
+                    }
+                }
+            }));
+        }
+    }
+    
+    ok(built)
 }
 
 async fn tools_search(State(app): S, b: Bytes) -> Res {
@@ -853,6 +899,15 @@ async fn tools_call(State(app): S, b: Bytes) -> Res {
     };
     let ws = ws_of(&app, st(&v, "ws"));
     let name = st(&v, "name");
+    if name.starts_with("remote_api_") {
+        let provider_id = name.trim_start_matches("remote_api_");
+        let prompt = args.get("prompt").and_then(Value::as_str).unwrap_or("");
+        
+        return match crate::remote::call_provider_direct(&app, provider_id, prompt).await {
+            Ok(text) => ok(json!({"content": text, "isError": false})),
+            Err(e) => ok(json!({"content": format!("Erro na API remota: {e}"), "isError": true})),
+        };
+    }
     // ponto de restauração antes de mexer em arquivo
     if matches!(name, "write_file" | "edit_file" | "create_directory") && !st(&v, "cp").is_empty() {
         if let Ok(file) = tools::resolve_write(&ws, args.get("path").and_then(Value::as_str).unwrap_or("")) {
