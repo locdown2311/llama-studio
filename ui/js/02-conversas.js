@@ -851,9 +851,18 @@ function renderAI(b, conv, isLast) {
   }
 
   const finalText = assistants.map((m) => splitThink(m.content).text).filter((t) => t.trim()).join('\n\n');
+// Indicador de progresso NIM por mensagem
+  let nimEl = null;
+  const lastMsg = b.msgs[b.msgs.length - 1];
+  if (lastMsg && lastMsg._rateLimitWait !== undefined) {
+    const waitSec = Math.max(0, Math.ceil((lastMsg._rateLimitWait - Date.now() + 1000) / 1000));
+    const waitText = waitSec > 0 ? L('Rate limit: {0}s', waitSec) : L('Rate limit OK');
+    nimEl = h('div.nim-progress', { title: waitText }, h('span', { style: { fontSize: 'xsmall', marginLeft: '4px' } }, waitText));
+  }
   return h('div.msg.msg-ai', { dataset: { start: b.start } },
     (() => { const pp = personaOf(conv); return h('div.ai-head', null, h('div.ai-avatar', { style: pp ? { background: pp.color, color: '#fff', borderColor: pp.color } : null }, pp ? (pp.name[0] || 'L').toUpperCase() : 'L'), h('span.ai-name', null, pp ? pp.name : 'llama'), h('span.stamp', null, fmtStamp(t0))); })(),
-    card,
+    nimEl,
+    
     !live ? h('div.chips', null,
       h('button.chip', { onclick: () => navigator.clipboard.writeText(finalText).then(() => toast(L('Resposta copiada'))) }, ic('copy'), L('Copiar')),
       isLast && planPending(conv, b) ? h('button.chip.primary', { onclick: () => runPlan(conv) }, ic('play'), L('Executar o plano')) : null,
