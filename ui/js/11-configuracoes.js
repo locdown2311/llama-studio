@@ -322,14 +322,30 @@ function apiSection(put, field, saved) {
         // o explorer aceita várias APIs: as subtarefas do multi_explore se distribuem entre as marcadas
         const setRole = (ids) => { put({ apiRoles: { ...(S.settings.apiRoles || {}), explorer: ids } }); draw(); };
         const picked = apiForAll('explorer');
-        const chips = ready.map((a) => h('button.chip' + (picked.includes(a.id) ? ' on' : ''), { type: 'button', title: `${apiLabel(a)} · ${a.model}`, onclick: () => {
-          const set = new Set(picked);
-          set.has(a.id) ? set.delete(a.id) : set.add(a.id);
-          setRole([...set]);
-        } }, `${apiLabel(a)} · ${a.model}`));
-        return h('div.api-role', null, h('div.api-role-main', null, h('b', null, title),
-          h('small.muted', null, desc + ' ' + L('Pode marcar mais de uma: as subtarefas do multi_explore se distribuem entre as marcadas; sem nenhuma, usa o modelo local.'))),
-          h('div.chips', null, ...chips));
+        // lista na ordem de preferência: a primeira atende o explore simples e assume quando outra falha
+        const move = (i, d) => { const ids = [...picked]; const j = i + d; if (j < 0 || j >= ids.length) return; [ids[i], ids[j]] = [ids[j], ids[i]]; setRole(ids); };
+        const rows = picked.map((pid, i) => {
+          const a = apiById(pid);
+          const conc = h('input.input.mono.team-conc', { type: 'number', min: '1', max: '8', value: explorerConc(pid), title: L('Exploradores ao mesmo tempo nesta API'), 'aria-label': L('Exploradores ao mesmo tempo nesta API') });
+          conc.addEventListener('change', () => { const n = Math.max(1, Math.min(8, parseInt(conc.value, 10) || 2)); conc.value = n; put({ explorerConc: { ...(S.settings.explorerConc || {}), [pid]: n } }); });
+          return h('div.team-row', null,
+            h('span.team-n', null, String(i + 1)),
+            h('div.team-name', null, h('b', null, apiLabel(a)), h('small.muted', null, a.model + (isNimApi(a) ? ' · ' + L('fila do NIM') : ''))),
+            h('label.team-conc-wrap', { title: L('Exploradores ao mesmo tempo nesta API') }, conc, h('small.muted', null, L('ao mesmo tempo'))),
+            h('button.icon-btn.sm', { type: 'button', disabled: i === 0, title: L('Subir'), 'aria-label': L('Subir'), html: svg('chev', 'up'), onclick: () => move(i, -1) }),
+            h('button.icon-btn.sm', { type: 'button', disabled: i === picked.length - 1, title: L('Descer'), 'aria-label': L('Descer'), html: svg('chev', 'down'), onclick: () => move(i, 1) }),
+            h('button.icon-btn.sm', { type: 'button', title: L('Tirar da equipe'), 'aria-label': L('Tirar da equipe'), html: svg('x'), onclick: () => setRole(picked.filter((x) => x !== pid)) }));
+        });
+        const rest = ready.filter((a) => !picked.includes(a.id));
+        const add = h('select.select', null, h('option', { value: '' }, L('Adicionar uma API à equipe...')), rest.map((a) => h('option', { value: a.id }, `${apiLabel(a)} · ${a.model}`)));
+        add.addEventListener('change', () => { if (add.value) setRole([...picked, add.value]); });
+        const seats = picked.reduce((n, pid) => n + explorerConc(pid), 0);
+        return h('div.api-role.team', null, h('div.api-role-main', null, h('b', null, title),
+          h('small.muted', null, desc + ' ' + L('As marcadas formam uma equipe: no multi_explore cada uma puxa a próxima subtarefa ao terminar a dela, e se uma falhar outra assume do ponto em que parou. O modelo local só entra quando nenhuma responde.'))),
+          h('div.team', null,
+            picked.length ? rows : h('div.muted.small', null, L('Nenhuma API na equipe: os exploradores usam o modelo local.')),
+            rest.length ? add : null,
+            picked.length ? h('small.muted', null, L('Até {0} exploradores ao mesmo tempo.', seats)) : null));
       }
       const cur0 = roles[id] === true ? ready[0]?.id || '' : roles[id] || '';
       const sel = h('select.select', null, h('option', { value: '' }, L('Modelo local')), ready.map((a) => h('option', { value: a.id }, `${apiLabel(a)} · ${a.model}`)));

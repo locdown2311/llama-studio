@@ -2249,7 +2249,7 @@ function runOnChip(res) {
         res.apiTokens
           ? L(", {0} tokens", res.apiTokens.toLocaleString(LOCALE))
           : ""
-      ),
+      ) + (r.moved ? " " + L("Assumiu a tarefa depois que {0} falhou ({1}).", r.moved, res.apiErr || "") : ""),
     },
     ic("globe"),
     `${r.api}${res.apiTokens ? " · " + fmtK(res.apiTokens) : ""}`

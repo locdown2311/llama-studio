@@ -1531,5 +1531,17 @@ const I18N_EN = {
 "NIM {0}/{1}": "NIM {0}/{1}",
 "NVIDIA NIM: limite de {0} pedidos por minuto atingido. Os pedidos ficam na fila e saem sozinhos em {1}s.": "NVIDIA NIM: limit of {0} requests per minute reached. Requests wait in the queue and go out by themselves in {1}s.",
 "NVIDIA NIM: {0} de {1} pedidos no último minuto. O studio usa até {2} e guarda {3} para a conversa (exploradores e tarefas de fundo esperam antes).": "NVIDIA NIM: {0} of {1} requests in the last minute. The studio uses up to {2} and keeps {3} for the chat (explorers and background tasks wait earlier).",
-"{0} na fila agora.": "{0} in the queue now."
+"{0} na fila agora.": "{0} in the queue now.",
+"Exploradores ao mesmo tempo nesta API": "Explorers at the same time on this API",
+"fila do NIM": "NIM queue",
+"ao mesmo tempo": "at once",
+"Descer": "Move down",
+"Tirar da equipe": "Remove from the team",
+"Adicionar uma API à equipe...": "Add an API to the team...",
+"As marcadas formam uma equipe: no multi_explore cada uma puxa a próxima subtarefa ao terminar a dela, e se uma falhar outra assume do ponto em que parou. O modelo local só entra quando nenhuma responde.": "The chosen ones form a team: in multi_explore each one pulls the next subtask when it finishes its own, and if one fails another takes over from where it stopped. The local model only steps in when none responds.",
+"Nenhuma API na equipe: os exploradores usam o modelo local.": "No API on the team: explorers use the local model.",
+"Até {0} exploradores ao mesmo tempo.": "Up to {0} explorers at the same time.",
+"Assumiu a tarefa depois que {0} falhou ({1}).": "Took over the task after {0} failed ({1}).",
+"modelo local": "local model",
+"Há {0} exploradores disponíveis ao mesmo tempo: quando a investigação tiver várias partes, use multi_explore com até {0} subtarefas independentes de uma vez.": "There are {0} explorers available at the same time: when the investigation has several parts, use multi_explore with up to {0} independent subtasks at once."
 };

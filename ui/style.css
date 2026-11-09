@@ -1595,3 +1595,19 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .act-subs-i.s-done { color: var(--ok); }
 .act-empty.small { padding: 16px 4px; font-size: 12.5px; }
 .act-main { min-width: 0; }
+
+/* equipe de exploradores (Configurações › API externa) */
+.api-role.team { flex-direction: column; align-items: stretch; gap: 10px; }
+.team { display: flex; flex-direction: column; gap: 6px; }
+.team-row { display: flex; align-items: center; gap: 8px; padding: 7px 8px 7px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+.team-n { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 600; background: var(--accent-soft); color: var(--accent-ink); flex: none; }
+.team-name { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.team-name b, .team-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.team-name b { font-weight: 550; font-size: 13.5px; }
+.team-conc-wrap { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.team-conc { width: 54px; height: 30px; padding: 0 6px; text-align: center; }
+.team-row .icon-btn svg.up { transform: rotate(-90deg); }
+.team-row .icon-btn svg.down { transform: rotate(90deg); }
+.team-row .icon-btn:disabled { opacity: .3; cursor: default; }
+.team > .select { align-self: flex-start; max-width: 100%; }
+@media (max-width: 640px) { .team-conc-wrap small { display: none; } }

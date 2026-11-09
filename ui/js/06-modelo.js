@@ -212,6 +212,17 @@ function apiForAll(role) {
   const ids = Array.isArray(v) ? v : [v === true ? apis[0]?.id : v];
   return [...new Set(ids.map((id) => apis.find((a) => a.id === id)?.id).filter(Boolean))];
 }
+/** Quantos exploradores a API aguenta ao mesmo tempo (Configurações › API externa; padrão 2). */
+function explorerConc(id) { return Math.max(1, Math.min(8, Number(S.settings.explorerConc?.[id]) || 2)); }
+/** APIs que falharam há pouco ficam de fora por um minuto (limite do plano, servidor fora). */
+const API_COOL = new Map();
+function apiCool(id) { API_COOL.set(id, Date.now() + 60000); }
+function apiCooled(id) { return (API_COOL.get(id) || 0) > Date.now(); }
+/** Próxima API da equipe dos exploradores para assumir uma tarefa: na ordem de preferência, fora as já
+    tentadas e as que falharam há pouco. null = só resta o modelo local. */
+function explorerNext(tried) {
+  return apiForAll('explorer').find((id) => !tried.has(id) && !apiCooled(id)) || null;
+}
 /** Por qual API externa esta função vai (id do provedor), ou null para o modelo local. */
 function apiFor(role) {
   return apiForAll(role)[0] || null;

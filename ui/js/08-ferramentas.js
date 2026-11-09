@@ -220,7 +220,10 @@ async function runExplorer(args, tctx, tmsg, apiId) {
   const msgs = [{ role: 'system', content: sys }, { role: 'user', content: args.task + (args.where ? L('\n\nComece por: {0}', args.where) : '') }];
   tmsg._sub = [];
   // fora do slot da conversa (ela fica esperando o relatório e não pode perder o cache)
-  let remote = apiId || apiFor('explorer');
+  // equipe: a API indicada (multi_explore) ou a primeira da ordem que não falhou há pouco
+  const tried = new Set();
+  let remote = apiId || explorerNext(tried);
+  if (remote) tried.add(remote);
   const slot = remote ? null : await sideSlot(tctx.conv);
   let extra = slot != null ? { id_slot: slot } : undefined;
   // onde o subagente roda, para o cartão mostrar (API e modelo, ou local)
@@ -232,17 +235,29 @@ async function runExplorer(args, tctx, tmsg, apiId) {
     const last = step === max;
     if (last) msgs.push({ role: 'user', content: L('Limite de passos atingido. Escreva agora o relatório final com o que já encontrou.') });
     const m = { content: '', reasoning: '', tool_calls: [] };
-    if (remote) {
-      try { await streamApi(msgs, last ? [] : tools, m, tctx.signal, null, { _p: remote, _timeout: 120000 }); tmsg.via = m.via; tmsg.apiTokens += m.usage?.total_tokens || 0; scheduleRender(); }
-      catch (e) {
+    // a API falhou (limite do plano, fora do ar): outra da equipe assume do ponto em que parou; o modelo local
+    // só entra quando nenhuma responde
+    while (remote) {
+      try {
+        await streamApi(msgs, last ? [] : tools, m, tctx.signal, null, { _p: remote, _timeout: 120000 });
+        tmsg.via = m.via; tmsg.apiTokens += m.usage?.total_tokens || 0; scheduleRender();
+        break;
+      } catch (e) {
         if (tctx.signal.aborted) throw e;
-        // API fora (limite do plano grátis, sem internet): segue no modelo local daqui em diante
-        remote = false; tmsg.apiErr = String(e.message || e).slice(0, 200); tmsg.runOn = { local: true, fell: true }; scheduleRender();
-        const s2 = await sideSlot(tctx.conv); extra = s2 != null ? { id_slot: s2 } : undefined;
+        apiCool(remote);
+        const from = apiLabel(apiById(remote) || {});
+        tmsg.apiErr = String(e.message || e).slice(0, 200);
         m.content = ''; m.reasoning = ''; m.tool_calls = [];
-        await streamRaw(msgs, last ? [] : tools, m, tctx.signal, null, extra);
+        remote = explorerNext(tried);
+        if (remote) { tried.add(remote); tmsg.runOn = { api: apiLabel(apiById(remote) || {}), model: apiById(remote)?.model || '', moved: from }; }
+        else tmsg.runOn = { local: true, fell: true };
+        scheduleRender();
       }
-    } else await streamRaw(msgs, last ? [] : tools, m, tctx.signal, null, extra);
+    }
+    if (!remote) {
+      if (tmsg.runOn?.fell && !extra) { const s2 = await sideSlot(tctx.conv); extra = s2 != null ? { id_slot: s2 } : undefined; }
+      await streamRaw(msgs, last ? [] : tools, m, tctx.signal, null, extra);
+    }
     const calls = m.tool_calls.filter((t) => t && t.function?.name);
     calls.forEach((t) => { if (!t.id) t.id = 'call_' + uid(); });
     const text = splitThink(m.content).text;
@@ -285,26 +300,44 @@ async function runMultiExplore(args, tctx, tmsg) {
     where: String(sub.where || ''),
   }));
   scheduleRender();
-  async function batchRun(from, to) {
-    // APIs escolhidas para o explorer: as subtarefas se distribuem entre elas (round-robin, em ordem)
-    const pool = apiForAll('explorer');
-    return Promise.all(subs.slice(from, to).map((sub, i) => {
-      const subMsg = tmsg.subs[from + i];
-      subMsg.status = 'running'; scheduleRender();
-      return runExplorer({ task: sub.task, where: sub.where || '' }, tctx, subMsg, pool.length ? pool[(from + i) % pool.length] : null).then((r) => {
-        subMsg.status = r.isError ? 'error' : 'ok';
-        subMsg.content = r.content;
-        scheduleRender();
-        return { task: String(sub.task), where: String(sub.where || ''), content: r.content, isError: !!r.isError };
-      });
-    }));
+  // Equipe: cada API marcada é um trabalhador (com tantas vagas quantas ela aguenta) que puxa a próxima
+  // subtarefa da fila ao terminar a dele. As rápidas fazem mais; nenhuma espera o lote inteiro.
+  const all = new Array(subs.length);
+  let next = 0, running = 0;
+  const runOne = async (i, apiId) => {
+    const sub = subs[i], subMsg = tmsg.subs[i];
+    subMsg.status = 'running'; scheduleRender();
+    let r;
+    try { r = await runExplorer({ task: sub.task, where: sub.where || '' }, tctx, subMsg, apiId); }
+    catch (e) { if (tctx.signal.aborted) throw e; r = { content: String(e.message || e), isError: true }; }
+    subMsg.status = r.isError ? 'error' : 'ok';
+    subMsg.content = r.content;
+    scheduleRender();
+    all[i] = { task: String(sub.task), where: String(sub.where || ''), content: r.content, isError: !!r.isError, by: subMsg.runOn?.local ? L('modelo local') : `${subMsg.runOn?.api || ''} · ${subMsg.via || subMsg.runOn?.model || ''}` };
+  };
+  // apiId = null: trabalhador do modelo local (quando não há API marcada ou todas falharam)
+  const worker = async (apiId) => {
+    while (next < subs.length && !tctx.signal.aborted) {
+      if (apiId && apiCooled(apiId)) return;
+      if (running >= limit) { await new Promise((r) => setTimeout(r, 150)); continue; }
+      const i = next++;
+      running++;
+      try { await runOne(i, apiId); } finally { running--; }
+    }
+  };
+  const team = apiForAll('explorer').filter((id) => !apiCooled(id));
+  // as vagas se alternam entre as APIs (1ª de cada, depois a 2ª de cada...): as primeiras subtarefas se espalham
+  const seats = [];
+  for (let k = 0; k < 8; k++) for (const id of team) if (k < explorerConc(id)) seats.push(id);
+  await Promise.all(seats.slice(0, subs.length).map((id) => worker(id)));
+  // sobrou fila (todas as APIs saíram, ou não há nenhuma): o modelo local termina
+  if (next < subs.length && !tctx.signal.aborted) {
+    const n = Math.max(1, Math.min(limit, team.length ? 1 : subs.length, subs.length - next));
+    await Promise.all(Array.from({ length: n }, () => worker(null)));
   }
-  let all = [];
-  for (let i = 0; i < subs.length; i += Math.max(limit, 1)) {
-    all = [...all, ...await batchRun(i, Math.min(i + (limit || subs.length), subs.length))];
-  }
+  if (tctx.signal.aborted) return { content: 'Cancelado.', isError: true };
   const sections = all.map((p, i) => {
-    const head = `## Agente ${i + 1}: ${p.task}${p.where ? ' (' + p.where + ')' : ''}`;
+    const head = `## Agente ${i + 1} (${p.by}): ${p.task}${p.where ? ' (' + p.where + ')' : ''}`;
     return `${head}\n${p.content}`;
   }).join('\n\n---\n\n');
   return {
