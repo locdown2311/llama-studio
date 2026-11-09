@@ -531,7 +531,13 @@ async function runAgent(conv) {
   } finally {
     // só diz "cancelado pelo usuário" se foi o usuário; erro interno não é cancelamento
     const why = ac.signal.aborted ? L('Cancelado pelo usuário.') : L('Não executada: a resposta parou por um erro do studio (veja a mensagem abaixo).');
-    for (const m of conv.messages) if (m.role === 'tool' && ['pending', 'running', 'approval', 'audit'].includes(m.status)) { m.status = ac.signal.aborted ? 'denied' : 'error'; m.isError = true; m.content = m.content || why; }
+    const stuck = ac.signal.aborted ? 'denied' : 'error';
+    for (const m of conv.messages) if (m.role === 'tool') {
+      if (['pending', 'running', 'approval', 'audit'].includes(m.status)) { m.status = stuck; m.isError = true; m.content = m.content || why; }
+      // subtarefas de explore/multi_explore: sem isso os spinners seguem girando após cancelar
+      for (const st of m._sub || []) if (st.status === 'running' || st.status === 'queued') st.status = stuck;
+      for (const st of m.subs || []) if (st.status === 'running' || st.status === 'queued') st.status = stuck;
+    }
     setTimeout(() => maybeSummarizeMap(conv), 1500); // pré-leitura: só quando o servidor ficar livre
     const last = conv.messages[conv.messages.length - 1];
     if (last?.role === 'assistant' && !last.content && !last.reasoning && !last.tool_calls?.length) conv.messages.pop();

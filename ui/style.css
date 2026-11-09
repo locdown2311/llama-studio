@@ -806,6 +806,9 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 
 /* passos de subagente / código */
 .substeps { display: flex; flex-direction: column; gap: 3px; }
+.substep.expandable { cursor: pointer; }
+.substep .caret { width: 12px; height: 12px; color: var(--muted); margin-top: 3px; flex: none; }
+.substeps-nested { display: flex; flex-direction: column; gap: 3px; margin-left: 20px; }
 .substep { display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; min-width: 0; }
 .substep svg { width: 13px; height: 13px; flex: none; color: var(--ok); margin-top: 3px; }
 .substep.s-running svg { color: var(--accent); }

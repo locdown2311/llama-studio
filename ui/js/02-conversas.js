@@ -3409,30 +3409,79 @@ function renderTool(tc, res, live) {
 
     for (const s of res.subs) {
       const lastStep = s._sub?.[s._sub.length - 1];
+      const stepsArr = s._sub?.length ? s._sub : s.sub || [];
 
-      rows.append(
-        h(
-          "div.substep.s-" + s.status,
-          null,
+      const row = h(
+        "div.substep.s-" + s.status + (stepsArr.length ? ".expandable" : ""),
+        null,
+        stepsArr.length
+          ? h("span", {
+              html: svg("chev", "caret"),
+              style: { transform: s._open ? "rotate(90deg)" : "" },
+            })
+          : null,
 
-          h("span", {
-            html: svg(
-              s.status === "running"
-                ? "loader"
-                : s.status === "queued"
-                ? "clock"
-                : s.status === "error"
-                ? "alert"
-                : "check",
-              s.status === "running" ? "spin" : ""
-            ),
-          }),
+        h("span", {
+          html: svg(
+            s.status === "running"
+              ? "loader"
+              : s.status === "queued"
+              ? "clock"
+              : s.status === "error"
+              ? "alert"
+              : "check",
+            s.status === "running" ? "spin" : ""
+          ),
+        }),
 
-          h("span.ss-name", null, s.task),
-          h("span.ss-sub", null, s.status === "queued" ? L("na fila") : lastStep?.summary || ""),
-          s.runOn ? runOnChip(s) : null
-        )
+        h("span.ss-name", null, s.task),
+        h("span.ss-sub", null, s.status === "queued" ? L("na fila") : lastStep?.summary || ""),
+        s.runOn ? runOnChip(s) : null
       );
+
+      if (stepsArr.length)
+        row.onclick = () => {
+          s._open = !s._open;
+          // scheduleRender só morfiza o último bloco; este cartão pode estar no meio da conversa
+          const c = cur();
+          const blk = row.closest("[data-start]");
+          const b = c && blk && blocksOf(c).find((x) => String(x.start) === blk.dataset.start);
+          if (!b) return scheduleRender();
+          const ms = $("#messages");
+          const top = ms.scrollTop;
+          morph(blk, renderBlock(b, c, false));
+          ms.scrollTop = top;
+        };
+
+      rows.append(row);
+
+      if (stepsArr.length && s._open)
+        rows.append(
+          h(
+            "div.substeps-nested",
+            null,
+            ...stepsArr.map((st) =>
+              h(
+                "div.substep.s-" + st.status,
+                null,
+
+                h("span", {
+                  html: svg(
+                    st.status === "running"
+                      ? "loader"
+                      : st.status === "error"
+                      ? "alert"
+                      : "check",
+                    st.status === "running" ? "spin" : ""
+                  ),
+                }),
+
+                h("span.ss-name", null, st.name),
+                h("span.ss-sub", null, st.summary || "")
+              )
+            )
+          )
+        );
     }
 
     bodyEl.append(
