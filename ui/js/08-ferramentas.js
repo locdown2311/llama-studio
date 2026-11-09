@@ -25,9 +25,6 @@ const FILE_MUT = new Set(['write_file', 'edit_file', 'create_directory']);
 /** Ferramentas só de leitura que podem rodar ao mesmo tempo (no agente e nos exploradores). */
 const PARALLEL_READS = new Set(['read_file', 'list_directory', 'search_files', 'read_skill_file', 'recall_history']);
 
-/** Aguarda o milissegundos informados (não bloqueia a UI). */
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
 /** Desfaz as alterações de arquivo das mensagens de ferramenta dadas (da mais nova para a mais antiga). */
 async function undoTools(conv, tmsgs) {
   const ids = []; const owners = [];
@@ -61,30 +58,6 @@ function readCoverage(conv, path, self) {
   let next = 1;
   for (const [a, b] of spans.sort((x, y) => x[0] - y[0])) if (a <= next && b >= next) next = b + 1;
   return { next, total };
-}
-
-/** Busca o estado atual do rate limit NIM via API. Retorna {used, wait_secs, max, window_secs}. */
-async function fetchNimStatus() {
-  try {
-    const data = await api('/api/nim-status');
-    return {
-      used: data.used || 0,
-      wait_secs: data.wait_secs || 0,
-      max: data.max || 40,
-      window_secs: data.window_secs || 60
-    };
-  } catch { /* ignora erros de rede */ }
-  
-  return { used: 0, wait_secs: 0, max: 40, window_secs: 60 };
-}
-
-/** Antes de um pedido ao NVIDIA NIM: espera o que o contador do servidor mandar (40 pedidos por 60 s, somando
-    tudo que usa o NIM). Com folga não espera nada; perto do limite espaça; no limite aguarda a janela abrir. */
-async function nimPace(signal) {
-  const { used, wait_secs, max } = await fetchNimStatus();
-  const ms = wait_secs > 0 ? wait_secs * 1000 + 500 : used >= max * 0.8 ? 3000 : used >= max * 0.5 ? 1500 : 0;
-  if (!ms) return;
-  await new Promise((r) => { const t = setTimeout(r, ms); signal?.addEventListener('abort', () => { clearTimeout(t); r(); }, { once: true }); });
 }
 
 /** Esta conversa já recebeu o sumário desse arquivo (read_file sem trecho de um arquivo grande)? */
@@ -258,8 +231,6 @@ async function runExplorer(args, tctx, tmsg, apiId) {
     if (tctx.signal.aborted) return { content: 'Cancelado.', isError: true };
     const last = step === max;
     if (last) msgs.push({ role: 'user', content: L('Limite de passos atingido. Escreva agora o relatório final com o que já encontrou.') });
-    // só o NVIDIA NIM tem limite por minuto: a pausa vale só para ele (local e outras APIs seguem direto)
-    if (remote && isNimApi(apiById(remote))) await nimPace(tctx.signal);
     const m = { content: '', reasoning: '', tool_calls: [] };
     if (remote) {
       try { await streamApi(msgs, last ? [] : tools, m, tctx.signal, null, { _p: remote, _timeout: 120000 }); tmsg.via = m.via; tmsg.apiTokens += m.usage?.total_tokens || 0; scheduleRender(); }

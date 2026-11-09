@@ -234,6 +234,7 @@ function updatePickers() {
   const dot = pending ? 'idle' : isRemote ? (remoteApi?.online === true ? 'ok' : remoteApi?.online === false ? 'err' : 'idle') : ({ ok: 'ok', loading: 'busy', offline: 'err' }[S.health.status] || '');
   const label = want ? want.name : S.model ? shortModel(S.model) : (S.health.status === 'loading' ? 'carregando...' : 'llama-server');
   pm.append(h('span.dot.' + dot), h('b', null, label.replace(/[-_.](I?Q\d[\w]*|BF16|F16|F32)$/i, '')), h('span', { html: svg('chev', 'caret'), style: { display: 'contents' } }));
+  maybeStartNimPoll();
   pm.title = pending ? L('{0}: será carregado no lugar de {1} quando você enviar', want.name, modelById(S.models.active)?.name || L('o atual')) : (want?.model || S.model || S.info.llamaUrl || '');
   pm.querySelector('.caret').style.transform = 'rotate(90deg)';
 

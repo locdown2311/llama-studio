@@ -3,8 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock, RwLock};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use crate::browser::Browser;
 use crate::llama::Llama;
@@ -12,8 +11,6 @@ use crate::mcp::Mcp;
 use std::collections::HashMap;
 
 pub const IS_WIN: bool = cfg!(windows);
-pub const NIM_MAX_REQS: usize = 40;
-pub const NIM_WINDOW: Duration = Duration::from_secs(60);
 
 /// Estado compartilhado, configuração e utilitários de caminho.
 #[derive(Debug, Clone)]
@@ -144,49 +141,13 @@ pub struct App {
     pub mcp: Mcp,
     pub browser: Browser,
     pub llama: Llama,
-    /// Contador global de requests NIM para rate limiting (40/min total).
-    pub nim_hits: OnceLock<Mutex<Vec<std::time::Instant>>>,
+    /// Fila do NVIDIA NIM (40 pedidos por minuto na conta).
+    pub nim: crate::nim::Nim,
 
     ui: OnceLock<Box<dyn Fn(UiMsg) + Send + Sync>>,
     pub rt: OnceLock<tokio::runtime::Handle>,
     pub native_window: std::sync::atomic::AtomicBool,
 }
-
-/// Janela móvel de 60s: conta o pedido e devolve a espera quando passa de 40.
-fn nim_gate_at(hits: &mut Vec<Instant>, now: Instant) -> Result<(), u64> {
-    hits.retain(|t| now.saturating_duration_since(*t) < NIM_WINDOW);
-    if hits.len() >= NIM_MAX_REQS {
-        let wait = hits.first().map(|t| NIM_WINDOW.saturating_sub(now.saturating_duration_since(*t))).unwrap_or(NIM_WINDOW);
-        return Err(wait.as_secs().max(1));
-    }
-    hits.push(now);
-    Ok(())
-}
-
-/// Contagem e espera do limite NIM para um único provedor.
-fn nim_state_single(hits: &Vec<Instant>, now: Instant) -> (u32, u32) {
-    let mut used: u32 = 0;
-    let mut oldest: Option<Instant> = None;
-    for t in hits.iter() {
-        if now.saturating_duration_since(*t) < NIM_WINDOW {
-            used += 1;
-            if oldest.map_or(true, |o| *t < o) {
-                oldest = Some(*t);
-            }
-        }
-    }
-    let wait_secs = if used >= NIM_MAX_REQS as u32 {
-        oldest.map_or(NIM_WINDOW.as_secs() as u32, |e| {
-            let age = now.saturating_duration_since(e).as_secs();
-            NIM_WINDOW.as_secs().saturating_sub(age).max(1) as u32
-        })
-    } else {
-        0
-    };
-    (used, wait_secs)
-}
-
-
 
 impl App {
     pub fn load() -> Arc<App> {
@@ -253,7 +214,7 @@ impl App {
             ui: OnceLock::new(),
             rt: OnceLock::new(),
             native_window: std::sync::atomic::AtomicBool::new(false),
-            nim_hits: OnceLock::new(),
+            nim: Default::default(),
         });
         app.save_config();
         app
@@ -261,18 +222,6 @@ impl App {
 
     pub fn cfg(&self) -> Config {
         self.config.read().unwrap().clone()
-    }
-
-    /// Retorna o contador de requests NIM (usado + tempo restante).
-    pub fn nim_status(&self) -> (u32, u32) {
-        let hits = self.nim_hits.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap_or_else(|e| e.into_inner());
-        nim_state_single(&hits, Instant::now())
-    }
-
-    /// Conta um pedido no limite do NIM (40/min total, não por provedor). Err = segundos de espera.
-    pub fn nim_gate(&self, _provider_id: &str) -> Result<(), u64> {
-        let mut hits = self.nim_hits.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap_or_else(|e| e.into_inner());
-        nim_gate_at(&mut hits, Instant::now())
     }
 
     pub fn workspace(&self) -> PathBuf {
@@ -541,39 +490,4 @@ pub fn now_ms() -> u128 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0)
-}
-
-#[cfg(test)]
-mod t {
-    use super::*;
-    #[test]
-    fn nim_limita_40_por_minuto() {
-        let mut hits: Vec<Instant> = Vec::new();
-        let t0 = Instant::now();
-        for i in 0..40 {
-            assert!(nim_gate_at(&mut hits, t0 + Duration::from_millis(i)).is_ok(), "pedido {i} passou");
-        }
-        let wait = nim_gate_at(&mut hits, t0 + Duration::from_millis(40)).unwrap_err();
-        assert!((1..=60).contains(&wait), "espera fora do range: {wait}");
-        // Depois de 60s o pedido mais antigo sai da janela e o limite volta.
-        assert!(nim_gate_at(&mut hits, t0 + Duration::from_secs(61)).is_ok());
-    }
-    #[test]
-    fn nim_status_espera_o_hit_mais_antigo() {
-        let t0 = Instant::now();
-        let now = t0 + Duration::from_secs(60);
-        let hits: Vec<Instant> = (1..=40).map(|i| t0 + Duration::from_secs(i)).collect();
-        let (used, wait) = nim_state_single(&hits, now);
-        assert_eq!(used, 40);
-        assert_eq!(wait, 1, "a espera é até o hit mais antigo sair da janela");
-    }
-    #[test]
-    fn nim_status_ignora_hit_fora_da_janela() {
-        let t0 = Instant::now();
-        let now = t0 + Duration::from_secs(61);
-        let hits = vec![t0];
-        let (used, wait) = nim_state_single(&hits, now);
-        assert_eq!(used, 0);
-        assert_eq!(wait, 0);
-    }
 }

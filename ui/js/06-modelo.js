@@ -254,7 +254,7 @@ async function streamApi(messages, tools, msg, signal, onDelta, extra = {}) {
   let late = false;
   const timer = setTimeout(() => { late = true; ac.abort(); }, _timeout);
   try {
-    await streamRaw(messages, tools, msg, ac.signal, onDelta, { ...ex, _remote: true });
+    await streamRaw(messages, tools, msg, ac.signal, onDelta, { ...ex, _remote: true, _bg: true });
     apiUse({ calls: 1, tokens: msg.usage?.total_tokens || 0 }, extra._p);
     msg.via = msg._fallbackModel || apiById(extra._p)?.model || '';
   } catch (e) {
@@ -269,7 +269,7 @@ async function streamApi(messages, tools, msg, signal, onDelta, extra = {}) {
 }
 
 async function streamRaw(messages, tools, msg, signal, onDelta, extra = {}) {
-  const { _fixed, _remote, _p, _think, ...rest } = extra;
+  const { _fixed, _remote, _p, _think, _bg, ...rest } = extra;
   // return_progress: o llama-server conta quanto do prompt já leu (barra de progresso antes da 1ª palavra)
   const body = { messages, stream: true, ...(_remote ? {} : { cache_prompt: true }), ...rest };
   if (!noProgress && !_remote) body.return_progress = true;
@@ -284,7 +284,7 @@ async function streamRaw(messages, tools, msg, signal, onDelta, extra = {}) {
     if (st.maxTokens !== '' && st.maxTokens != null && body.max_tokens == null) body.max_tokens = Number(st.maxTokens);
   }
 
-  const post = () => fetch(_remote ? '/remote/v1/chat/completions?p=' + encodeURIComponent(_p || '') : '/v1/chat/completions', {
+  const post = () => fetch(_remote ? '/remote/v1/chat/completions?p=' + encodeURIComponent(_p || '') + (_bg ? '&bg=1' : '') : '/v1/chat/completions', {
     method: 'POST', signal,
     headers: { 'Content-Type': 'application/json', 'X-Studio': '1' },
     body: JSON.stringify(body),

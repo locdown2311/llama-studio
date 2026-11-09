@@ -1872,147 +1872,53 @@ function renderChat() {
   maybeStartNimPoll();
 }
 
-/* --- indicador NVIDIA NIM --- */
+/* --- contador do NVIDIA NIM no rodapé do cartão da conversa --- */
+// Só aparece quando a conversa aberta roda num provedor NIM. O servidor é quem segura a fila (src/nim.rs);
+// aqui é só o mostrador: pedidos na janela de 60 s, e quanto falta para abrir vaga quando enche.
+const NIM = { timer: 0, data: null, at: 0 };
 
-let nimPollInterval = 0;
-
-function isNimModel() {
-  // API principal configurada: NVIDIA NIM pelo id "nvidia" ou pelo endpoint integrate.api.nvidia.com
-  return isNimApi(mainApiForChat());
-}
+function isNimModel() { return isNimApi(mainApiForChat()); }
 
 function maybeStartNimPoll() {
-  // só começa se já estivermos na view de chat
-
-  if (!$("#view-chat").classList.contains("active")) return;
-
-  // já está rodando?
-
-  if (nimPollInterval) return;
-
-  // só inicia se estiver usando modelo NIM
-
-  if (!isNimModel()) {
-    stopNimPoll();
-    return;
-  }
-
-  // busca inicial IMEDIATA (sem esperar o intervalo)
-
+  const el = $("#nim-meter");
+  if (!el) return;
+  if (S.view !== "chat" || !isNimModel()) { stopNimPoll(); el.hidden = true; return; }
+  if (NIM.timer) { drawNimMeter(); return; }
   updateNimStatusChat();
-
-  // poll a cada 5 segundos (mais responsivo)
-
-  nimPollInterval = setInterval(updateNimStatusChat, 5000);
+  // de segundo em segundo: redesenha a contagem regressiva; consulta o servidor a cada 3 s (1 s com resposta em curso)
+  NIM.timer = setInterval(() => {
+    if (S.view !== "chat" || !isNimModel()) return maybeStartNimPoll();
+    const every = S.runs.size || NIM.data?.wait_secs || NIM.data?.waiting ? 1000 : 3000;
+    if (Date.now() - NIM.at >= every - 50) updateNimStatusChat(); else drawNimMeter();
+  }, 1000);
 }
 
-function stopNimPoll() {
-  if (nimPollInterval) {
-    clearInterval(nimPollInterval);
-    nimPollInterval = 0;
-  }
+function stopNimPoll() { clearInterval(NIM.timer); NIM.timer = 0; }
+
+async function updateNimStatusChat() {
+  NIM.at = Date.now();
+  try { NIM.data = await api("/api/nim-status"); } catch { /* servidor fora: mantém o último */ }
+  drawNimMeter();
 }
 
-function getNimLevel(used, total) {
-  if (total <= 0) return "limit";
-
-  const pct = (used / total) * 100;
-
-  if (pct >= 80) return "high";
-
-  if (pct >= 50) return "medium";
-
-  // pct > 0 inclui todos os valores > 0; pct === 0 (zero uso) também é 'low' — faz sentido lógico
-
-  return "low";
-}
-
-function updateNimStatusChat() {
-  // verifica se ainda estamos usando modelo NIM
-
-  if (!isNimModel()) {
-    stopNimPoll();
-    return;
-  }
-
-  // busca status da API
-
-  api("/api/nim-status")
-    .then((data) => {
-      let used, total;
-
-      // Se não houver dados, usa used=0, total=40 para calcular nível corretamente
-
-      // (sem forçar 'limit' — permite que 0% seja classificado como 'low')
-
-      if (!data) {
-        used = 0;
-
-        total = 40;
-      } else {
-        // API retorna: {used, wait_secs, max=40, window_secs=60}
-
-        used = data.used || 0;
-
-        total = data.max || 40; // usa 'max' da API (padrão 40)
-      }
-
-      const level = getNimLevel(used, total);
-
-      const pct = Math.min(100, Math.max(0, Math.round((used / total) * 100)));
-
-      // atualizar indicador no cabeçalho
-
-      const ind = $("#chat-nim-indicator");
-
-      if (ind) {
-        ind.className = "chat-nim-indicator " + level;
-        ind.style.display = "flex";
-        const txt = ind.querySelector(".txt");
-        if (txt) txt.textContent = L("NIM: {0} / {1}", used.toLocaleString(), total.toLocaleString());
-        const fill = ind.querySelector(".fill");
-        if (fill) fill.style.width = pct + "%";
-      }
-
-      // atualizar indicador flutuante
-
-      const floatInd = $("#chat-nim-floating");
-
-      if (floatInd) {
-        floatInd.textContent =
-          used.toLocaleString() + "/" + total.toLocaleString();
-
-        floatInd.className = "chat-nim-floating " + level;
-      }
-    })
-
-    .catch((e) => {
-      console.warn("NIM status error:", e.message);
-
-      // em caso de erro, mostra estado: used=0, total=40 → nível 'low' (0% uso)
-
-      let used = 0,
-        total = 40;
-
-      const level = getNimLevel(used, total);
-
-      const pct = 0;
-
-      const ind = $("#chat-nim-indicator");
-
-      if (ind) {
-        ind.className = "chat-nim-indicator " + level;
-        ind.querySelector(".txt").textContent = L("NIM off");
-      }
-
-      const floatInd = $("#chat-nim-floating");
-
-      if (floatInd) {
-        floatInd.textContent = "0/40";
-        floatInd.style.display = "block";
-        floatInd.className = "chat-nim-floating " + level;
-      }
-    });
+function drawNimMeter() {
+  const el = $("#nim-meter");
+  if (!el) return;
+  const d = NIM.data;
+  if (!d || !isNimModel()) { el.hidden = true; return; }
+  const age = Math.floor((Date.now() - NIM.at) / 1000);
+  const wait = Math.max(0, (d.wait_secs || 0) - age);
+  const budget = d.budget || d.max || 40;
+  const pct = Math.min(100, (d.used / budget) * 100);
+  const lvl = wait > 0 || d.used >= budget ? "full" : pct >= 80 ? "hi" : pct >= 50 ? "mid" : "lo";
+  el.hidden = false;
+  el.className = "nim-meter " + lvl;
+  const txt = wait > 0 ? L("NIM {0}/{1} · {2}s", d.used, d.max, wait) : L("NIM {0}/{1}", d.used, d.max);
+  el.innerHTML = `<i style="width:${pct.toFixed(0)}%"></i><span>${txt}</span>`;
+  el.title = (wait > 0
+    ? L("NVIDIA NIM: limite de {0} pedidos por minuto atingido. Os pedidos ficam na fila e saem sozinhos em {1}s.", d.max, wait)
+    : L("NVIDIA NIM: {0} de {1} pedidos no último minuto. O studio usa até {2} e guarda {3} para a conversa (exploradores e tarefas de fundo esperam antes).", d.used, d.max, budget, d.reserve || 0))
+    + (d.waiting ? " " + L("{0} na fila agora.", d.waiting) : "");
 }
 
 /* ------------------------------------------------------------ chat */

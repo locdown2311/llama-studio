@@ -34,7 +34,7 @@ enum SendErr {
 impl SendErr {
     fn msg(self) -> String {
         match self {
-            SendErr::Limit(s) => LF!("Limite do NVIDIA NIM: 40 pedidos por minuto. Tente de novo em {}s.", "NVIDIA NIM limit: 40 requests per minute. Retry in {}s.", s),
+            SendErr::Limit(s) => LF!("Limite do NVIDIA NIM: 40 pedidos por minuto. Fila cheia. Tente de novo em {}s.", "NVIDIA NIM limit: 40 requests per minute. Queue full. Retry in {}s.", s),
             SendErr::Net(e) => chain(e),
         }
     }
@@ -98,12 +98,15 @@ fn client() -> &'static reqwest::Client {
             .expect("cliente das APIs externas")
     })
 }
-async fn send_with_retries(app: &App, c: &ApiProvider, body_str: &str, max_retries: u32) -> Result<reqwest::Response, SendErr> {
+/// `side`: pedido que não é a conversa (explorador, auditor, tarefa de fundo); na fila do NIM ele cede a vez.
+async fn send_with_retries(app: &App, c: &ApiProvider, body_str: &str, max_retries: u32, side: bool) -> Result<reqwest::Response, SendErr> {
     let mut attempt = 0u32;
+    let nim = is_nim(c);
 
     loop {
-        if is_nim(c) {
-            if let Err(wait) = app.nim_gate(&c.id) {
+        // NIM: espera uma vaga na janela de 60 s em vez de bater no limite (as novas tentativas também contam)
+        if nim {
+            if let Err(wait) = app.nim.acquire(side).await {
                 return Err(SendErr::Limit(wait));
             }
         }
@@ -129,6 +132,17 @@ async fn send_with_retries(app: &App, c: &ApiProvider, body_str: &str, max_retri
                 tokio::time::sleep(Duration::from_millis(delay)).await;
             }
 
+            // o NIM recusou mesmo com a fila (outro programa na mesma chave): fecha a porta pelo tempo que ele
+            // pedir; a próxima tentativa espera na fila em vez de insistir e gastar mais pedidos
+            Ok(r) if nim && r.status().as_u16() == 429 => {
+                let secs = r.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(15);
+                app.nim.block(secs);
+                if attempt >= max_retries.max(1) {
+                    return Ok(r);
+                }
+                attempt += 1;
+            }
+
             Ok(r) if matches!(r.status().as_u16(), 429 | 500 | 502 | 503 | 529) && attempt < max_retries => {
                 attempt += 1;
                 let delay = std::cmp::min(1000 * attempt as u64, 3000);
@@ -151,7 +165,7 @@ pub async fn call_provider_direct(app: &App, provider_id: &str, prompt: &str) ->
     });
 
     let max_retries = c.retries.unwrap_or(1).min(10);
-    let sent = send_with_retries(app, &c, &body.to_string(), max_retries).await;
+    let sent = send_with_retries(app, &c, &body.to_string(), max_retries, true).await;
 
     match sent {
         Ok(resp) => {
@@ -201,7 +215,7 @@ fn apply_think(o: &mut serde_json::Map<String, Value>, c: &ApiProvider, mode: Op
     }
 }
 
-pub async fn chat(app: &App, id: &str, body: Bytes) -> Response {
+pub async fn chat(app: &App, id: &str, body: Bytes, side: bool) -> Response {
 
     let Some(c) = provider(app, id).filter(ready) else {
         return err(StatusCode::BAD_REQUEST, L!("Essa API externa não está configurada.", "That external API is not configured.").into());
@@ -245,7 +259,7 @@ pub async fn chat(app: &App, id: &str, body: Bytes) -> Response {
     };
 
     let max_retries = c.retries.unwrap_or(1).min(10);
-    let mut sent = send_with_retries(app, &c, &prep_body(&c.model), max_retries).await;
+    let mut sent = send_with_retries(app, &c, &prep_body(&c.model), max_retries, side).await;
     let mut used_fallback = false;
 
     let has_fallback = !c.fallback_model.trim().is_empty() && c.fallback_model.trim() != c.model.trim();
@@ -256,7 +270,7 @@ pub async fn chat(app: &App, id: &str, body: Bytes) -> Response {
             Ok(r) => !r.status().is_success(),
         };
         if needs_fallback {
-            let fb_res = send_with_retries(app, &c, &prep_body(&c.fallback_model), max_retries).await;
+            let fb_res = send_with_retries(app, &c, &prep_body(&c.fallback_model), max_retries, side).await;
             match fb_res {
                 // Usa 'ref r2' para apenas referenciar a resposta ao checar o status, sem movê-la
                 Ok(ref r2) if r2.status().is_success() => {

@@ -23,6 +23,7 @@ mod engines;
 mod hf;
 mod mcp;
 mod models;
+mod nim;
 mod pe;
 mod packs;
 mod procmem;

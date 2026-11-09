@@ -238,7 +238,8 @@ async fn proxy(State(app): S, req: Request) -> Response {
         
         if path.ends_with("/chat/completions") || path.ends_with("/completions") {
             // Manda o request transparente para o crate::remote em vez do llama-server
-            return crate::remote::chat(&app, provider_id, bytes).await;
+            // pelo proxy só chegam pedidos laterais (a conversa num perfil remoto vai direto em /remote)
+            return crate::remote::chat(&app, provider_id, bytes, true).await;
         } else if path.ends_with("/models") {
             return (StatusCode::OK, Json(json!({"data": [{"id": current_model, "object": "model"}]}))).into_response();
         } else if path == "/props" {
@@ -282,7 +283,7 @@ async fn proxy(State(app): S, req: Request) -> Response {
 }
 
 async fn remote_chat(State(app): S, Query(qs): Q, b: Bytes) -> Response {
-    crate::remote::chat(&app, q(&qs, "p"), b).await
+    crate::remote::chat(&app, q(&qs, "p"), b, q(&qs, "bg") == "1").await
 }
 
 async fn remote_warm(State(app): S, Query(qs): Q) -> Res {
@@ -674,8 +675,9 @@ async fn skills_get(State(app): S, Query(qs): Q) -> Res {
 }
 
 async fn nim_status_handler(State(app): S) -> Res {
-    let (used, wait_secs) = app.nim_status();
-    ok(json!({"used": used, "wait_secs": wait_secs, "max": app::NIM_MAX_REQS, "window_secs": app::NIM_WINDOW.as_secs()}))
+    let n = app.nim.status();
+    ok(json!({"used": n.used, "wait_secs": n.wait_secs, "waiting": n.waiting, "free": n.free, "next_secs": n.next_secs,
+        "max": crate::nim::MAX, "budget": crate::nim::BUDGET, "reserve": crate::nim::RESERVE, "window_secs": crate::nim::WINDOW.as_secs()}))
 }
 
 async fn skills_save(State(app): S, b: Bytes) -> Res {

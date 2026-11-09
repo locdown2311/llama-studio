@@ -1526,5 +1526,10 @@ const I18N_EN = {
 "131072 (padrão)": "131072 (default)",
 "Tamanho da janela do modelo. O medidor de contexto e a compactação automática usam este número quando a conversa roda nesta API.": "The model's window size. The context meter and automatic compaction use this number when the chat runs on this API.",
 "Oferecer as APIs como ferramentas": "Offer the APIs as tools",
-"O modelo da conversa ganha uma ferramenta por API pronta (remote_api_...) para mandar um prompt a ela. Cada uma ocupa contexto em todo pedido; deixe desligado se não usa.": "The chat model gets one tool per ready API (remote_api_...) to send it a prompt. Each one takes context on every request; leave it off if you do not use it."
+"O modelo da conversa ganha uma ferramenta por API pronta (remote_api_...) para mandar um prompt a ela. Cada uma ocupa contexto em todo pedido; deixe desligado se não usa.": "The chat model gets one tool per ready API (remote_api_...) to send it a prompt. Each one takes context on every request; leave it off if you do not use it.",
+"NIM {0}/{1} · {2}s": "NIM {0}/{1} · {2}s",
+"NIM {0}/{1}": "NIM {0}/{1}",
+"NVIDIA NIM: limite de {0} pedidos por minuto atingido. Os pedidos ficam na fila e saem sozinhos em {1}s.": "NVIDIA NIM: limit of {0} requests per minute reached. Requests wait in the queue and go out by themselves in {1}s.",
+"NVIDIA NIM: {0} de {1} pedidos no último minuto. O studio usa até {2} e guarda {3} para a conversa (exploradores e tarefas de fundo esperam antes).": "NVIDIA NIM: {0} of {1} requests in the last minute. The studio uses up to {2} and keeps {3} for the chat (explorers and background tasks wait earlier).",
+"{0} na fila agora.": "{0} in the queue now."
 };
