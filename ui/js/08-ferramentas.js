@@ -1,4 +1,4 @@
-/* llama studio - ferramentas internas (execute_code, explorar, histórico...) */
+/*. llama studio - ferramentas internas (execute_code, explorar, histórico...) */
 'use strict';
 
 /* ============================================================ ferramentas internas */
