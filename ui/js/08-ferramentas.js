@@ -253,9 +253,9 @@ async function runExplorer(args, tctx, tmsg) {
   let { used, wait_secs, max: nim_max, window_secs } = await fetchNimStatus();
   // Se já estamos perto do limite, aumentar delays
   const margin = nim_max - used; // requisições ainda disponíveis
-  let delayInit = totalSteps > 3 ? 5000 : 0;
+  let delayInit = max > 3 ? 5000 : 0;
   let delayBetween = 3000;
-  let delayExtra = totalSteps > 5 ? 2000 : 0;
+  let delayExtra = max > 5 ? 2000 : 0;
   // Se quase no limite (used >= 80% do max), dobrar os delays
   if (margin <= nim_max * 0.2) {
     delayInit = Math.max(delayInit, 10000);
@@ -273,7 +273,7 @@ async function runExplorer(args, tctx, tmsg) {
     const last = step === max;
     if (last) msgs.push({ role: 'user', content: L('Limite de passos atingido. Escreva agora o relatório final com o que já encontrou.') });
     // delay extra a cada 3 tópicos (após o inicial)
-    if (totalSteps > 5 && step > 0 && step % 3 === 0) {
+    if (max > 5 && step > 0 && step % 3 === 0) {
       await sleep(delayExtra);
     }
     // delay entre tópicos (sem delay após o último)

@@ -12,7 +12,7 @@ o `WebView2Loader.dll` precisa ficar ao lado do .exe; no MSVC ele vai embutido.
 
 Opções do executável:
 - `--navegador`         usa o navegador em vez da janela própria
-- `--bandeja`           começa só com o ícone na bandeja
+- `--bandeja`           começa só com o ícone na bandejaca
 - `--iniciar-servidor`  inicia o llama-server ao abrir (se já estiver aberto, só pede para iniciar)
 
 Pastas:
