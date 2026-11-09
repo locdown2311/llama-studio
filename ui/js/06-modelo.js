@@ -45,6 +45,7 @@ function thinkNow(conv) {
 function requestExtras(conv) {
   const x = {};
   const t = thinkNow(conv);
+  x._think = t;
   if (t !== 'auto') x.chat_template_kwargs = { enable_thinking: t === 'on' };
   if (t === 'off') x.reasoning_budget = 0;
   if (conv._slot != null) x.id_slot = conv._slot;
@@ -260,10 +261,14 @@ async function streamApi(messages, tools, msg, signal, onDelta, extra = {}) {
 }
 
 async function streamRaw(messages, tools, msg, signal, onDelta, extra = {}) {
-  const { _fixed, _remote, _p, ...rest } = extra;
+  const { _fixed, _remote, _p, _think, ...rest } = extra;
   // return_progress: o llama-server conta quanto do prompt já leu (barra de progresso antes da 1ª palavra)
   const body = { messages, stream: true, ...(_remote ? {} : { cache_prompt: true }), ...rest };
   if (!noProgress && !_remote) body.return_progress = true;
+  // botão de raciocínio no remoto: mapeia modos para reasoning_effort (padrão OpenAI)
+  if (_remote && _think && _think !== 'auto') {
+    body.reasoning_effort = _think === 'on' ? 'high' : _think === 'eco' ? 'low' : 'low';
+  }
   msg._t0 = Date.now(); msg._pp = null;
   if (tools.length) body.tools = tools;
   const st = S.settings;

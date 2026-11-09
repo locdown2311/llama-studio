@@ -71,12 +71,20 @@ pub fn load(app: &App) -> Vec<Profile> {
 pub fn remote_profiles(app: &App) -> Vec<Profile> {
     app.cfg().api_providers.iter()
         .filter(|p| crate::remote::ready(p))
-        .map(|p| Profile {
-            id: format!("api_{}", p.id),
-            name: format!("☁️ {} ({})", p.name, p.model),
-            model: format!("remote:{}", p.id),
-            context: 32768,
-            ..Default::default()
+        .map(|p| {
+            // nome customizado no painel; sem nome, mostra o id do modelo
+            let name = if p.name.trim().is_empty() {
+                format!("☁️ {}", p.model)
+            } else {
+                format!("☁️ {}", p.name.trim())
+            };
+            Profile {
+                id: format!("api_{}", p.id),
+                name,
+                model: format!("remote:{}", p.id),
+                context: 32768,
+                ..Default::default()
+            }
         })
         .collect()
 }

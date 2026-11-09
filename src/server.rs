@@ -127,6 +127,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/remote/v1/chat/completions", post(remote_chat))
         .route("/api/remote/models", get(remote_models))
         .route("/api/remote/warm", post(remote_warm))
+        .route("/api/remote/ping", get(remote_ping))
         .route("/v1/{*rest}", any(proxy))
         .route("/props", any(proxy))
         .route("/health", any(proxy))
@@ -291,6 +292,13 @@ async fn remote_models(State(app): S, Query(qs): Q) -> Res {
     match crate::remote::models(&app, q(&qs, "p")).await {
         Ok(m) => ok(json!({ "models": m })),
         Err(e) => Err(bad(e)),
+    }
+}
+
+async fn remote_ping(State(app): S, Query(qs): Q) -> Res {
+    match crate::remote::ping(&app, q(&qs, "p")).await {
+        Ok(()) => ok(json!({ "ok": true })),
+        Err(e) => ok(json!({ "ok": false, "error": e })),
     }
 }
 

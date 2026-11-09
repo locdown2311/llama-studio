@@ -184,6 +184,8 @@ function apiSection(put, field, saved) {
     key.addEventListener('change', () => { if (key.value.trim()) save({ apiProvider: { id: a.id, key: key.value.trim() } }); });
     const base = h('input.input.mono', { value: a.base || '', placeholder: 'https://.../v1' });
     base.addEventListener('change', () => save({ apiProvider: { id: a.id, base: base.value.trim() } }));
+    const nome = h('input.input', { value: a.name || '', placeholder: L('ex.: Groq rápido') });
+    nome.addEventListener('change', () => save({ apiProvider: { id: a.id, name: nome.value.trim() } }));
     const dl = h('datalist', { id: 'api-models-' + a.id });
     const model = h('input.input.mono', { value: a.model || '', placeholder: L('ex.: o id do modelo'), list: 'api-models-' + a.id });
     model.addEventListener('change', () => save({ apiProvider: { id: a.id, model: model.value.trim() } }));
@@ -240,9 +242,9 @@ function apiSection(put, field, saved) {
       i.addEventListener('change', () => { const v = i.value.trim(); if (v === '') delete prm[k]; else prm[k] = Number(v); saveParams(); });
       return i;
     };
-    const known = ['temperature', 'top_p', 'max_tokens'];
+    const known = ['temperature', 'top_p', 'max_tokens', 'reasoning_effort', 'reasoning_tokens'];
     const others = Object.fromEntries(Object.entries(prm).filter(([k]) => !known.includes(k)));
-    const extra = h('textarea.input.mono', { rows: 3, spellcheck: false, placeholder: '{"reasoning_effort": "low"}' }, Object.keys(others).length ? JSON.stringify(others, null, 2) : '');
+    const extra = h('textarea.input.mono', { rows: 3, spellcheck: false, placeholder: '{"seed": 42}' }, Object.keys(others).length ? JSON.stringify(others, null, 2) : '');
     extra.addEventListener('change', () => {
       let o = {};
       if (extra.value.trim()) { try { o = JSON.parse(extra.value); if (!o || typeof o !== 'object' || Array.isArray(o)) throw new Error(); } catch { toast(L('Os outros parâmetros precisam ser um objeto JSON.'), 'err'); return; } }
@@ -257,12 +259,30 @@ function apiSection(put, field, saved) {
         field(L('Temperatura'), num('temperature', L('do studio'), '0.05')),
         field(L('Top P'), num('top_p', L('do studio'), '0.01')),
         field(L('Máx. de tokens'), num('max_tokens', L('do studio'), '1'))),
+      h('div.api-params-row', null,
+        field(L('Esforço de raciocínio'), (() => {
+          const sel = h('select.select', null, h('option', { value: '' }, L('automático')), h('option', { value: 'low' }, L('baixo')), h('option', { value: 'medium' }, L('médio')), h('option', { value: 'high' }, L('alto')));
+          sel.value = prm.reasoning_effort || '';
+          sel.addEventListener('change', () => { const v = sel.value.trim(); if (v === '') delete prm.reasoning_effort; else prm.reasoning_effort = v; saveParams(); });
+          return sel;
+        })(), L('Quanto o modelo pensa antes de responder (OpenAI, DeepSeek).')),
+        field(L('Limite de raciocínio (tokens)'), num('reasoning_tokens', L('sem limite'), '1'))),
       field(L('Outros parâmetros (JSON)'), extra, L('Vão em todo pedido para esta API, por cima dos do studio. Ex.: reasoning_effort, chat_template_kwargs, top_k. Vazio = o studio decide (o auditor usa temperatura 0, por exemplo).')));
     const u = apiUse(null, a.id);
+    const pingBtn = h('button.icon-btn.sm', { type: 'button', title: L('Verificar se a API responde'), 'aria-label': L('Ping'), html: svg('refresh'), onclick: async () => {
+      pingBtn.classList.add('spinning');
+      try {
+        const r = await api('/api/remote/ping?p=' + encodeURIComponent(a.id));
+        if (r.ok) { toast(L('API online')); pingBtn.classList.remove('err'); pingBtn.classList.add('ok'); }
+        else { toast(r.error || L('API offline'), 'err'); pingBtn.classList.remove('ok'); pingBtn.classList.add('err'); }
+      } catch (e) { toast(e.message, 'err'); pingBtn.classList.remove('ok'); pingBtn.classList.add('err'); }
+      setTimeout(() => pingBtn.classList.remove('spinning', 'ok', 'err'), 3000);
+    } });
     return h('div.api-card', null,
       h('div.api-head', null, h('b', null, apiLabel(a)), a.ready ? h('span.tag.ok', null, L('pronta')) : h('span.tag.off', null, L('incompleta')),
-        h('span.spacer'), pre?.[3] ? h('a.bin-link', { href: pre[3], target: '_blank', rel: 'noopener' }, ic('external'), L('Pegar uma chave grátis')) : null, del),
+        h('span.spacer'), pre?.[3] ? h('a.bin-link', { href: pre[3], target: '_blank', rel: 'noopener' }, ic('external'), L('Pegar uma chave grátis')) : null, pingBtn, del),
       pre ? null : field(L('Endereço'), base, L('O que vem antes de /chat/completions.')),
+      field(L('Nome'), nome, L('Como aparece na lista de modelos. Vazio = id do modelo.')),
       field(L('Chave'), key),
       field(L('Modelo'), h('div.row', null, model, dl, listBtn, test)),
       testOut,field(L('Modelo de fallback'), fallbackModel, L('Opcional. Se o modelo principal falhar (400, 404, 429, 500...) ou a API cair, tenta este modelo no mesmo servidor.')),

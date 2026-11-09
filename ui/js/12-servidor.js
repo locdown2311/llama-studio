@@ -886,3 +886,20 @@ async function checkHealth() {
   el.onclick = (e) => { if (!e.target.closest('button')) setView('server'); };
   updatePickers(); renderChatTitle();
 }
+
+/* ============================================================ ping das APIs remotas */
+async function pingApis() {
+  const apis = S.info.apis || [];
+  for (const a of apis) {
+    if (!a.ready) continue;
+    try {
+      const r = await api('/api/remote/ping?p=' + encodeURIComponent(a.id));
+      a.online = r.ok;
+      a.pingError = r.ok ? null : (r.error || 'offline');
+    } catch {
+      a.online = false;
+      a.pingError = 'offline';
+    }
+  }
+  updatePickers();
+}

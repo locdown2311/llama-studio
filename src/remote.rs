@@ -191,8 +191,11 @@ pub async fn chat(app: &App, id: &str, body: Bytes) -> Response {
         }
 
         // parâmetros escolhidos para este provedor: valem por cima dos do studio (menos os que definem o pedido)
+        // se o botão da conversa já mandou reasoning_effort/reasoning_tokens, respeita (override por conversa)
         for (k, val) in &c.params {
-            if !matches!(k.as_str(), "model" | "messages" | "tools" | "stream" | "stream_options") {
+            if !matches!(k.as_str(), "model" | "messages" | "tools" | "stream" | "stream_options")
+                && !(matches!(k.as_str(), "reasoning_effort" | "reasoning_tokens") && o.contains_key(k))
+            {
                 o.insert(k.clone(), val.clone());
             }
         }
@@ -276,6 +279,24 @@ pub async fn warm(app: &App, id: &str) {
     let Ok(u) = reqwest::Url::parse(c.base.trim()) else { return };
     let Ok(root) = u.join("/") else { return };
     let _ = client().head(root).timeout(Duration::from_secs(5)).header("User-Agent", "llama-studio").send().await;
+}
+
+/// Testa se a API responde (ping leve). Retorna Ok se a API está online.
+pub async fn ping(app: &App, id: &str) -> Result<(), String> {
+    let c = provider(app, id).ok_or_else(|| L!("API não encontrada.", "API not found.").to_string())?;
+    if c.base.trim().is_empty() || c.model.trim().is_empty() {
+        return Err(L!("Configuração incompleta.", "Incomplete configuration.").into());
+    }
+    let mut rb = client().get(endpoint(&c.base, "models")).timeout(Duration::from_secs(10)).header("User-Agent", "llama-studio");
+    if !c.key.trim().is_empty() {
+        rb = rb.bearer_auth(c.key.trim());
+    }
+    let resp = rb.send().await.map_err(chain)?;
+    if resp.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("HTTP {}", resp.status().as_u16()))
+    }
 }
 
 /// Lista os modelos do provedor (GET /models), para escolher sem digitar.

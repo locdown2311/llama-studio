@@ -228,7 +228,10 @@ function updatePickers() {
   const pm = $('#pick-model'); pm.innerHTML = '';
   const want = convModel(c);
   const pending = want && S.models.active && want.id !== S.models.active;
-  const dot = pending ? 'idle' : ({ ok: 'ok', loading: 'busy', offline: 'err' }[S.health.status] || '');
+  // para APIs remotas, mostra o status real (online/offline) em vez do llama-server
+  const isRemote = want?.model?.startsWith('remote:');
+  const remoteApi = isRemote ? (S.info.apis || []).find((a) => a.id === want.model.slice(7)) : null;
+  const dot = pending ? 'idle' : isRemote ? (remoteApi?.online === true ? 'ok' : remoteApi?.online === false ? 'err' : 'idle') : ({ ok: 'ok', loading: 'busy', offline: 'err' }[S.health.status] || '');
   const label = want ? want.name : S.model ? shortModel(S.model) : (S.health.status === 'loading' ? 'carregando...' : 'llama-server');
   pm.append(h('span.dot.' + dot), h('b', null, label.replace(/[-_.](I?Q\d[\w]*|BF16|F16|F32)$/i, '')), h('span', { html: svg('chev', 'caret'), style: { display: 'contents' } }));
   pm.title = pending ? L('{0}: será carregado no lugar de {1} quando você enviar', want.name, modelById(S.models.active)?.name || L('o atual')) : (want?.model || S.model || S.info.llamaUrl || '');
