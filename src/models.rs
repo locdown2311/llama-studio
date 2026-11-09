@@ -1,5 +1,5 @@
-﻿//! VÃ¡rios modelos cadastrados, um carregado por vez.
-//! Cada perfil guarda o arquivo .gguf e os parÃ¢metros que mudam de modelo para modelo
+//! Vários modelos cadastrados, um carregado por vez.
+//! Cada perfil guarda o arquivo .gguf e os parâmetros que mudam de modelo para modelo
 //! (contexto, camadas MoE na CPU, threads, argumentos extras). Ativar um perfil copia
 //! esses campos para o llama-gui.json e reinicia o llama-server.
 
@@ -40,7 +40,7 @@ fn from_cfg(c: &LlamaCfg, id: &str) -> Profile {
     }
 }
 
-/// Nome legÃ­vel a partir do arquivo (sem pasta, extensÃ£o e partes "-00001-of-00003").
+/// Nome legível a partir do arquivo (sem pasta, extensão e partes "-00001-of-00003").
 pub fn name_of(path: &str) -> String {
     let base = path.rsplit(['/', '\\']).next().unwrap_or(path);
     let base = base.strip_suffix(".gguf").unwrap_or(base);
@@ -82,7 +82,7 @@ pub fn remote_profiles(app: &App) -> Vec<Profile> {
                 id: format!("api_{}", p.id),
                 name,
                 model: format!("remote:{}", p.id),
-                context: 32768,
+                context: crate::remote::context_of(p),
                 ..Default::default()
             }
         })
@@ -107,13 +107,13 @@ pub fn save(app: &App, list: &[Profile]) {
         .filter(|p| !p.model.starts_with("remote:"))
         .cloned()
         .collect::<Vec<_>>();
-    // ordena por nome (caso) para ser previsÃ­vel
+    // ordena por nome (caso) para ser previsível
     local.sort_by(|a, b| a.name.cmp(&b.name));
     let json = serde_json::to_vec_pretty(&local).unwrap_or_else(|_| vec![]);
     std::fs::write(file(app), json).ok();
 }
 
-/// Perfil cujo modelo estÃ¡ configurado no llama-server agora.
+/// Perfil cujo modelo está configurado no llama-server agora.
 pub fn active_id(app: &App, list: &[Profile]) -> Option<String> {
     let c = app.llama.cfg();
     list.iter().find(|p| same_path(&p.model, &c.model)).map(|p| p.id.clone())
@@ -140,7 +140,7 @@ fn scan(app: &App, known: &[Profile]) -> Vec<Value> {
             if !name.ends_with(".gguf") || name.contains("mmproj") {
                 continue;
             }
-            // de modelos divididos, sÃ³ a primeira parte
+            // de modelos divididos, só a primeira parte
             if regex_lite::Regex::new(r"-\d{5}-of-\d{5}\.gguf$").unwrap().is_match(&name) && !name.contains("-00001-of-") {
                 continue;
             }
@@ -165,14 +165,14 @@ pub fn list_json(app: &App) -> Value {
     json!({"models": list, "active": active, "found": found, "defaults": from_cfg(&app.llama.cfg(), "")})
 }
 
-/// Carrega o perfil: grava os parÃ¢metros e (re)inicia o llama-server.
+/// Carrega o perfil: grava os parâmetros e (re)inicia o llama-server.
 pub async fn activate(app: &Arc<App>, id: &str) -> Result<Value, String> {
     let list = full_list(app); 
     
-    let p = list.iter().find(|p| p.id == id).ok_or(L!("Modelo nÃ£o encontrado.", "Model not found."))?.clone();
+    let p = list.iter().find(|p| p.id == id).ok_or(L!("Modelo não encontrado.", "Model not found."))?.clone();
     let is_remote = p.model.starts_with("remote:");
     
-    // Modelos remotos nÃ£o usam o llama-server local
+    // Modelos remotos não usam o llama-server local
     if is_remote {
         let mut c = app.llama.cfg();
         c.model = p.model.clone();
@@ -186,7 +186,7 @@ pub async fn activate(app: &Arc<App>, id: &str) -> Result<Value, String> {
     
     // Verifica se o arquivo do modelo existe
     if !Path::new(&p.model).is_file() {
-        return Err(LF!("O arquivo do modelo nÃ£o existe: {}", "The model file does not exist: {}", p.model));
+        return Err(LF!("O arquivo do modelo não existe: {}", "The model file does not exist: {}", p.model));
     }
     
     let state = app.llama.state();
@@ -229,7 +229,7 @@ pub async fn activate(app: &Arc<App>, id: &str) -> Result<Value, String> {
     Err(last)
 }
 
-/// O formulÃ¡rio do servidor editou a configuraÃ§Ã£o direta: leva as mudanÃ§as para o perfil
+/// O formulário do servidor editou a configuração direta: leva as mudanças para o perfil
 /// do modelo que estava ativo (ou cria um perfil se o modelo for novo).
 pub fn sync_from_cfg(app: &App, old_model: &str) {
     let c = app.llama.cfg();

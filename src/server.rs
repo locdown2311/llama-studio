@@ -241,6 +241,9 @@ async fn proxy(State(app): S, req: Request) -> Response {
             return crate::remote::chat(&app, provider_id, bytes).await;
         } else if path.ends_with("/models") {
             return (StatusCode::OK, Json(json!({"data": [{"id": current_model, "object": "model"}]}))).into_response();
+        } else if path == "/props" {
+            let ctx = app.cfg().api_providers.iter().find(|p| p.id == provider_id).map(crate::remote::context_of).unwrap_or(crate::remote::DEFAULT_CONTEXT);
+            return (StatusCode::OK, Json(json!({"model_alias": current_model, "default_generation_settings": {"n_ctx": ctx}, "total_slots": 1, "ignored_by_remote": true}))).into_response();
         } else {
             // Resposta vazia gentil para endpoints locais que não existem em APIs remotas (ex: /tokenize)
             return (StatusCode::OK, Json(json!({"status": "ok", "ignored_by_remote": true}))).into_response();
@@ -367,6 +370,9 @@ async fn set_config(State(app): S, b: Bytes) -> Res {
                     if let Some(x) = p.get(k).and_then(Value::as_str) {
                         *f = x.trim().to_string();
                     }
+                }
+                if let Some(x) = p.get("context") {
+                    e.context = x.as_u64().map(|n| n.min(4_000_000) as u32).unwrap_or(0);
                 }
                 if let Some(r) = p.get("retries") {
                     e.retries = r.as_u64().map(|n| (n as u32).min(10));
@@ -859,7 +865,11 @@ async fn tools_list(State(app): S, b: Bytes) -> Res {
     // Pega as ferramentas normais geradas pelo sistema
     let mut built = tools::build_tools(&app, &groups_of(&v), &strs(&v, "mcp"), !strs(&v, "skills").is_empty(), &strs(&v, "extra"), only.as_deref(), lazy, &strs(&v, "eager"), &strs(&v, "full"));
     
-    // Injeta as APIs Remotas como ferramentas na resposta JSON
+    // APIs remotas como ferramentas: só no pedido principal da conversa e com a opção ligada ("apis": true).
+    // Exploradores, auditor e listas restritas não recebem (gastaria contexto em todo pedido).
+    if !v.get("apis").and_then(Value::as_bool).unwrap_or(false) || only.is_some() {
+        return ok(built);
+    }
     if let Some(tools_arr) = built.get_mut("tools").and_then(Value::as_array_mut) {
         for p in app.cfg().api_providers.iter().filter(|p| crate::remote::ready(p)) {
             tools_arr.push(json!({

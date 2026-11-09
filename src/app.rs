@@ -71,6 +71,9 @@ pub struct ApiProvider {
     pub fallback_model: String,
     #[serde(default)]
     pub retries: Option<u32>,
+    /// Janela de contexto do modelo remoto, em tokens (0 = padrão de 131072): medidor e compactação usam.
+    #[serde(default)]
+    pub context: u32,
 
     #[serde(default)]
     pub params: HashMap<String, serde_json::Value>,

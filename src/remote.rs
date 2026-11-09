@@ -40,6 +40,13 @@ impl SendErr {
     }
 }
 
+/// Contexto usado quando o provedor não informa o dele (a maioria dos modelos de API tem 128k ou mais).
+pub const DEFAULT_CONTEXT: u32 = 131_072;
+
+pub fn context_of(p: &ApiProvider) -> u32 {
+    if p.context >= 1024 { p.context } else { DEFAULT_CONTEXT }
+}
+
 pub fn ready(p: &ApiProvider) -> bool {
     !p.base.trim().is_empty() && !p.model.trim().is_empty()
 }
@@ -62,6 +69,9 @@ pub fn public(app: &App) -> Value {
 
         "fallbackModel": p.fallback_model,
         "retries": p.retries,
+        "context": context_of(p),
+        "contextSet": p.context >= 1024,
+        "nim": is_nim(p),
 
         "params": p.params,
         "thinkParams": p.think_params,

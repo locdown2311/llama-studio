@@ -195,6 +195,8 @@ function apiSection(put, field, saved) {
     const fallbackModel = h('input.input.mono', { value: a.fallbackModel || '', placeholder: L('ex.: modelo reserva se o principal falhar'), list: 'api-models-' + a.id });
     fallbackModel.addEventListener('change', () => save({ apiProvider: { id: a.id, fallbackModel: fallbackModel.value.trim() } }));
     const retries = h('input.input.mono', { type: 'number', min: '0', max: '10', value: a.retries != null ? a.retries : '', placeholder: L('1 (padrão)') });
+    const ctxIn = h('input.input.mono', { type: 'number', min: '1024', step: '1024', value: a.contextSet ? a.context : '', placeholder: L('131072 (padrão)') });
+    ctxIn.addEventListener('change', () => { const n = parseInt(ctxIn.value, 10); save({ apiProvider: { id: a.id, context: n >= 1024 ? n : 0 } }); });
     retries.addEventListener('change', () => {
       const v = retries.value.trim();
       save({ apiProvider: { id: a.id, retries: v === '' ? null : Math.max(0, Math.min(10, parseInt(v, 10) || 0)) } });
@@ -297,6 +299,7 @@ function apiSection(put, field, saved) {
       field(L('Modelo'), h('div.row', null, model, dl, listBtn, test)),
       testOut, field(L('Modelo de fallback'), fallbackModel, L('Opcional. Se o modelo principal falhar (400, 404, 429, 500...) ou a API cair, tenta este modelo no mesmo servidor.')),
       field(L('Tentativas de reconexão'), retries, L('Tentativas de reenvio em caso de falha de conexão, timeout ou erro temporário do servidor (0 a 10, padrão: 1).')),
+      field(L('Contexto (tokens)'), ctxIn, L('Tamanho da janela do modelo. O medidor de contexto e a compactação automática usam este número quando a conversa roda nesta API.')),
       params,
       h('small.muted', null, L('Hoje: {0} pedidos, {1} tokens, {2} falhas (voltaram para o modelo local).', u.calls, u.tokens.toLocaleString(LOCALE), u.fails)));
   };
@@ -348,6 +351,11 @@ function apiSection(put, field, saved) {
               h('span.switch', null, h('input', { type: 'checkbox', checked: S.settings.exploreMore !== false, onchange: (e) => put({ exploreMore: e.target.checked }) }), h('span'))
             )
           : null,
+        h('label.tcard', null,
+          h('span.tc-main', null,
+            h('span.tc-title', null, L('Oferecer as APIs como ferramentas')),
+            h('span.tc-desc', null, L('O modelo da conversa ganha uma ferramenta por API pronta (remote_api_...) para mandar um prompt a ela. Cada uma ocupa contexto em todo pedido; deixe desligado se não usa.'))),
+          h('span.switch', null, h('input', { type: 'checkbox', checked: S.settings.apiTools === true, onchange: (e) => put({ apiTools: e.target.checked }) }), h('span'))),
         h('small', null, L('Planos grátis costumam poder usar o que você manda para treinar modelos (o Gemini grátis avisa isso). Deixe no modelo local o que tiver dado sensível.'))));
   };
   draw();

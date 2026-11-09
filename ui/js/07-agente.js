@@ -329,7 +329,7 @@ async function runAgent(conv) {
       const { text } = await api('/api/context', { skillsOnly: true, skills: late, lazy });
       if (text) { askMsg.skillNote = text; askMsg.skillIds = late; }
     }
-    const fetchTools = () => api('/api/tools', { ...sel, extra: conv.extraTools || [], lazy, eager: eagerList(sel.mcp, conv.auto?.eager || []), full: sel.mcp.filter((n) => mcpLoadOf(n) === 'eager') });
+    const fetchTools = () => api('/api/tools', { ...sel, apis: S.settings.apiTools === true, extra: conv.extraTools || [], lazy, eager: eagerList(sel.mcp, conv.auto?.eager || []), full: sel.mcp.filter((n) => mcpLoadOf(n) === 'eager') });
     let [{ tools, meta, catalog }, ctx] = await Promise.all([
       fetchTools(),
       // o prompt de sistema precisa ficar idêntico entre mensagens para o llama-server reaproveitar o cache:
@@ -375,14 +375,16 @@ async function runAgent(conv) {
       conv.messages.push(msg);
       scheduleRender();
       if (step === 0) {
-        if (!mainApiForChat?.()) { await ensureModel(conv, ac.signal); await waitModel(conv, ac.signal); await assignSlot(conv); }
+        // perfil remoto: ativar é imediato (os pedidos laterais seguem para a mesma API); não há modelo para esperar nem slot
+        await ensureModel(conv, ac.signal);
+        if (!mainApiForChat(conv)) { await waitModel(conv, ac.signal); await assignSlot(conv); }
         await preloadImgs(conv);
       }
       if (ac.signal.aborted) throw new DOMException('abort', 'AbortError');
       await maybeCompact(conv, system, tools, ac.signal);
       // enquanto o modelo ainda escreve a chamada de ferramenta, abre a conexão com a API do auditor (e a dos
       // exploradores, se ele chamar explore): o primeiro pedido não espera o aperto de mão TLS
-      const warmAud = apiFor('auditor'), warmExp = apiFor('explorer'), warmMain = mainApiForChat?.()?.id;
+      const warmAud = apiFor('auditor'), warmExp = apiFor('explorer'), warmMain = mainApiForChat(conv)?.id;
       if (warmMain) apiWarm(warmMain);
       const warmT = warmAud || warmExp ? setInterval(() => {
         if (!msg.tool_calls?.length) return;
@@ -563,7 +565,7 @@ function estimateTokens(conv, system, tools) {
 
 /** Mantém a conversa abaixo do limite: 1) encurta resultados antigos; 2) resume o começo. */
 async function maybeCompact(conv, system, tools, signal, force = false) {
-  const nCtx = S.nCtx || 32768;
+  const nCtx = ctxLimit(conv) || 32768;
   const limit = nCtx * (Number(S.settings.compactAt) || 75) / 100;
   if (!force && (!S.settings.autoCompact || estimateTokens(conv, system, tools) < limit)) return false;
   const msgs = conv.messages;

@@ -1522,5 +1522,9 @@ const I18N_EN = {
 "Modelo de fallback": "Fallback model",
 "Opcional. Se o modelo principal falhar (400, 404, 429, 500...) ou a API cair, tenta este modelo no mesmo servidor.": "Optional. If the main model fails (400, 404, 429, 500...) or the API drops, tries this model on the same server.",
 "Tentativas de reconexão": "Reconnection attempts",
-"Tentativas de reenvio em caso de falha de conexão, timeout ou erro temporário do servidor (0 a 10, padrão: 1).": "Retry attempts in case of connection failure, timeout or temporary server error (0 to 10, default: 1)."
+"Tentativas de reenvio em caso de falha de conexão, timeout ou erro temporário do servidor (0 a 10, padrão: 1).": "Retry attempts in case of connection failure, timeout or temporary server error (0 to 10, default: 1).",
+"131072 (padrão)": "131072 (default)",
+"Tamanho da janela do modelo. O medidor de contexto e a compactação automática usam este número quando a conversa roda nesta API.": "The model's window size. The context meter and automatic compaction use this number when the chat runs on this API.",
+"Oferecer as APIs como ferramentas": "Offer the APIs as tools",
+"O modelo da conversa ganha uma ferramenta por API pronta (remote_api_...) para mandar um prompt a ela. Cada uma ocupa contexto em todo pedido; deixe desligado se não usa.": "The chat model gets one tool per ready API (remote_api_...) to send it a prompt. Each one takes context on every request; leave it off if you do not use it."
 };

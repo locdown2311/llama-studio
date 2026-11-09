@@ -1878,10 +1878,7 @@ let nimPollInterval = 0;
 
 function isNimModel() {
   // API principal configurada: NVIDIA NIM pelo id "nvidia" ou pelo endpoint integrate.api.nvidia.com
-  const mainApi = mainApiForChat();
-  if (!mainApi) return false;
-  if (mainApi.id && mainApi.id.trim().toLowerCase() === "nvidia") return true;
-  return (mainApi.base || "").toLowerCase().includes("integrate.api.nvidia.com");
+  return isNimApi(mainApiForChat());
 }
 
 function maybeStartNimPoll() {

@@ -505,7 +505,7 @@ async function streamCompletion(conv, system, tools, msg, signal) {
   // mais de uma chamada por resposta quando o pedido diz; sem isso vale o que ele acha do template
   const extra = requestExtras(conv);
   if (tools?.length) extra.parallel_tool_calls = true;
-  const mainApi = typeof mainApiForChat === 'function' ? mainApiForChat() : null;
+  const mainApi = mainApiForChat(conv);
   let r;
   if (mainApi) {
     extra._remote = true;

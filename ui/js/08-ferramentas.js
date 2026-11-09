@@ -78,6 +78,15 @@ async function fetchNimStatus() {
   return { used: 0, wait_secs: 0, max: 40, window_secs: 60 };
 }
 
+/** Antes de um pedido ao NVIDIA NIM: espera o que o contador do servidor mandar (40 pedidos por 60 s, somando
+    tudo que usa o NIM). Com folga não espera nada; perto do limite espaça; no limite aguarda a janela abrir. */
+async function nimPace(signal) {
+  const { used, wait_secs, max } = await fetchNimStatus();
+  const ms = wait_secs > 0 ? wait_secs * 1000 + 500 : used >= max * 0.8 ? 3000 : used >= max * 0.5 ? 1500 : 0;
+  if (!ms) return;
+  await new Promise((r) => { const t = setTimeout(r, ms); signal?.addEventListener('abort', () => { clearTimeout(t); r(); }, { once: true }); });
+}
+
 /** Esta conversa já recebeu o sumário desse arquivo (read_file sem trecho de um arquivo grande)? */
 function outlineGiven(conv, path, self) {
   const cut = conv.compactCut || 0; const want = normP(path);
@@ -245,37 +254,12 @@ async function runExplorer(args, tctx, tmsg, apiId) {
   tmsg.runOn = remote ? { api: apiLabel(apiById(remote) || {}), model: apiById(remote)?.model || '' } : { local: true };
   tmsg.apiTokens = 0;
   const max = Math.max(3, Number(S.settings.explorerSteps) || 20);
-  // Delay para evitar rate limit NIM (40 req/60s): buscar estado da API e ajustar
-  let { used, wait_secs, max: nim_max, window_secs } = await fetchNimStatus();
-  // Se já estamos perto do limite, aumentar delays
-  const margin = nim_max - used; // requisições ainda disponíveis
-  let delayInit = max > 3 ? 5000 : 0;
-  let delayBetween = 3000;
-  let delayExtra = max > 5 ? 2000 : 0;
-  // Se quase no limite (used >= 80% do max), dobrar os delays
-  if (margin <= nim_max * 0.2) {
-    delayInit = Math.max(delayInit, 10000);
-    delayBetween = Math.max(delayBetween, 6000);
-    delayExtra = Math.max(delayExtra, 4000);
-  }
-  // Se wait_secs > 0, já temos um atraso explícito; usar o maior do nosso cálculo ou do wait
-  if (wait_secs > 0) {
-    delayInit = Math.max(delayInit, wait_secs * 1000 + 2000);
-    delayBetween = Math.max(delayBetween, wait_secs * 1000);
-  }
-  await sleep(delayInit);
   for (let step = 0; step <= max; step++) {
     if (tctx.signal.aborted) return { content: 'Cancelado.', isError: true };
     const last = step === max;
     if (last) msgs.push({ role: 'user', content: L('Limite de passos atingido. Escreva agora o relatório final com o que já encontrou.') });
-    // delay extra a cada 3 tópicos (após o inicial)
-    if (max > 5 && step > 0 && step % 3 === 0) {
-      await sleep(delayExtra);
-    }
-    // delay entre tópicos (sem delay após o último)
-    if (!last) {
-      await sleep(delayBetween);
-    }
+    // só o NVIDIA NIM tem limite por minuto: a pausa vale só para ele (local e outras APIs seguem direto)
+    if (remote && isNimApi(apiById(remote))) await nimPace(tctx.signal);
     const m = { content: '', reasoning: '', tool_calls: [] };
     if (remote) {
       try { await streamApi(msgs, last ? [] : tools, m, tctx.signal, null, { _p: remote, _timeout: 120000 }); tmsg.via = m.via; tmsg.apiTokens += m.usage?.total_tokens || 0; scheduleRender(); }

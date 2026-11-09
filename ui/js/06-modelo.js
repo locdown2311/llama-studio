@@ -145,7 +145,7 @@ function ctxBreakdown(system, ctxText, catalog, tools, meta) {
 
 /** Tokens ocupados: a última medida do servidor + estimativa do que entrou depois. */
 function ctxUsage(conv) {
-  const nCtx = S.nCtx || 0;
+  const nCtx = ctxLimit(conv);
   if (!conv) return { used: 0, nCtx, exact: false };
   const m = conv.ctx;
   const est = (from) => Math.ceil(JSON.stringify(conv.messages.slice(from).map((x) => [x.content, x.tool_calls])).length / 3.2);
@@ -224,14 +224,17 @@ function apiWarm(pid) {
   api('/api/remote/warm?p=' + encodeURIComponent(pid), {}).catch(() => {});
 }
 function apiById(id) { return (S.info?.apis || []).find((a) => a.id === id); }
-/** API externa usada como modelo principal nas conversas (configurada na aba Testes). */
-function mainApiForChat() {
-  if (!S.settings?.advanced) return null;
-  const cfg = S.settings?.mainApi;
-  if (!cfg?.on || !cfg.provider) return null;
-  const a = apiById(cfg.provider);
+/** API externa que responde a conversa: o modelo dela (ou o ativo) é um perfil "remote:<id>" da lista de modelos. */
+function mainApiForChat(conv = cur()) {
+  const m = convModel(conv)?.model || '';
+  if (!m.startsWith('remote:')) return null;
+  const a = apiById(m.slice(7));
   return a && a.ready ? a : null;
 }
+/** O provedor é o NVIDIA NIM (40 pedidos por minuto)? */
+function isNimApi(a) { return !!a && (a.nim === true || String(a.id || '').trim().toLowerCase() === 'nvidia' || String(a.base || '').toLowerCase().includes('integrate.api.nvidia.com')); }
+/** Janela de contexto que vale para a conversa: a do modelo remoto dela, ou a do llama-server. */
+function ctxLimit(conv = cur()) { return mainApiForChat(conv)?.context || S.nCtx || 0; }
 /** Contagem do dia: pedidos, tokens e falhas (só neste navegador). */
 function apiUse(add, pid) {
   const today = new Date().toISOString().slice(0, 10);
