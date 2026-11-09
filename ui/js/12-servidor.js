@@ -874,10 +874,23 @@ async function checkHealth() {
   if (status !== 'ok') S.model = '';
   S.health.status = status;
   const canStart = status === 'offline' && S.llama && !S.llama.running && S.llama.config?.Model;
-  const sig = status + S.model + S.info.llamaUrl + canStart;
+  // a conversa aberta pode estar usando uma API remota: aí quem manda é o ping dela, não o llama-server
+  const w = convModel(cur());
+  const api = w?.model?.startsWith('remote:') ? (S.info.apis || []).find((a) => a.id === w.model.slice(7)) : null;
+  const sig = status + S.model + S.info.llamaUrl + canStart + (cur()?.modelId || '') + (api ? api.id + api.online : '');
   if (sig === lastHealth) return;
   lastHealth = sig;
   const el = $('#server-status'); el.innerHTML = '';
+  if (api) {
+    const on = api.online === true ? 'ok' : api.online === false ? 'err' : 'idle';
+    el.append(h('span.dot.' + on), h('div.ss-main', null,
+      h('div.ss-title', null, L('API {0}', api.name || api.model)),
+      h('div.ss-sub', { title: api.base }, on === 'ok' ? L('conectada') : on === 'err' ? L('sem resposta') : L('verificando'))));
+    el.style.cursor = 'pointer';
+    el.onclick = () => setView('settings');
+    updatePickers(); renderChatTitle();
+    return;
+  }
   el.append(h('span.dot.' + { ok: 'ok', loading: 'busy', offline: 'err' }[status]), h('div.ss-main', null,
     h('div.ss-title', null, { ok: L('llama-server pronto'), loading: L('Carregando o modelo...'), offline: L('llama-server desligado') }[status]),
     h('div.ss-sub', { title: S.model || S.info.llamaUrl }, S.model ? shortModel(S.model) : S.info.llamaUrl || '')),
@@ -901,5 +914,6 @@ async function pingApis() {
       a.pingError = 'offline';
     }
   }
-  updatePickers();
+  lastHealth = '';  // o status lateral depende do ping: força redesenhar
+  checkHealth();
 }

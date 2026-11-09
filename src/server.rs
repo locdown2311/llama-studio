@@ -374,6 +374,11 @@ async fn set_config(State(app): S, b: Bytes) -> Res {
                 if let Some(x) = p.get("params").and_then(Value::as_object) {
                     e.params = x.iter().filter(|(_, v)| !v.is_null()).map(|(k, v)| (k.clone(), v.clone())).collect();
                 }
+                if let Some(x) = p.get("thinkParams") {
+                    if let Ok(v) = serde_json::from_value(x.clone()) {
+                        e.think_params = v;
+                    }
+                }
             }
         }
         if let Some(id) = v.get("apiProviderDelete").and_then(Value::as_str) {

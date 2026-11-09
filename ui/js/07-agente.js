@@ -387,7 +387,7 @@ async function runAgent(conv) {
       const warmT = warmAud || warmExp ? setInterval(() => {
         if (!msg.tool_calls?.length) return;
         apiWarm(warmAud);
-        if (msg.tool_calls.some((t) => t?.function?.name === 'explore')) apiWarm(warmExp);
+        if (msg.tool_calls.some((t) => t?.function?.name === 'explore' || t?.function?.name === 'multi_explore')) apiWarm(warmExp);
       }, 250) : null;
       try {
         await streamCompletion(conv, system, tools, msg, ac.signal);
@@ -412,7 +412,7 @@ async function runAgent(conv) {
         for (const tc of msg.tool_calls) {
           const info = meta[tc.function.name] || { source: tc.function.name.includes('__') ? 'mcp' : 'builtin', mutating: true };
           if (PARALLEL_READS.has(tc.function.name) && !needsApproval(info, conv) && !shouldAudit(info, conv)) continue;
-          if (tc.function.name === 'explore' || !shouldAudit(info, conv)) continue;
+          if (tc.function.name === 'explore' || tc.function.name === 'multi_explore' || !shouldAudit(info, conv)) continue;
           const pr = auditCall(tc, info, conv, ac.signal);
           pr.catch(() => {});
           preAudit.set(tc.id, pr);
@@ -437,6 +437,14 @@ async function runAgent(conv) {
           tmsg.status = 'running'; scheduleRender();
           const ts = performance.now();
           parallel.push(runExplorer(parseArgs(tc.function.arguments) || {}, tctx, tmsg).then((r) => {
+            tmsg.ms = performance.now() - ts; tmsg.content = r.content; tmsg.isError = r.isError; tmsg.status = r.isError ? 'error' : 'ok'; saveConvs(); scheduleRender();
+          }));
+          continue;
+        }
+        if (tc.function.name === 'multi_explore') {
+          tmsg.status = 'running'; scheduleRender();
+          const ts = performance.now();
+          parallel.push(runMultiExplore(parseArgs(tc.function.arguments) || {}, tctx, tmsg).then((r) => {
             tmsg.ms = performance.now() - ts; tmsg.content = r.content; tmsg.isError = r.isError; tmsg.status = r.isError ? 'error' : 'ok'; saveConvs(); scheduleRender();
           }));
           continue;

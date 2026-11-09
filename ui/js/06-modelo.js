@@ -203,13 +203,18 @@ function fillCtxPop() {
 
 let noProgress = false;
 /* ---- API externa (auditor, exploradores, tarefas de fundo) ---- */
-/** Por qual API externa esta função vai (id do provedor), ou null para o modelo local.
-   Configurações › API externa: cada função escolhe um provedor (true, do formato antigo, = o primeiro). */
-function apiFor(role) {
+/** IDs das APIs externas desta função, na ordem em que ficaram salvas.
+   Configurações › API externa: cada função escolhe um provedor (true, do formato antigo, = o primeiro);
+   o explorer aceita vários — as subtarefas do multi_explore se distribuem entre eles. */
+function apiForAll(role) {
   const apis = (S.info?.apis || []).filter((a) => a.ready);
   const v = S.settings.apiRoles?.[role];
-  if (!v || !apis.length) return null;
-  return (v === true ? apis[0] : apis.find((a) => a.id === v))?.id || null;
+  const ids = Array.isArray(v) ? v : [v === true ? apis[0]?.id : v];
+  return [...new Set(ids.map((id) => apis.find((a) => a.id === id)?.id).filter(Boolean))];
+}
+/** Por qual API externa esta função vai (id do provedor), ou null para o modelo local. */
+function apiFor(role) {
+  return apiForAll(role)[0] || null;
 }
 /** Abre a conexão com a API antes de precisar dela (no máximo uma vez a cada 6 s por API). */
 const API_WARM = new Map();
@@ -265,17 +270,15 @@ async function streamRaw(messages, tools, msg, signal, onDelta, extra = {}) {
   // return_progress: o llama-server conta quanto do prompt já leu (barra de progresso antes da 1ª palavra)
   const body = { messages, stream: true, ...(_remote ? {} : { cache_prompt: true }), ...rest };
   if (!noProgress && !_remote) body.return_progress = true;
-  // botão de raciocínio no remoto: mapeia modos para reasoning_effort (padrão OpenAI)
-  if (_remote && _think && _think !== 'auto') {
-    body.reasoning_effort = _think === 'on' ? 'high' : _think === 'eco' ? 'low' : 'low';
-  }
+  // O backend escolhe os campos do modo Pensar configurados para este provedor.
+  if (_remote && _think && _think !== 'auto') body._think = _think;
   msg._t0 = Date.now(); msg._pp = null;
   if (tools.length) body.tools = tools;
   const st = S.settings;
   if (!_fixed) {
     if (st.temperature !== '' && st.temperature != null) body.temperature = Number(st.temperature);
     if (st.topP !== '' && st.topP != null) body.top_p = Number(st.topP);
-    if (st.maxTokens !== '' && st.maxTokens != null) body.max_tokens = Number(st.maxTokens);
+    if (st.maxTokens !== '' && st.maxTokens != null && body.max_tokens == null) body.max_tokens = Number(st.maxTokens);
   }
 
   const post = () => fetch(_remote ? '/remote/v1/chat/completions?p=' + encodeURIComponent(_p || '') : '/v1/chat/completions', {

@@ -1489,6 +1489,7 @@ const I18N_EN = {
 "Delegar mais aos exploradores": "Delegate more to the explorers",
 "Com os exploradores numa API, o modelo é orientado a mandar a investigação para eles (vários em paralelo) em vez de ler tudo sozinho. Economiza o contexto e o tempo do modelo local.": "With the explorers on an API, the model is guided to send the investigation to them (several in parallel) instead of reading everything itself. Saves the local model's context and time.",
 "Ferramenta não disponível para o explorador. Use uma destas: {0}": "Tool not available to the explorer. Use one of these: {0}",
+"Pode marcar mais de uma: as subtarefas do multi_explore se distribuem entre as marcadas; sem nenhuma, usa o modelo local.": "You can pick more than one: multi_explore subtasks are spread across the ones you check; with none checked, it uses the local model.",
 "Use só as ferramentas que você recebeu (aqui não existem update_todos, search_tools nem nada que escreva).\n\n": "Use only the tools you were given (update_todos, search_tools and anything that writes do not exist here).\n\n",
 "Tudo": "All",
 "Ferramentas": "Tools",

@@ -64,6 +64,7 @@ pub fn public(app: &App) -> Value {
         "retries": p.retries,
 
         "params": p.params,
+        "thinkParams": p.think_params,
         "hasKey": !p.key.trim().is_empty(),
         "ready": ready(p)
     })).collect::<Vec<_>>())
@@ -175,6 +176,21 @@ fn endpoint(base: &str, path: &str) -> String {
     format!("{}/{}", base.trim().trim_end_matches('/'), path)
 }
 
+fn apply_think(o: &mut serde_json::Map<String, Value>, c: &ApiProvider, mode: Option<&str>) {
+    let Some(mode) = mode.filter(|m| matches!(*m, "on" | "off" | "eco")) else { return };
+    // O botão da conversa tem prioridade sobre o esforço fixo do provedor.
+    o.remove("reasoning_effort");
+    if let Some(fields) = c.think_params.get(mode) {
+        for (k, val) in fields {
+            if !matches!(k.as_str(), "model" | "messages" | "tools" | "stream" | "stream_options") {
+                o.insert(k.clone(), val.clone());
+            }
+        }
+    } else {
+        o.insert("reasoning_effort".into(), json!(match mode { "on" => "high", "eco" => "low", _ => "none" }));
+    }
+}
+
 pub async fn chat(app: &App, id: &str, body: Bytes) -> Response {
 
     let Some(c) = provider(app, id).filter(ready) else {
@@ -186,6 +202,7 @@ pub async fn chat(app: &App, id: &str, body: Bytes) -> Response {
     };
 
     if let Some(o) = v.as_object_mut() {
+        let think = o.remove("_think").and_then(|v| v.as_str().map(str::to_string));
         for k in LLAMA_ONLY {
             o.remove(*k);
         }
@@ -199,6 +216,7 @@ pub async fn chat(app: &App, id: &str, body: Bytes) -> Response {
                 o.insert(k.clone(), val.clone());
             }
         }
+        apply_think(o, &c, think.as_deref());
 
         if o.get("stream").and_then(Value::as_bool).unwrap_or(false) {
             // o uso de tokens chega no último pedaço
@@ -334,5 +352,18 @@ mod t {
         assert!(is_nim(&ApiProvider { id: "nvidia".into(), ..Default::default() }));
         assert!(is_nim(&ApiProvider { id: "openai".into(), base: "https://integrate.api.nvidia.com/v1".into(), ..Default::default() }));
         assert!(!is_nim(&ApiProvider { id: "openai".into(), base: "https://api.openai.com/v1".into(), ..Default::default() }));
+    }
+
+    #[test]
+    fn pensar_usa_os_campos_do_provedor() {
+        let mut c = ApiProvider::default();
+        c.think_params.insert("on".into(), [("thinking".into(), json!({"type": "enabled"}))].into());
+        let mut o = serde_json::Map::new();
+        o.insert("reasoning_effort".into(), json!("low"));
+        apply_think(&mut o, &c, Some("on"));
+        assert_eq!(o.get("thinking"), Some(&json!({"type": "enabled"})));
+        assert!(!o.contains_key("reasoning_effort"));
+        apply_think(&mut o, &c, Some("off"));
+        assert_eq!(o.get("reasoning_effort"), Some(&json!("none")));
     }
 }

@@ -47,7 +47,9 @@ function renderSettings() {
     group(L('Limites'),
       h('div.row', null,
         field(L('Passos com ferramentas por resposta'), input('input.input', { value: st.maxSteps, inputmode: 'numeric' }, (x) => put({ maxSteps: Number(x.value) || 40 })), L('Limite base. Se a tarefa está avançando (lista de tarefas, arquivos alterados), o studio dá mais passos sozinho, até 3 vezes isso. Repetições sem resultado novo são interrompidas antes.')),
-        field(L('Passos de cada subagente'), input('input.input', { value: st.explorerSteps, inputmode: 'numeric' }, (x) => put({ explorerSteps: Number(x.value) || 20 }))))));
+        field(L('Passos de cada subagente'), input('input.input', { value: st.explorerSteps, inputmode: 'numeric' }, (x) => put({ explorerSteps: Number(x.value) || 20 })))),
+      h('div.row', null,
+        field(L('Exploradores em paralelo'), input('input.input', { value: st.maxConcurrentExplorers ?? '', placeholder: '3', inputmode: 'numeric' }, (x) => put({ maxConcurrentExplorers: Number(x.value) || 0 }))))));
 
   const autoCur = st.autoRoute === false ? 'desligado' : (st.autoLevel || 'equilibrado');
   const autoList = h('div.set-choices', null, AUTO_LEVELS.map(([v, l, d]) => {
@@ -162,6 +164,7 @@ const API_PRESETS = [
   ['cerebras', 'Cerebras', 'https://api.cerebras.ai/v1', 'https://cloud.cerebras.ai'],
   ['openrouter', 'OpenRouter', 'https://openrouter.ai/api/v1', 'https://openrouter.ai/keys'],
   ['nvidia', 'NVIDIA NIM', 'https://integrate.api.nvidia.com/v1', 'https://build.nvidia.com/settings/api-keys'],
+  ['nim-test', 'NVIDIA NIM (teste DeepSeek v4.1)', 'https://integrate.api.nvidia.com/v1', 'https://build.nvidia.com/settings/api-keys'],
   ['custom', L('Outro (compatível com OpenAI)'), '', ''],
 ];
 const API_ROLES = [
@@ -195,7 +198,8 @@ function apiSection(put, field, saved) {
     retries.addEventListener('change', () => {
       const v = retries.value.trim();
       save({ apiProvider: { id: a.id, retries: v === '' ? null : Math.max(0, Math.min(10, parseInt(v, 10) || 0)) } });
-    });    const listBtn = h('button.btn.sm', { type: 'button', onclick: async () => {
+    });
+    const listBtn = h('button.btn.sm', { type: 'button', onclick: async () => {
       listBtn.disabled = true;
       try { const r = await api('/api/remote/models?p=' + encodeURIComponent(a.id)); dl.innerHTML = ''; r.models.forEach((m) => dl.append(h('option', { value: m }))); toast(L('{0} modelos', r.models.length)); model.focus(); }
       catch (e) { toast(e.message, 'err'); }
@@ -216,23 +220,29 @@ function apiSection(put, field, saved) {
           : L('Pensando ({0} caracteres de raciocínio) · primeiro sinal em {1} s · {2} s', m.reasoning.length, (first / 1000).toFixed(1), s);
       };
       const tick = setInterval(show, 250); show();
+      let settled = false;
       const onDelta = () => {
         if (!first && (m.content || m.reasoning)) first = performance.now() - t0;
-        if (m.content.trim().length >= 2) { mine = true; ac.abort(); }
+        if (!settled && m.content.trim().length >= 2) { settled = true; mine = true; ac.abort(); }
       };
       try {
-        await streamApi([{ role: 'user', content: L('Responda só: ok') }], [], m, ac.signal, onDelta, { _p: a.id, max_tokens: 300, temperature: 0, _timeout: 45000 });
-        show();
+        await streamApi([{ role: 'user', content: L('Responda só: ok') }], [], m, ac.signal, onDelta, { _p: a.id, _fixed: true, max_tokens: 300, temperature: 0, _timeout: 45000 });
       } catch (e) {
-        if (mine) show();
-        else { testOut.textContent = e.message; testOut.classList.add('err'); }
+        if (!mine) { testOut.textContent = e.message; testOut.classList.add('err'); }
+      } finally {
+        settled = true;
+        clearInterval(tick);
+        show();
+        test.disabled = false;
       }
-      clearInterval(tick);
-      test.disabled = false;
     } }, ic('zap'), L('Testar'));
     const del = h('button.icon-btn.sm', { type: 'button', title: L('Remover'), 'aria-label': L('Remover'), html: svg('trash'), onclick: async () => {
       if (!(await confirmBox(L('Remover a API {0}? As funções que usam ela voltam para o modelo local.', apiLabel(a)), L('Remover'), true))) return;
-      const roles = { ...(S.settings.apiRoles || {}) }; for (const k in roles) if (roles[k] === a.id) roles[k] = '';
+      const roles = { ...(S.settings.apiRoles || {}) };
+      for (const k in roles) {
+        if (roles[k] === a.id) roles[k] = '';
+        if (Array.isArray(roles[k])) roles[k] = roles[k].filter((x) => x !== a.id);
+      }
       put({ apiRoles: roles }); save({ apiProviderDelete: a.id });
     } });
     // parâmetros deste provedor: vão em todo pedido e ganham dos do studio (temperatura 0 do auditor etc.)
@@ -285,7 +295,7 @@ function apiSection(put, field, saved) {
       field(L('Nome'), nome, L('Como aparece na lista de modelos. Vazio = id do modelo.')),
       field(L('Chave'), key),
       field(L('Modelo'), h('div.row', null, model, dl, listBtn, test)),
-      testOut,field(L('Modelo de fallback'), fallbackModel, L('Opcional. Se o modelo principal falhar (400, 404, 429, 500...) ou a API cair, tenta este modelo no mesmo servidor.')),
+      testOut, field(L('Modelo de fallback'), fallbackModel, L('Opcional. Se o modelo principal falhar (400, 404, 429, 500...) ou a API cair, tenta este modelo no mesmo servidor.')),
       field(L('Tentativas de reconexão'), retries, L('Tentativas de reenvio em caso de falha de conexão, timeout ou erro temporário do servidor (0 a 10, padrão: 1).')),
       params,
       h('small.muted', null, L('Hoje: {0} pedidos, {1} tokens, {2} falhas (voltaram para o modelo local).', u.calls, u.tokens.toLocaleString(LOCALE), u.fails)));
@@ -297,12 +307,27 @@ function apiSection(put, field, saved) {
     add.addEventListener('change', () => {
       const p = API_PRESETS.find((x) => x[0] === add.value); if (!p) return;
       let n = 1; while (apis.some((a) => a.id === 'p' + n)) n++;
-      save({ apiProvider: { id: 'p' + n, base: p[2], name: p[0] === 'custom' ? '' : '' } });
+      const patch = { id: 'p' + n, base: p[2], name: p[0] === 'custom' ? '' : '' };
+      if (p[0] === 'nim-test') { patch.model = 'deepseek-ai/deepseek-v4.1-flash'; patch.params = { temperature: 1, top_p: 0.95, max_tokens: 262144 }; }
+      save({ apiProvider: patch });
     });
     // por função: modelo local ou uma das APIs (só as prontas)
     const roles = S.settings.apiRoles || {};
     const ready = apis.filter((a) => a.ready);
     const roleRows = API_ROLES.map(([id, title, desc]) => {
+      if (id === 'explorer') {
+        // o explorer aceita várias APIs: as subtarefas do multi_explore se distribuem entre as marcadas
+        const setRole = (ids) => { put({ apiRoles: { ...(S.settings.apiRoles || {}), explorer: ids } }); draw(); };
+        const picked = apiForAll('explorer');
+        const chips = ready.map((a) => h('button.chip' + (picked.includes(a.id) ? ' on' : ''), { type: 'button', title: `${apiLabel(a)} · ${a.model}`, onclick: () => {
+          const set = new Set(picked);
+          set.has(a.id) ? set.delete(a.id) : set.add(a.id);
+          setRole([...set]);
+        } }, `${apiLabel(a)} · ${a.model}`));
+        return h('div.api-role', null, h('div.api-role-main', null, h('b', null, title),
+          h('small.muted', null, desc + ' ' + L('Pode marcar mais de uma: as subtarefas do multi_explore se distribuem entre as marcadas; sem nenhuma, usa o modelo local.'))),
+          h('div.chips', null, ...chips));
+      }
       const cur0 = roles[id] === true ? ready[0]?.id || '' : roles[id] || '';
       const sel = h('select.select', null, h('option', { value: '' }, L('Modelo local')), ready.map((a) => h('option', { value: a.id }, `${apiLabel(a)} · ${a.model}`)));
       sel.value = ready.some((a) => a.id === cur0) ? cur0 : '';
@@ -313,8 +338,16 @@ function apiSection(put, field, saved) {
       ...apis.map(card),
       field(apis.length ? L('Outra API') : L('Provedor'), add, apis.length ? L('Dá para ter várias e mandar cada função para uma, espalhando os limites dos planos grátis.') : null),
       h('div.field', null, h('label', null, L('Quem faz cada função')), ...roleRows,
-        apiFor('explorer') ? h('label.tcard', null, h('span.tc-main', null, h('span.tc-title', null, L('Delegar mais aos exploradores')), h('span.tc-desc', null, L('Com os exploradores numa API, o modelo é orientado a mandar a investigação para eles (vários em paralelo) em vez de ler tudo sozinho. Economiza o contexto e o tempo do modelo local.'))),
-          h('span.switch', null, h('input', { type: 'checkbox', checked: S.settings.exploreMore !== false, onchange: (e) => put({ exploreMore: e.target.checked }) }), h('span'))) : null,
+        apiFor('explorer')
+          ? h(
+              'label.tcard',
+              null,
+              h('span.tc-main', null,
+                h('span.tc-title', null, L('Delegar mais aos exploradores')),
+                h('span.tc-desc', null, L('Com os exploradores numa API, o modelo é orientado a mandar a investigação para eles (vários em paralelo) em vez de ler tudo sozinho.'))),
+              h('span.switch', null, h('input', { type: 'checkbox', checked: S.settings.exploreMore !== false, onchange: (e) => put({ exploreMore: e.target.checked }) }), h('span'))
+            )
+          : null,
         h('small', null, L('Planos grátis costumam poder usar o que você manda para treinar modelos (o Gemini grátis avisa isso). Deixe no modelo local o que tiver dado sensível.'))));
   };
   draw();

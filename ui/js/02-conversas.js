@@ -3093,7 +3093,12 @@ function renderTool(tc, res, live) {
   const open = S.openTools.has(key);
 
   const el = h(
-    "div.tool.s-" + status + ".src-" + source + (open ? ".open" : ""),
+    "div.tool.s-" +
+      status +
+      ".src-" +
+      source +
+      (open ? ".open" : "") +
+      (name === "multi_explore" && res?.subs?.length ? ".multi" : ""),
     { dataset: { id: key } }
   );
 
@@ -3212,6 +3217,23 @@ function renderTool(tc, res, live) {
           html: md(
             args.task +
               (args.where ? L("\n\n**Começar por:** {0}", args.where) : "")
+          ),
+        })
+      )
+    );
+  } else if (name === "multi_explore" && args) {
+    const subs = Array.isArray(args.subtasks) ? args.subtasks : [];
+    bodyEl.append(
+      h(
+        "div.tool-sec",
+        null,
+        h("div.tool-sec-label", null, L("Pesquisa principal ({0} agentes)", subs.length)),
+        h("div.md", {
+          html: md(
+            args.task +
+              (subs.length
+                ? "\n\n" + subs.map((s, i) => `**${i + 1}.** ${s.task}${s.where ? " — " + s.where : ""}`).join("\n\n")
+                : "")
           ),
         })
       )
@@ -3382,6 +3404,66 @@ function renderTool(tc, res, live) {
     );
   }
 
+  if (res?.subs?.length) {
+    const rows = h("div.substeps");
+
+    for (const s of res.subs) {
+      const lastStep = s._sub?.[s._sub.length - 1];
+
+      rows.append(
+        h(
+          "div.substep.s-" + s.status,
+          null,
+
+          h("span", {
+            html: svg(
+              s.status === "running"
+                ? "loader"
+                : s.status === "queued"
+                ? "clock"
+                : s.status === "error"
+                ? "alert"
+                : "check",
+              s.status === "running" ? "spin" : ""
+            ),
+          }),
+
+          h("span.ss-name", null, s.task),
+          h("span.ss-sub", null, s.status === "queued" ? L("na fila") : lastStep?.summary || ""),
+          s.runOn ? runOnChip(s) : null
+        )
+      );
+    }
+
+    bodyEl.append(
+      h(
+        "div.tool-sec sec-subs",
+        null,
+        h(
+          "div.tool-sec-label",
+          null,
+          L(
+            "Agentes ({0}/{1} concluídos)",
+            res.subs.filter((s) => s.status === "ok").length,
+            res.subs.length
+          )
+        ),
+        rows
+      )
+    );
+
+    for (const s of res.subs)
+      if (s.content && s.status !== "error")
+        bodyEl.append(
+          h(
+            "div.tool-sec",
+            null,
+            h("div.tool-sec-label", null, s.task),
+            h("div.md.report", { html: md(s.content) })
+          )
+        );
+  }
+
   if (res?._images?.length) {
     bodyEl.append(
       h(
@@ -3431,7 +3513,7 @@ function renderTool(tc, res, live) {
           collapse: true,
         }),
       });
-    else if (name === "explore" && !res.isError)
+    else if ((name === "explore" || name === "multi_explore") && !res.isError)
       inner = h("div.md.report", { html: md(content) });
     else if (name === "run_command") inner = h("pre.term", null, content);
     else inner = h("pre.result-text", null, content);

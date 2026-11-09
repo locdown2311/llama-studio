@@ -230,7 +230,8 @@ function drawActivity() {
             h('span.act-sub', null, toolSummary(name, parseArgs(tc.function?.arguments)) || ''),
             badges.length ? h('span.act-badges', null, badges) : null,
             bad && r ? h('span.act-err', null, errLine(r)) : null,
-            subs.length ? h('span.act-subs', null, subs.slice(0, 8).map((x) => h('span.act-subs-i.s-' + x.status, null, x.name)), subs.length > 8 ? h('span.act-subs-i', null, '+' + (subs.length - 8)) : null) : null),
+            subs.length ? h('span.act-subs', null, subs.slice(0, 8).map((x) => h('span.act-subs-i.s-' + x.status, null, x.name)), subs.length > 8 ? h('span.act-subs-i', null, '+' + (subs.length - 8)) : null,
+              h('span.act-subs-i.s-done', null, subs.filter((x) => x.status === 'ok').length + '/' + subs.length)) : null),
           h('span.act-st', null, st === 'ok' ? (r?.ms != null ? fmtMs(r.ms) : '') : st === 'error' ? L('erro') : st === 'denied' ? L('negada') : st === 'approval' ? L('aguarda') : st === 'audit' ? L('auditando') : ''));
         (holder || list).append(row);
       }

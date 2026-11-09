@@ -74,6 +74,9 @@ pub struct ApiProvider {
 
     #[serde(default)]
     pub params: HashMap<String, serde_json::Value>,
+    /// Campos específicos do provedor para os modos on/off/eco do botão Pensar.
+    #[serde(default)]
+    pub think_params: HashMap<String, HashMap<String, serde_json::Value>>,
 }
 
 impl Default for Config {

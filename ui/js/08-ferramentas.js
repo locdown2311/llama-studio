@@ -208,8 +208,9 @@ function runCode(code, tctx, tmsg) {
   });
 }
 
-/** Subagente explorador: ciclo próprio, só ferramentas de leitura, devolve um relatório. */
-async function runExplorer(args, tctx, tmsg) {
+/** Subagente explorador: ciclo próprio, só ferramentas de leitura, devolve um relatório.
+   apiId: força uma API externa específica (o multi_explore distribui as subtarefas entre as escolhidas). */
+async function runExplorer(args, tctx, tmsg, apiId) {
   const only = ['list_directory', 'read_file', 'search_files'];
   if (tctx.groups.includes('browser')) only.push('browser_navigate', 'browser_read', 'browser_click', 'browser_back');
   if (tctx.groups.includes('history')) only.push('recall_history');
@@ -237,7 +238,7 @@ async function runExplorer(args, tctx, tmsg) {
   const msgs = [{ role: 'system', content: sys }, { role: 'user', content: args.task + (args.where ? L('\n\nComece por: {0}', args.where) : '') }];
   tmsg._sub = [];
   // fora do slot da conversa (ela fica esperando o relatório e não pode perder o cache)
-  let remote = apiFor('explorer');
+  let remote = apiId || apiFor('explorer');
   const slot = remote ? null : await sideSlot(tctx.conv);
   let extra = slot != null ? { id_slot: slot } : undefined;
   // onde o subagente roda, para o cartão mostrar (API e modelo, ou local)
@@ -309,4 +310,50 @@ async function runExplorer(args, tctx, tmsg) {
     calls.forEach((t, i) => msgs.push({ role: 'tool', tool_call_id: t.id, content: String(results[i].content).slice(0, 24000) }));
   }
   return { content: L('O subagente não concluiu.'), isError: true };
+}
+
+/** multi_explore: dispara vários subagentes em paralelo e consolida os relatórios. */
+async function runMultiExplore(args, tctx, tmsg) {
+  const task = String(args.task || '').trim();
+  const subs = Array.isArray(args.subtasks) ? args.subtasks.filter((s) => s && String(s.task).trim()) : [];
+  if (!subs.length) return { content: L('multi_explore precisa de pelo menos uma subtarefa.'), isError: true };
+  // prioridade: arg explícito > config do usuário > ilimitado
+  let limit = Number(args.maxConcurrentExplorers);
+  if (!Number.isFinite(limit) || limit < 1) limit = Number(S.settings?.maxConcurrentExplorers) || subs.length;
+  const mainId = tmsg.tool_call_id;
+  // o cartão do multi_explore mostra cada agente, onde ele rodou e o relatório dele
+  tmsg.subs = subs.map((sub, idx) => ({
+    tool_call_id: `${mainId}-sub-${idx}`,
+    agentId: `${tmsg.agentId || 'a'}s${idx}`,
+    status: 'queued',
+    task: String(sub.task),
+    where: String(sub.where || ''),
+  }));
+  scheduleRender();
+  async function batchRun(from, to) {
+    // APIs escolhidas para o explorer: as subtarefas se distribuem entre elas (round-robin, em ordem)
+    const pool = apiForAll('explorer');
+    return Promise.all(subs.slice(from, to).map((sub, i) => {
+      const subMsg = tmsg.subs[from + i];
+      subMsg.status = 'running'; scheduleRender();
+      return runExplorer({ task: sub.task, where: sub.where || '' }, tctx, subMsg, pool.length ? pool[(from + i) % pool.length] : null).then((r) => {
+        subMsg.status = r.isError ? 'error' : 'ok';
+        subMsg.content = r.content;
+        scheduleRender();
+        return { task: String(sub.task), where: String(sub.where || ''), content: r.content, isError: !!r.isError };
+      });
+    }));
+  }
+  let all = [];
+  for (let i = 0; i < subs.length; i += Math.max(limit, 1)) {
+    all = [...all, ...await batchRun(i, Math.min(i + (limit || subs.length), subs.length))];
+  }
+  const sections = all.map((p, i) => {
+    const head = `## Agente ${i + 1}: ${p.task}${p.where ? ' (' + p.where + ')' : ''}`;
+    return `${head}\n${p.content}`;
+  }).join('\n\n---\n\n');
+  return {
+    content: `# Pesquisa: ${task}\n\n${sections}\n\n---\n\nResponda ao usuário com um relatório consolidado citando achados de cada agente. Se algum agente falhou, mencione e peça se deve reenviar.`,
+    isError: false,
+  };
 }
