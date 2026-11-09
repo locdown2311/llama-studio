@@ -2027,11 +2027,13 @@ function updateNimStatusChat() {
 function renderMessages(onlyLast) {
   const box = $("#messages");
 
+  if (!box) return; 
+
   const conv = cur();
 
   const stick = onlyLast ? followBottom && !holdScroll() : true;
 
-  const top = box.scrollTop;
+  const top = box.scrollTop; // Agora isso não vai mais quebrar, pois box é garantido
 
   if (!conv || !conv.messages.length) {
     box.innerHTML = "";
