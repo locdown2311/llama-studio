@@ -21,7 +21,7 @@ fn err(status: StatusCode, msg: String) -> Response {
 
 /// Só o NVIDIA NIM (id "nvidia") tem limite de plano.
 fn is_nim(c: &ApiProvider) -> bool {
-    c.id.trim().eq_ignore_ascii_case("nvidia")
+    c.id.trim().eq_ignore_ascii_case("nvidia") || c.base.to_ascii_lowercase().contains("integrate.api.nvidia.com")
 }
 
 /// Falha no envio: limite de plano (NIM) ou erro de rede.
@@ -311,6 +311,7 @@ mod t {
     #[test]
     fn so_nvidia_e_limitado() {
         assert!(is_nim(&ApiProvider { id: "nvidia".into(), ..Default::default() }));
-        assert!(!is_nim(&ApiProvider { id: "openai".into(), base: "https://integrate.api.nvidia.com/v1".into(), ..Default::default() }));
+        assert!(is_nim(&ApiProvider { id: "openai".into(), base: "https://integrate.api.nvidia.com/v1".into(), ..Default::default() }));
+        assert!(!is_nim(&ApiProvider { id: "openai".into(), base: "https://api.openai.com/v1".into(), ..Default::default() }));
     }
 }

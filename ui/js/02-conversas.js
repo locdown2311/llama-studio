@@ -1877,11 +1877,11 @@ function renderChat() {
 let nimPollInterval = 0;
 
 function isNimModel() {
-  // Verifica se a API principal configurada é o NVIDIA NIM (provedor "nvidia")
-
+  // API principal configurada: NVIDIA NIM pelo id "nvidia" ou pelo endpoint integrate.api.nvidia.com
   const mainApi = mainApiForChat();
-
-  return mainApi && mainApi.id && mainApi.id.trim().toLowerCase() === "nvidia";
+  if (!mainApi) return false;
+  if (mainApi.id && mainApi.id.trim().toLowerCase() === "nvidia") return true;
+  return (mainApi.base || "").toLowerCase().includes("integrate.api.nvidia.com");
 }
 
 function maybeStartNimPoll() {
@@ -1970,15 +1970,10 @@ function updateNimStatusChat() {
 
       if (ind) {
         ind.className = "chat-nim-indicator " + level;
-
-        $("#nim-status-text").textContent = L(
-          "NIM: {0} / {1}",
-          used.toLocaleString(),
-          total.toLocaleString()
-        );
-
+        ind.style.display = "flex";
+        const txt = ind.querySelector(".txt");
+        if (txt) txt.textContent = L("NIM: {0} / {1}", used.toLocaleString(), total.toLocaleString());
         const fill = ind.querySelector(".fill");
-
         if (fill) fill.style.width = pct + "%";
       }
 
@@ -2017,6 +2012,7 @@ function updateNimStatusChat() {
 
       if (floatInd) {
         floatInd.textContent = "0/40";
+        floatInd.style.display = "block";
         floatInd.className = "chat-nim-floating " + level;
       }
     });

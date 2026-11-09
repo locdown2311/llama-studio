@@ -1,5 +1,5 @@
-//! Vários modelos cadastrados, um carregado por vez.
-//! Cada perfil guarda o arquivo .gguf e os parâmetros que mudam de modelo para modelo
+﻿//! VÃ¡rios modelos cadastrados, um carregado por vez.
+//! Cada perfil guarda o arquivo .gguf e os parÃ¢metros que mudam de modelo para modelo
 //! (contexto, camadas MoE na CPU, threads, argumentos extras). Ativar um perfil copia
 //! esses campos para o llama-gui.json e reinicia o llama-server.
 
@@ -40,7 +40,7 @@ fn from_cfg(c: &LlamaCfg, id: &str) -> Profile {
     }
 }
 
-/// Nome legível a partir do arquivo (sem pasta, extensão e partes "-00001-of-00003").
+/// Nome legÃ­vel a partir do arquivo (sem pasta, extensÃ£o e partes "-00001-of-00003").
 pub fn name_of(path: &str) -> String {
     let base = path.rsplit(['/', '\\']).next().unwrap_or(path);
     let base = base.strip_suffix(".gguf").unwrap_or(base);
@@ -67,11 +67,45 @@ pub fn load(app: &App) -> Vec<Profile> {
     v
 }
 
-pub fn save(app: &App, v: &[Profile]) {
-    let _ = std::fs::write(file(app), serde_json::to_vec_pretty(v).unwrap_or_default());
+/// Perfis remotos da API externa.
+pub fn remote_profiles(app: &App) -> Vec<Profile> {
+    app.cfg().api_providers.iter()
+        .filter(|p| crate::remote::ready(p))
+        .map(|p| Profile {
+            id: format!("api_{}", p.id),
+            name: format!("☁️ {} ({})", p.name, p.model),
+            model: format!("remote:{}", p.id),
+            context: 32768,
+            ..Default::default()
+        })
+        .collect()
 }
 
-/// Perfil cujo modelo está configurado no llama-server agora.
+/// Combina perfis locais com os remotos (descarta remotos antigos do arquivo).
+fn merge_remotes(mut local: Vec<Profile>, remotes: Vec<Profile>) -> Vec<Profile> {
+    local.retain(|p| !p.model.starts_with("remote:"));
+    local.extend(remotes);
+    local
+}
+
+/// Lista todos os perfis (locais + da API externa).
+pub fn full_list(app: &App) -> Vec<Profile> {
+    merge_remotes(load(app), remote_profiles(app))
+}
+
+/// Grava os perfis locais em `modelos.json` (exclui remotos).
+pub fn save(app: &App, list: &[Profile]) {
+    let mut local = list.iter()
+        .filter(|p| !p.model.starts_with("remote:"))
+        .cloned()
+        .collect::<Vec<_>>();
+    // ordena por nome (caso) para ser previsÃ­vel
+    local.sort_by(|a, b| a.name.cmp(&b.name));
+    let json = serde_json::to_vec_pretty(&local).unwrap_or_else(|_| vec![]);
+    std::fs::write(file(app), json).ok();
+}
+
+/// Perfil cujo modelo estÃ¡ configurado no llama-server agora.
 pub fn active_id(app: &App, list: &[Profile]) -> Option<String> {
     let c = app.llama.cfg();
     list.iter().find(|p| same_path(&p.model, &c.model)).map(|p| p.id.clone())
@@ -98,7 +132,7 @@ fn scan(app: &App, known: &[Profile]) -> Vec<Value> {
             if !name.ends_with(".gguf") || name.contains("mmproj") {
                 continue;
             }
-            // de modelos divididos, só a primeira parte
+            // de modelos divididos, sÃ³ a primeira parte
             if regex_lite::Regex::new(r"-\d{5}-of-\d{5}\.gguf$").unwrap().is_match(&name) && !name.contains("-00001-of-") {
                 continue;
             }
@@ -117,37 +151,34 @@ fn scan(app: &App, known: &[Profile]) -> Vec<Value> {
 }
 
 pub fn list_json(app: &App) -> Value {
-    let mut list = load(app);
-    
-    // Injeta APIs remotas na lista
-    for api in app.cfg().api_providers.iter().filter(|p| crate::remote::ready(p)) {
-        list.push(Profile {
-            id: format!("api_{}", api.id),
-            name: format!("☁️ {} ({})", api.name, api.model),
-            model: format!("remote:{}", api.id),
-            context: 8192,
-            cpu_moe: 0,
-            threads: 0,
-            extra_args: String::new(),
-        });
-    }
-
+    let list = full_list(app);
     let active = active_id(app, &list);
     let found = scan(app, &list);
     json!({"models": list, "active": active, "found": found, "defaults": from_cfg(&app.llama.cfg(), "")})
 }
 
-/// Carrega o perfil: grava os parâmetros e (re)inicia o llama-server.
+/// Carrega o perfil: grava os parÃ¢metros e (re)inicia o llama-server.
 pub async fn activate(app: &Arc<App>, id: &str) -> Result<Value, String> {
-    // 1. Corrigido: 'mut' removido - lista lida apenas para consulta
-    let list = load(app); 
+    let list = full_list(app); 
     
-    let p = list.iter().find(|p| p.id == id).ok_or(L!("Modelo não encontrado.", "Model not found."))?.clone();
+    let p = list.iter().find(|p| p.id == id).ok_or(L!("Modelo nÃ£o encontrado.", "Model not found."))?.clone();
     let is_remote = p.model.starts_with("remote:");
     
-    // 2. Corrigido: Mantida apenas a checagem que respeita o is_remote (a antiga foi apagada)
-    if !is_remote && !Path::new(&p.model).is_file() {
-        return Err(LF!("O arquivo do modelo não existe: {}", "The model file does not exist: {}", p.model));
+    // Modelos remotos nÃ£o usam o llama-server local
+    if is_remote {
+        let mut c = app.llama.cfg();
+        c.model = p.model.clone();
+        c.context = p.context;
+        c.cpu_moe = p.cpu_moe;
+        c.threads = p.threads;
+        c.extra_args = p.extra_args.clone();
+        app.llama.save(c);
+        return Ok(app.llama.to_json());
+    }
+    
+    // Verifica se o arquivo do modelo existe
+    if !Path::new(&p.model).is_file() {
+        return Err(LF!("O arquivo do modelo nÃ£o existe: {}", "The model file does not exist: {}", p.model));
     }
     
     let state = app.llama.state();
@@ -164,14 +195,6 @@ pub async fn activate(app: &Arc<App>, id: &str) -> Result<Value, String> {
     c.extra_args = p.extra_args.clone();
     app.llama.save(c);
     
-    // 3. Corrigido: Se for API externa, garante que o llama-server local seja desligado e sai da função
-    if is_remote {
-        if app.llama.is_running() {
-            app.llama.stop(); 
-        }
-        return Ok(app.llama.to_json());
-    }
-
     if app.llama.is_running() {
         if !changed {
             return Ok(app.llama.to_json());
@@ -198,14 +221,14 @@ pub async fn activate(app: &Arc<App>, id: &str) -> Result<Value, String> {
     Err(last)
 }
 
-/// O formulário do servidor editou a configuração direta: leva as mudanças para o perfil
+/// O formulÃ¡rio do servidor editou a configuraÃ§Ã£o direta: leva as mudanÃ§as para o perfil
 /// do modelo que estava ativo (ou cria um perfil se o modelo for novo).
 pub fn sync_from_cfg(app: &App, old_model: &str) {
     let c = app.llama.cfg();
     if c.model.trim().is_empty() || c.model.starts_with("remote:") {
         return;
     }
-    let mut list = load(app);
+    let mut list = full_list(app);
     if let Some(p) = list.iter_mut().find(|p| same_path(&p.model, old_model) || same_path(&p.model, &c.model)) {
         let renamed = p.name == name_of(&p.model);
         p.model = c.model.clone();
@@ -222,3 +245,22 @@ pub fn sync_from_cfg(app: &App, old_model: &str) {
     }
     save(app, &list);
 }
+
+#[cfg(test)]
+mod t {
+    use super::*;
+    #[test]
+    fn merge_remotes_tira_antigos_do_arquivo() {
+        let local = vec![
+            Profile { id: "m1".into(), model: "llama.gguf".into(), ..Default::default() },
+            // entrada remota antiga persistida em modelos.json
+            Profile { id: "api_antigo".into(), model: "remote:antigo".into(), ..Default::default() },
+        ];
+        let remotos = vec![Profile { id: "api_novo".into(), model: "remote:novo".into(), ..Default::default() }];
+        let list = merge_remotes(local, remotos);
+        let ids: Vec<_> = list.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, ["m1", "api_novo"]);
+    }
+}
+
+

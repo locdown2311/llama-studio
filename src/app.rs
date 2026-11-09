@@ -138,8 +138,8 @@ pub struct App {
     pub mcp: Mcp,
     pub browser: Browser,
     pub llama: Llama,
-    /// Contador de requests NIM para rate limiting (40/min).
-    pub nim_hits: OnceLock<Mutex<HashMap<String, Vec<std::time::Instant>>>>,
+    /// Contador global de requests NIM para rate limiting (40/min total).
+    pub nim_hits: OnceLock<Mutex<Vec<std::time::Instant>>>,
 
     ui: OnceLock<Box<dyn Fn(UiMsg) + Send + Sync>>,
     pub rt: OnceLock<tokio::runtime::Handle>,
@@ -157,23 +157,19 @@ fn nim_gate_at(hits: &mut Vec<Instant>, now: Instant) -> Result<(), u64> {
     Ok(())
 }
 
-/// Contagem e espera do limite NIM a partir do mapa de hits.
-fn nim_state(m: &mut HashMap<String, Vec<Instant>>, now: Instant) -> (u32, u32) {
+/// Contagem e espera do limite NIM para um único provedor.
+fn nim_state_single(hits: &Vec<Instant>, now: Instant) -> (u32, u32) {
     let mut used: u32 = 0;
     let mut oldest: Option<Instant> = None;
-    for hits in m.values_mut() {
-        // Remove hits fora da janela de 60s
-        hits.retain(|t| now.saturating_duration_since(*t) < NIM_WINDOW);
-        used += hits.len() as u32;
-        for t in hits.iter() {
-            // O mais antigo expira primeiro
+    for t in hits.iter() {
+        if now.saturating_duration_since(*t) < NIM_WINDOW {
+            used += 1;
             if oldest.map_or(true, |o| *t < o) {
                 oldest = Some(*t);
             }
         }
     }
     let wait_secs = if used >= NIM_MAX_REQS as u32 {
-        // Todos os slots estão ocupados; espera até o mais velho expirar
         oldest.map_or(NIM_WINDOW.as_secs() as u32, |e| {
             let age = now.saturating_duration_since(e).as_secs();
             NIM_WINDOW.as_secs().saturating_sub(age).max(1) as u32
@@ -183,6 +179,8 @@ fn nim_state(m: &mut HashMap<String, Vec<Instant>>, now: Instant) -> (u32, u32) 
     };
     (used, wait_secs)
 }
+
+
 
 impl App {
     pub fn load() -> Arc<App> {
@@ -261,15 +259,14 @@ impl App {
 
     /// Retorna o contador de requests NIM (usado + tempo restante).
     pub fn nim_status(&self) -> (u32, u32) {
-        let mut m = self.nim_hits.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap_or_else(|e| e.into_inner());
-        nim_state(&mut m, Instant::now())
+        let hits = self.nim_hits.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap_or_else(|e| e.into_inner());
+        nim_state_single(&hits, Instant::now())
     }
 
-    /// Conta um pedido no limite do NIM (40/min por provedor). Err = segundos de espera.
-    pub fn nim_gate(&self, provider_id: &str) -> Result<(), u64> {
-        let mut m = self.nim_hits.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap_or_else(|e| e.into_inner());
-        let hits = m.entry(provider_id.trim().to_string()).or_default();
-        nim_gate_at(hits, Instant::now())
+    /// Conta um pedido no limite do NIM (40/min total, não por provedor). Err = segundos de espera.
+    pub fn nim_gate(&self, _provider_id: &str) -> Result<(), u64> {
+        let mut hits = self.nim_hits.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap_or_else(|e| e.into_inner());
+        nim_gate_at(&mut hits, Instant::now())
     }
 
     pub fn workspace(&self) -> PathBuf {
@@ -559,10 +556,8 @@ mod t {
     fn nim_status_espera_o_hit_mais_antigo() {
         let t0 = Instant::now();
         let now = t0 + Duration::from_secs(60);
-        let mut m: HashMap<String, Vec<Instant>> = HashMap::new();
-        // 40 hits dentro da janela; o mais antigo tem 59s de idade
-        m.insert("nvidia".into(), (1..=40).map(|i| t0 + Duration::from_secs(i)).collect());
-        let (used, wait) = nim_state(&mut m, now);
+        let hits: Vec<Instant> = (1..=40).map(|i| t0 + Duration::from_secs(i)).collect();
+        let (used, wait) = nim_state_single(&hits, now);
         assert_eq!(used, 40);
         assert_eq!(wait, 1, "a espera é até o hit mais antigo sair da janela");
     }
@@ -570,9 +565,8 @@ mod t {
     fn nim_status_ignora_hit_fora_da_janela() {
         let t0 = Instant::now();
         let now = t0 + Duration::from_secs(61);
-        let mut m: HashMap<String, Vec<Instant>> = HashMap::new();
-        m.insert("nvidia".into(), vec![t0]);
-        let (used, wait) = nim_state(&mut m, now);
+        let hits = vec![t0];
+        let (used, wait) = nim_state_single(&hits, now);
         assert_eq!(used, 0);
         assert_eq!(wait, 0);
     }

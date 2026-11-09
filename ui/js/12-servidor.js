@@ -35,6 +35,7 @@ function drawModels() {
   for (const m of models) {
     const on = m.id === active;
     const used = S.convs.filter((c) => c.modelId === m.id).length;
+    const remote = String(m.model || '').startsWith('remote:');
     box.append(h('div.mdl' + (on ? '.on' : ''), null,
       h('div.mdl-ico', { html: svg('cpu' in ICONS ? 'cpu' : 'server') }),
       h('div.mdl-main', null,
@@ -43,9 +44,9 @@ function drawModels() {
         h('div.mdl-meta', null, L('contexto {0}', fmtK(m.context)), m.cpuMoe ? L(' · {0} camadas MoE na CPU', m.cpuMoe) : '', m.threads ? L(' · {0} threads', m.threads) : '', used ? L(' · {0} conversa{1}', used, used > 1 ? 's' : '') : '')),
       h('div.mdl-acts', null,
         on ? null : h('button.btn.sm', { onclick: async () => { try { await activateModel(m.id); } catch (e) { toast(e.message, 'err'); } } }, ic('play'), L('Carregar')),
-        h('button.btn.sm.ghost', { title: L('Mede algumas configurações no seu PC e grava a mais rápida neste modelo'), onclick: () => openBench(m) }, ic('zap'), L('Otimizar')),
-        h('button.icon-btn.sm', { title: L('Editar'), 'aria-label': L('Editar'), html: svg('edit'), onclick: () => editModel(m) }),
-        on ? null : h('button.icon-btn.sm', { title: L('Remover da lista'), 'aria-label': L('Remover'), html: svg('trash'), onclick: async () => {
+        remote ? null : h('button.btn.sm.ghost', { title: L('Mede algumas configurações no seu PC e grava a mais rápida neste modelo'), onclick: () => openBench(m) }, ic('zap'), L('Otimizar')),
+        remote ? null : h('button.icon-btn.sm', { title: L('Editar'), 'aria-label': L('Editar'), html: svg('edit'), onclick: () => editModel(m) }),
+        on || remote ? null : h('button.icon-btn.sm', { title: L('Remover da lista'), 'aria-label': L('Remover'), html: svg('trash'), onclick: async () => {
           if (!(await confirmBox(L('Tirar "{0}" da lista? O arquivo não é apagado.', m.name), L('Remover'), true))) return;
           await saveModels(models.filter((x) => x.id !== m.id));
         } }))));
