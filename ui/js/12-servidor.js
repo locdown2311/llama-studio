@@ -612,7 +612,9 @@ function drawServerStatus() {
 /** Busca e exibe o status do rate limit NIM na barra de servidor */
 async function updateNimStatus() {
   try {
-    const r = await api('/api/nim-status', {});
+    // CORREÇÃO 1: Removido o '{}' para forçar um GET
+    const r = await api('/api/nim-status');
+    
     if (r && r.content) {
       const data = JSON.parse(r.content);
       const used = data.used || 0;
@@ -625,13 +627,13 @@ async function updateNimStatus() {
       const pct = Math.round((used / max) * 100);
       let statusTxt;
       let progressW = '0%';
+      
       if (waitSecs > 0) {
         statusTxt = L('Rate limit ativo - aguarde {0}s', waitSecs);
-        // Mostrar countdown até o próximo slot ficar livre
-        const oldestAge = waitSecs; // aproximadamente
+        const oldestAge = waitSecs;
         statusTxt += L(' (próximo livre em ~{0}s)', Math.round(oldestAge));
-        // Progresso baseado no tempo restante vs window
-        progressW = `${Math.round((1 - waitSecs/windowSecs) * 100)}%`;
+        // CORREÇÃO 2: Adicionado o sinal de menos (1 - ...)
+        progressW = `${Math.round((1 - waitSecs / windowSecs) * 100)}%`;
       } else if (pct >= 80) {
         statusTxt = L('Próximo request quase no limite ({0}/{1})', used, max);
         progressW = `${pct}%`;
