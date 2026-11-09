@@ -66,18 +66,13 @@ function readCoverage(conv, path, self) {
 /** Busca o estado atual do rate limit NIM via API. Retorna {used, wait_secs, max, window_secs}. */
 async function fetchNimStatus() {
   try {
-    // CORREÇÃO: Removido o '{}' para forçar um GET
-    const r = await api('/api/nim-status');
-    
-    if (r && r.content) {
-      const data = JSON.parse(r.content);
-      return { 
-        used: data.used || 0, 
-        wait_secs: data.wait_secs || 0, 
-        max: data.max || 40, 
-        window_secs: data.window_secs || 60 
-      };
-    }
+    const data = await api('/api/nim-status');
+    return {
+      used: data.used || 0,
+      wait_secs: data.wait_secs || 0,
+      max: data.max || 40,
+      window_secs: data.window_secs || 60
+    };
   } catch { /* ignora erros de rede */ }
   
   return { used: 0, wait_secs: 0, max: 40, window_secs: 60 };

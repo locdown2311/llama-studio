@@ -656,7 +656,7 @@ async fn skills_get(State(app): S, Query(qs): Q) -> Res {
 
 async fn nim_status_handler(State(app): S) -> Res {
     let (used, wait_secs) = app.nim_status();
-    ok(json!({"used": used, "wait_secs": wait_secs, "max": 40, "window_secs": 60}))
+    ok(json!({"used": used, "wait_secs": wait_secs, "max": app::NIM_MAX_REQS, "window_secs": app::NIM_WINDOW.as_secs()}))
 }
 
 async fn skills_save(State(app): S, b: Bytes) -> Res {

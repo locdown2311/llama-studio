@@ -8,9 +8,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::{json, Value};
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::app::{ApiProvider, App};
 
@@ -21,38 +19,9 @@ fn err(status: StatusCode, msg: String) -> Response {
     (status, Json(json!({ "error": { "message": msg } }))).into_response()
 }
 
-/// Plano do NVIDIA NIM: 40 pedidos por minuto. Ao estourar, a API para por 1 minuto.
-const NIM_MAX_REQS: usize = 40;
-const NIM_WINDOW: Duration = Duration::from_secs(60);
-
-/// Pedidos recentes por provedor (só o NIM usa isso).
-fn nim_hits() -> &'static Mutex<HashMap<String, Vec<Instant>>> {
-    static H: OnceLock<Mutex<HashMap<String, Vec<Instant>>>> = OnceLock::new();
-    H.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
 /// Só o NVIDIA NIM (id "nvidia") tem limite de plano.
 fn is_nim(c: &ApiProvider) -> bool {
     c.id.trim().eq_ignore_ascii_case("nvidia")
-}
-
-/// Conta o pedido. Err = segundos de espera quando o limite de 40/min estourou.
-fn nim_gate(c: &ApiProvider) -> Result<(), u64> {
-    let key = c.id.trim().to_string();
-    let mut m = nim_hits().lock().unwrap_or_else(|e| e.into_inner());
-    let hits = m.entry(key).or_default();
-    nim_gate_at(hits, Instant::now())
-}
-
-/// Janela móvel de 60s: conta o pedido e devolve a espera quando passa de 40.
-fn nim_gate_at(hits: &mut Vec<Instant>, now: Instant) -> Result<(), u64> {
-    hits.retain(|t| now.saturating_duration_since(*t) < NIM_WINDOW);
-    if hits.len() >= NIM_MAX_REQS {
-        let wait = hits.first().map(|t| NIM_WINDOW.saturating_sub(now.saturating_duration_since(*t))).unwrap_or(NIM_WINDOW);
-        return Err(wait.as_secs().max(1));
-    }
-    hits.push(now);
-    Ok(())
 }
 
 /// Falha no envio: limite de plano (NIM) ou erro de rede.
@@ -118,12 +87,12 @@ fn client() -> &'static reqwest::Client {
             .expect("cliente das APIs externas")
     })
 }
-async fn send_with_retries(c: &ApiProvider, body_str: &str, max_retries: u32) -> Result<reqwest::Response, SendErr> {
+async fn send_with_retries(app: &App, c: &ApiProvider, body_str: &str, max_retries: u32) -> Result<reqwest::Response, SendErr> {
     let mut attempt = 0u32;
 
     loop {
         if is_nim(c) {
-            if let Err(wait) = nim_gate(c) {
+            if let Err(wait) = app.nim_gate(&c.id) {
                 return Err(SendErr::Limit(wait));
             }
         }
@@ -171,7 +140,7 @@ pub async fn call_provider_direct(app: &App, provider_id: &str, prompt: &str) ->
     });
 
     let max_retries = c.retries.unwrap_or(1).min(10);
-    let sent = send_with_retries(&c, &body.to_string(), max_retries).await;
+    let sent = send_with_retries(app, &c, &body.to_string(), max_retries).await;
 
     match sent {
         Ok(resp) => {
@@ -245,7 +214,7 @@ pub async fn chat(app: &App, id: &str, body: Bytes) -> Response {
     };
 
     let max_retries = c.retries.unwrap_or(1).min(10);
-    let mut sent = send_with_retries(&c, &prep_body(&c.model), max_retries).await;
+    let mut sent = send_with_retries(app, &c, &prep_body(&c.model), max_retries).await;
     let mut used_fallback = false;
 
     let has_fallback = !c.fallback_model.trim().is_empty() && c.fallback_model.trim() != c.model.trim();
@@ -256,7 +225,7 @@ pub async fn chat(app: &App, id: &str, body: Bytes) -> Response {
             Ok(r) => !r.status().is_success(),
         };
         if needs_fallback {
-            let fb_res = send_with_retries(&c, &prep_body(&c.fallback_model), max_retries).await;
+            let fb_res = send_with_retries(app, &c, &prep_body(&c.fallback_model), max_retries).await;
             match fb_res {
                 // Usa 'ref r2' para apenas referenciar a resposta ao checar o status, sem movê-la
                 Ok(ref r2) if r2.status().is_success() => {
@@ -339,18 +308,6 @@ pub async fn models(app: &App, id: &str) -> Result<Vec<String>, String> {
 #[cfg(test)]
 mod t {
     use super::*;
-    #[test]
-    fn nim_limita_40_por_minuto() {
-        let mut hits: Vec<Instant> = Vec::new();
-        let t0 = Instant::now();
-        for i in 0..40 {
-            assert!(nim_gate_at(&mut hits, t0 + Duration::from_millis(i)).is_ok(), "pedido {i} passou");
-        }
-        let wait = nim_gate_at(&mut hits, t0 + Duration::from_millis(40)).unwrap_err();
-        assert!((1..=60).contains(&wait), "espera fora do range: {wait}");
-        // Depois de 60s o pedido mais antigo sai da janela e o limite volta.
-        assert!(nim_gate_at(&mut hits, t0 + Duration::from_secs(61)).is_ok());
-    }
     #[test]
     fn so_nvidia_e_limitado() {
         assert!(is_nim(&ApiProvider { id: "nvidia".into(), ..Default::default() }));
