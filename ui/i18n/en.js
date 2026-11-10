@@ -1753,5 +1753,18 @@ const I18N_EN = {
 "O modelo da conversa não enxerga imagens: {0} vai descrevê-la para ele.": "The chat model cannot see images: {0} will describe it for it.",
 "[Imagem {0}, descrita por {1} porque este modelo não enxerga imagens]\n{2}": "[Image {0}, described by {1} because this model cannot see images]\n{2}",
 "{0} não conseguiu descrever a imagem": "{0} could not describe the image",
-"Imagem descrita por {0} para o modelo da conversa": "Image described by {0} for the chat model"
+"Imagem descrita por {0} para o modelo da conversa": "Image described by {0} for the chat model",
+"(\"{0}\" não existe com esse nome; usei {1}.) ": "(\"{0}\" does not exist under that name; used {1}.) ",
+"⚠ O vídeo ficou com só {0}s. Confira se from/to cobrem o momento inteiro (os tempos são do arquivo original; um corte de live costuma ter de 40 a 120 s). Se o pedido tinha uma duração, refaça com o trecho certo.": "⚠ The video came out at only {0}s. Check that from/to cover the whole moment (times are from the original file; a stream clip is usually 40 to 120 s). If the request had a duration, redo it with the right stretch.",
+"Lista gravada em {0} (dá para ajustar tempos ali com edit_file; o modelo de montagem é src/edit/EditVideo.tsx, não edite). A prévia do Remotion Studio mostra \"{1}\", e o usuário renderiza na página Vídeos; o MP4 sai em out/{1}-<data>.mp4 (para olhar, video_look com file \"out/{1}\" acha o mais recente).": "List saved in {0} (times can be adjusted there with edit_file; the assembly template is src/edit/EditVideo.tsx, do not edit it). The Remotion Studio preview shows \"{1}\", and the user renders on the Videos page; the MP4 is saved as out/{1}-<date>.mp4 (to look at it, video_look with file \"out/{1}\" finds the latest).",
+"… mais {0} falas. Use from/to (ex.: a partir de {1}) ou query para ver o resto.": "… {0} more phrases. Use from/to (e.g. starting at {1}) or query to see the rest.",
+"public/{0}: {1} de {2} falas com \"{3}\".": "public/{0}: {1} of {2} phrases with \"{3}\".",
+"public/{0}: {1} falas, frase por frase (tempos em segundos do arquivo | m:ss).": "public/{0}: {1} phrases, one by one (times in seconds of the file | m:ss).",
+"Nada encontrado. Tente outras palavras (sem acento também vale) ou veja a lista inteira sem query.": "Nothing found. Try other words or see the whole list without query.",
+"Pausas de 1 s ou mais:": "Pauses of 1 s or more:",
+"Para um corte, o trecho começa alguns segundos antes da fala que dá contexto e termina logo depois da reação.": "For a clip, the stretch starts a few seconds before the line that gives context and ends right after the reaction.",
+"ex.: 0123456789abcdef0123456789abcdef": "e.g. 0123456789abcdef0123456789abcdef",
+"A Cloudflare não lista modelos pela API: escolha uma das sugestões no campo ou veja o catálogo em developers.cloudflare.com/workers-ai/models.": "Cloudflare does not list models through the API: pick one of the suggestions in the field or see the catalog at developers.cloudflare.com/workers-ai/models.",
+"ID da conta": "Account ID",
+"No painel da Cloudflare: Workers AI › Use REST API (ou a barra lateral da conta). O token precisa da permissão Workers AI.": "In the Cloudflare dashboard: Workers AI › Use REST API (or the account sidebar). The token needs the Workers AI permission."
 };

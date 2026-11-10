@@ -218,6 +218,38 @@ pub fn speech(words: &[Word], from: f64, to: f64, gap: f64) -> Vec<(f64, f64, St
     out
 }
 
+/// Frases com o tempo de cada uma: quebra na pausa (`gap`), em ~80 caracteres ou em 6 s.
+pub fn phrases(words: &[Word], from: f64, to: f64, gap: f64) -> Vec<(f64, f64, String)> {
+    let mut out: Vec<(f64, f64, String)> = vec![];
+    for w in words.iter().filter(|w| w.end_ms / 1000.0 > from && w.start_ms / 1000.0 < to && !w.text.trim().is_empty()) {
+        let (a, b) = ((w.start_ms / 1000.0).max(from), (w.end_ms / 1000.0).min(to));
+        match out.last_mut() {
+            Some(last) if a - last.1 < gap && last.2.chars().count() < 80 && b - last.0 < 6.0 => {
+                last.1 = last.1.max(b);
+                last.2.push_str(&w.text);
+            }
+            _ => out.push((a, b, w.text.trim_start().to_string())),
+        }
+    }
+    out
+}
+
+/// Minúsculas sem acento, para buscar "nao acredito" em "Não acredito".
+pub fn fold(s: &str) -> String {
+    s.to_lowercase()
+        .chars()
+        .map(|c| match c {
+            'á' | 'à' | 'â' | 'ã' | 'ä' => 'a',
+            'é' | 'ê' | 'è' | 'ë' => 'e',
+            'í' | 'ì' | 'î' | 'ï' => 'i',
+            'ó' | 'ô' | 'õ' | 'ò' | 'ö' => 'o',
+            'ú' | 'ù' | 'û' | 'ü' => 'u',
+            'ç' => 'c',
+            c => c,
+        })
+        .collect()
+}
+
 /// Troca um trecho com cutSilences pelos pedaços falados dele (com uma folga), levando textos e ênfases
 /// para o pedaço em que caem. Devolve os segundos tirados.
 fn cut_clip(c: &Clip, words: &[Word], gap: f64) -> (Vec<Clip>, f64) {
@@ -391,6 +423,13 @@ pub fn prepare(mut e: Edl, dir: &Path, dur: &dyn Fn(&str) -> Option<Option<f64>>
         clips.push(c);
     }
     e.clips = clips;
+    // "sem música" e fundo que não é cor (ex.: "desfocado") não são erro: só não entram
+    if e.music.as_ref().is_some_and(|m| matches!(fold(m.src.trim()).as_str(), "" | "none" | "nenhuma" | "sem" | "no" | "null")) {
+        e.music = None;
+    }
+    if e.background.as_ref().is_some_and(|b| { let b = b.trim(); !(b.starts_with('#') || b.starts_with("rgb") || b.starts_with("hsl") || b.chars().all(|c| c.is_ascii_alphabetic())) || fold(b) == "desfocado" }) {
+        e.background = None;
+    }
     if let Some(m) = e.music.as_mut() {
         m.src = norm_src(&m.src);
         check_file(&m.src, "music", &mut errs);
@@ -512,6 +551,23 @@ mod t {
         let e: Edl = serde_json::from_value(json!({ "clips": [{ "src": "v.mp4", "from": 2.55, "to": 3.01 }] })).unwrap();
         let errs = prepare(e, Path::new("/x"), &dur).err().unwrap();
         assert!(errs[0].contains("\"2:55.00\" e \"3:01.00\" (ou 175 e 181)"), "{errs:?}");
+    }
+
+    #[test]
+    fn frases_e_busca() {
+        let words: Vec<Word> = (0..40).map(|i| w(if i == 25 { " Não" } else if i == 26 { " acredito" } else { " bla" }, i as f64 * 0.3, i as f64 * 0.3 + 0.25)).collect();
+        let ls = phrases(&words, 0.0, 100.0, 0.6);
+        assert!(ls.len() >= 2, "fala contínua quebra em frases: {}", ls.len());
+        assert!(ls.iter().all(|(a, b, t)| b - a <= 6.0 && t.chars().count() <= 90));
+        assert!(ls.iter().any(|(_, _, t)| fold(t).contains("nao acredito")));
+    }
+
+    #[test]
+    fn musica_none_e_fundo_invalido() {
+        let dur = |_: &str| -> Option<Option<f64>> { Some(Some(100.0)) };
+        let e: Edl = serde_json::from_value(json!({ "background": "desfocado", "music": { "src": "none" }, "clips": [{ "src": "a.mp4", "from": 1, "to": 9 }] })).unwrap();
+        let (e, _) = prepare(e, Path::new("/x"), &dur).unwrap();
+        assert!(e.music.is_none() && e.background.is_none());
     }
 
     #[test]

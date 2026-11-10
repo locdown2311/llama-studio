@@ -164,7 +164,7 @@ const API_PRESETS = [
   ['cerebras', 'Cerebras', 'https://api.cerebras.ai/v1', 'https://cloud.cerebras.ai'],
   ['openrouter', 'OpenRouter', 'https://openrouter.ai/api/v1', 'https://openrouter.ai/keys'],
   ['nvidia', 'NVIDIA NIM', 'https://integrate.api.nvidia.com/v1', 'https://build.nvidia.com/settings/api-keys'],
-  ['nim-test', 'NVIDIA NIM (teste DeepSeek v4.1)', 'https://integrate.api.nvidia.com/v1', 'https://build.nvidia.com/settings/api-keys'],
+  ['cloudflare', 'Cloudflare Workers AI', 'https://api.cloudflare.com/client/v4/accounts/ID_DA_CONTA/ai/v1', 'https://dash.cloudflare.com/profile/api-tokens'],
   ['custom', L('Outro (compatível com OpenAI)'), '', ''],
 ];
 const API_ROLES = [
@@ -176,7 +176,10 @@ const API_ROLES = [
 /** Cartões de API abertos (o resto fica numa linha só). */
 const API_OPEN = new Set(store.get('apiOpen', []));
 const API_ROLE_SHORT = { auditor: L('Auditor'), explorer: L('Exploradores'), background: L('Fundo'), compact: L('Resumo') };
-const presetOf = (base) => API_PRESETS.find((p) => p[2] && base && base.replace(/\/+$/, '') === p[2]);
+/** Cloudflare: o endereço leva o ID da conta (https://api.cloudflare.com/client/v4/accounts/<ID>/ai/v1). */
+const CF_RE = /^https:\/\/api\.cloudflare\.com\/client\/v4\/accounts\/([^/]*)\/ai\/v1\/?$/;
+const CF_MODELS = ['@cf/moonshotai/kimi-k2.6', '@cf/zai-org/glm-4.7-flash', '@cf/meta/llama-3.1-8b-instruct'];
+const presetOf = (base) => CF_RE.test(base || '') ? API_PRESETS.find((p) => p[0] === 'cloudflare') : API_PRESETS.find((p) => p[2] && base && base.replace(/\/+$/, '') === p[2]);
 const apiLabel = (a) => a.name || presetOf(a.base)?.[1] || a.base || L('API');
 
 function apiSection(put, field, saved) {
@@ -204,7 +207,13 @@ function apiSection(put, field, saved) {
       const v = retries.value.trim();
       save({ apiProvider: { id: a.id, retries: v === '' ? null : Math.max(0, Math.min(10, parseInt(v, 10) || 0)) } });
     });
+    const cf = (a.base || '').match(CF_RE);
+    const cfAcc = cf ? h('input.input.mono', { value: cf[1] === 'ID_DA_CONTA' ? '' : cf[1], placeholder: L('ex.: 0123456789abcdef0123456789abcdef'), spellcheck: false }) : null;
+    cfAcc?.addEventListener('change', () => { const id = cfAcc.value.trim().replace(/[^A-Za-z0-9]/g, ''); if (id) save({ apiProvider: { id: a.id, base: `https://api.cloudflare.com/client/v4/accounts/${id}/ai/v1` } }); });
+    if (cf) CF_MODELS.forEach((m) => dl.append(h('option', { value: m })));
     const listBtn = h('button.btn.sm', { type: 'button', onclick: async () => {
+      // a Cloudflare não lista modelos pela API: as sugestões já estão no campo, o catálogo tem o resto
+      if (cf) { model.focus(); toast(L('A Cloudflare não lista modelos pela API: escolha uma das sugestões no campo ou veja o catálogo em developers.cloudflare.com/workers-ai/models.')); return; }
       listBtn.disabled = true;
       try { const r = await api('/api/remote/models?p=' + encodeURIComponent(a.id)); dl.innerHTML = ''; r.models.forEach((m) => dl.append(h('option', { value: m }))); toast(L('{0} modelos', r.models.length)); model.focus(); }
       catch (e) { toast(e.message, 'err'); }
@@ -316,7 +325,7 @@ function apiSection(put, field, saved) {
         h('div.api-grid', null,
           field(L('Nome'), nome, L('Como aparece na lista de modelos. Vazio = id do modelo.')),
           field(L('Chave'), key, pre?.[3] ? h('a.bin-link', { href: pre[3], target: '_blank', rel: 'noopener' }, ic('external'), L('Pegar uma chave grátis')) : null)),
-        pre ? null : field(L('Endereço'), base, L('O que vem antes de /chat/completions.')),
+        cf ? field(L('ID da conta'), cfAcc, L('No painel da Cloudflare: Workers AI › Use REST API (ou a barra lateral da conta). O token precisa da permissão Workers AI.')) : pre ? null : field(L('Endereço'), base, L('O que vem antes de /chat/completions.')),
         field(L('Modelo'), h('div.api-model-row', null, model, dl, listBtn, test)),
         testOut,
         h('div.api-grid.three', null,
@@ -338,7 +347,7 @@ function apiSection(put, field, saved) {
       let n = 1; while (apis.some((a) => a.id === 'p' + n)) n++;
       const patch = { id: 'p' + n, base: p[2], name: p[0] === 'custom' ? '' : '' };
       API_OPEN.add(patch.id); store.set('apiOpen', [...API_OPEN]);
-      if (p[0] === 'nim-test') { patch.model = 'deepseek-ai/deepseek-v4.1-flash'; patch.params = { temperature: 1, top_p: 0.95, max_tokens: 262144 }; }
+      if (p[0] === 'cloudflare') { patch.name = 'Cloudflare'; patch.model = CF_MODELS[0]; patch.context = 262144; }
       save({ apiProvider: patch });
     });
     // por função: modelo local ou uma das APIs (só as prontas)

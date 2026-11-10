@@ -48,7 +48,8 @@ pub fn context_of(p: &ApiProvider) -> u32 {
 }
 
 pub fn ready(p: &ApiProvider) -> bool {
-    !p.base.trim().is_empty() && !p.model.trim().is_empty()
+    // a Cloudflare vem com "ID_DA_CONTA" no endereço até o usuário pôr o ID da conta
+    !p.base.trim().is_empty() && !p.model.trim().is_empty() && !p.base.contains("ID_DA_CONTA")
 }
 
 /// O provedor pedido (ou o primeiro, se não vier id).
@@ -330,16 +331,27 @@ pub async fn ping(app: &App, id: &str) -> Result<(), String> {
     if c.base.trim().is_empty() || c.model.trim().is_empty() {
         return Err(L!("Configuração incompleta.", "Incomplete configuration.").into());
     }
-    let mut rb = client().get(endpoint(&c.base, "models")).timeout(Duration::from_secs(10)).header("User-Agent", "llama-studio");
-    if !c.key.trim().is_empty() {
-        rb = rb.bearer_auth(c.key.trim());
+    // a Cloudflare não tem /models: confere o token (de usuário ou da conta)
+    let urls: Vec<String> = match c.base.find("api.cloudflare.com/client/v4/accounts/") {
+        Some(_) => {
+            let acc = c.base.trim().trim_end_matches('/').trim_end_matches("/ai/v1").to_string();
+            vec!["https://api.cloudflare.com/client/v4/user/tokens/verify".into(), format!("{acc}/tokens/verify")]
+        }
+        None => vec![endpoint(&c.base, "models")],
+    };
+    let mut last = String::new();
+    for u in urls {
+        let mut rb = client().get(&u).timeout(Duration::from_secs(10)).header("User-Agent", "llama-studio");
+        if !c.key.trim().is_empty() {
+            rb = rb.bearer_auth(c.key.trim());
+        }
+        let resp = rb.send().await.map_err(chain)?;
+        if resp.status().is_success() {
+            return Ok(());
+        }
+        last = format!("HTTP {}", resp.status().as_u16());
     }
-    let resp = rb.send().await.map_err(chain)?;
-    if resp.status().is_success() {
-        Ok(())
-    } else {
-        Err(format!("HTTP {}", resp.status().as_u16()))
-    }
+    Err(last)
 }
 
 /// Lista os modelos do provedor (GET /models), para escolher sem digitar.

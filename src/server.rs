@@ -372,7 +372,7 @@ async fn videos_edit(State(app): S, b: Bytes) -> Res {
 async fn videos_speech(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     let f = |k: &str| v[k].as_f64().unwrap_or(0.0);
-    app.videos.speech(&app, st(&v, "id"), st(&v, "file"), f("gap"), f("from"), f("to")).map(ok).map_err(bad)?
+    app.videos.speech(&app, st(&v, "id"), st(&v, "file"), f("gap"), f("from"), f("to"), st(&v, "query")).map(ok).map_err(bad)?
 }
 async fn videos_smoke(State(app): S, b: Bytes) -> Res {
     let v = body(&b);

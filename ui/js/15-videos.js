@@ -576,7 +576,7 @@ async function videoProjectOf(tctx) {
 async function runVideoLook(args, tctx, tmsg) {
   let vid;
   try { vid = await videoProjectOf(tctx); } catch (e) { return { content: e.message, isError: true }; }
-  const file = String(args.file || '').trim().replace(/^\.?\//, '');
+  let file = String(args.file || '').trim().replace(/^\.?\//, '');
   const count = Math.max(1, Math.min(24, Number(args.count) || 12));
   const from = Math.max(0, Number(args.from) || 0), to = Math.max(0, Number(args.to) || 0);
   let r;
@@ -585,7 +585,8 @@ async function runVideoLook(args, tctx, tmsg) {
   const sheets = [];
   for (let i = 0; i < r.frames.length; i += 12) sheets.push(await contactSheet(r.frames.slice(i, i + 12)));
   const times = r.frames.map((f) => `${f.t.toFixed(1)}s`);
-  let text = L('{0}: {1} de duração. {2} quadros em {3} folha(s), da esquerda para a direita e de cima para baixo, cada um com o tempo no canto: {4}.', file, r.duration ? `${r.duration.toFixed(1)}s (${fmtDur(r.duration)})` : '?', r.frames.length, sheets.length, times.join(', ')) + ' ' + L('Na lista de edição, use os tempos em segundos (175.5) ou como texto "2:55.5"; nunca 2.55 para dizer 2:55.');
+  const asked = file; file = r.file || file;
+  let text = (asked !== file ? L('("{0}" não existe com esse nome; usei {1}.) ', asked, file) : '') + L('{0}: {1} de duração. {2} quadros em {3} folha(s), da esquerda para a direita e de cima para baixo, cada um com o tempo no canto: {4}.', file, r.duration ? `${r.duration.toFixed(1)}s (${fmtDur(r.duration)})` : '?', r.frames.length, sheets.length, times.join(', ')) + ' ' + L('Na lista de edição, use os tempos em segundos (175.5) ou como texto "2:55.5"; nunca 2.55 para dizer 2:55.');
   // a fala do trecho, se o vídeo já tem legenda
   const stem = file.split('/').pop().replace(/\.[^.]+$/, '');
   try {
@@ -693,27 +694,35 @@ async function runVideoEdit(args, tctx, tmsg) {
   } catch (e) { check = L('Não consegui testar o vídeo rodando: {0}', e.message); }
   tmsg.phase = '';
   const cut = r.silenceCut > 0.05 ? ' ' + L('Pausas cortadas: {0}s.', r.silenceCut.toFixed(1)) : '';
+  const short = r.seconds < 12 ? '\n\n' + L('⚠ O vídeo ficou com só {0}s. Confira se from/to cobrem o momento inteiro (os tempos são do arquivo original; um corte de live costuma ter de 40 a 120 s). Se o pedido tinha uma duração, refaça com o trecho certo.', r.seconds.toFixed(1)) : '';
   return {
     content: L('Composição "{0}": {1}x{2}, {3} trecho(s), {4} no total.{5}', name, r.width, r.height, r.clips, fmtDur(r.seconds), cut) + '\n'
-      + L('Lista gravada em {0} (dá para ajustar tempos ali com edit_file; o modelo de montagem é src/edit/EditVideo.tsx, não edite). A prévia do Remotion Studio mostra "{1}", e o usuário renderiza na página Vídeos.', r.file, name) + '\n\n' + check,
+      + L('Lista gravada em {0} (dá para ajustar tempos ali com edit_file; o modelo de montagem é src/edit/EditVideo.tsx, não edite). A prévia do Remotion Studio mostra "{1}", e o usuário renderiza na página Vídeos; o MP4 sai em out/{1}-<data>.mp4 (para olhar, video_look com file "out/{1}" acha o mais recente).', r.file, name) + short + '\n\n' + check,
     isError: /quebra|Erros de tipo/.test(check),
   };
 }
 
-/** video_find: trechos falados e pausas pela legenda. */
+/** video_find: frase por frase com o tempo de cada uma (e busca por palavras), pela legenda. */
 async function runVideoFind(args, tctx) {
   let vid;
   try { vid = await videoProjectOf(tctx); } catch (e) { return { content: e.message, isError: true }; }
+  const query = String(args.query || '').trim();
   let r;
-  try { r = await api('/api/videos/speech', { id: vid, file: String(args.file || ''), gap: Number(args.gap) || 0, from: Number(args.from) || 0, to: Number(args.to) || 0 }); }
+  try { r = await api('/api/videos/speech', { id: vid, file: String(args.file || ''), gap: Number(args.gap) || 0, from: Number(args.from) || 0, to: Number(args.to) || 0, query }); }
   catch (e) { return { content: e.message, isError: true }; }
-  const segs = r.segments.slice(0, 250).map((s) => `[${s.from.toFixed(1)}–${s.to.toFixed(1)}s | ${fmtDur(s.from)}–${fmtDur(s.to)}] ${s.text}`);
-  const sil = r.silences.filter((s) => s.to - s.from >= 0.3).slice(0, 120).map((s) => `${s.from.toFixed(1)}–${s.to.toFixed(1)}s (${(s.to - s.from).toFixed(1)}s)`);
-  const total = r.silences.reduce((n, s) => n + (s.to - s.from), 0);
+  const line = (s) => `[${s.from.toFixed(1)}–${s.to.toFixed(1)}s | ${fmtDur(s.from)}] ${s.text}`;
+  // cabe no contexto: o começo da lista e o aviso de como ver o resto
+  let body = '', shown = 0;
+  for (const s of r.segments) { const l = line(s) + '\n'; if (body.length + l.length > 14000) break; body += l; shown++; }
+  const more = shown < r.segments.length ? '\n' + L('… mais {0} falas. Use from/to (ex.: a partir de {1}) ou query para ver o resto.', r.segments.length - shown, Math.floor(r.segments[shown].from)) : '';
+  const sil = r.silences.filter((s) => s.to - s.from >= 1).slice(0, 60).map((s) => `${s.from.toFixed(1)}–${s.to.toFixed(1)}s`);
+  const head = query
+    ? L('public/{0}: {1} de {2} falas com "{3}".', r.file, r.segments.length, r.total, query)
+    : L('public/{0}: {1} falas, frase por frase (tempos em segundos do arquivo | m:ss).', r.file, r.total);
   return {
-    content: L('public/{0}: {1} trecho(s) falado(s), {2} pausa(s) somando {3}s.', r.file, r.segments.length, r.silences.length, total.toFixed(1)) + '\n\n'
-      + L('Trechos (tempos no arquivo, em segundos | m:ss):') + '\n' + segs.join('\n') + (r.segments.length > segs.length ? '\n…' : '')
-      + (sil.length ? '\n\n' + L('Pausas:') + '\n' + sil.join(', ') : ''),
+    content: head + '\n\n' + (r.segments.length ? body + more : L('Nada encontrado. Tente outras palavras (sem acento também vale) ou veja a lista inteira sem query.'))
+      + (!query && sil.length ? '\n\n' + L('Pausas de 1 s ou mais:') + ' ' + sil.join(', ') : '')
+      + '\n\n' + L('Para um corte, o trecho começa alguns segundos antes da fala que dá contexto e termina logo depois da reação.'),
     isError: false,
   };
 }

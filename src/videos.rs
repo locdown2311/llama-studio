@@ -518,17 +518,21 @@ impl Videos {
     }
 
     /// Trechos falados e silêncios de um arquivo, pela legenda (public/captions/<nome>.json).
-    pub fn speech(&self, app: &App, id: &str, file: &str, gap: f64, from: f64, to: f64) -> Result<Value, String> {
+    pub fn speech(&self, app: &App, id: &str, file: &str, gap: f64, from: f64, to: f64, query: &str) -> Result<Value, String> {
         use crate::videos_edl as ed;
         let dir = project_dir(app, id).ok_or_else(|| L!("Projeto não encontrado.", "Project not found.").to_string())?;
-        let src = ed::norm_src(file);
+        let src = match find_media(&dir, file) {
+            Ok((_, rel)) => ed::norm_src(&rel),
+            Err(_) => ed::norm_src(file),
+        };
         let words = ed::words_of(&dir, &src).ok_or_else(|| LF!("public/{} ainda não tem legenda: gere com video_captions.", "public/{} has no captions yet: generate them with video_captions.", src))?;
         let end = if to > 0.0 { to } else { words.last().map(|w| w.end_ms / 1000.0 + 1.0).unwrap_or(0.0) };
         let gap = if gap > 0.05 { gap } else { 0.6 };
-        let segs = ed::speech(&words, from.max(0.0), end, gap);
+        // frase por frase (pausa, ~80 caracteres ou 6 s): dá para achar onde cada coisa é dita
+        let lines = ed::phrases(&words, from.max(0.0), end, gap);
         let mut silences = vec![];
         let mut at = from.max(0.0);
-        for (a, b, _) in &segs {
+        for (a, b, _) in &lines {
             if a - at >= gap {
                 silences.push(json!({ "from": at, "to": a }));
             }
@@ -537,7 +541,14 @@ impl Videos {
         if end - at >= gap {
             silences.push(json!({ "from": at, "to": end }));
         }
-        Ok(json!({ "file": src, "segments": segs.iter().map(|(a, b, t)| json!({ "from": a, "to": b, "text": t.trim() })).collect::<Vec<_>>(), "silences": silences }))
+        let terms: Vec<String> = query.split(['|', ',']).map(|t| ed::fold(t.trim())).filter(|t| !t.is_empty()).collect();
+        let hit = |t: &str| { let f = ed::fold(t); terms.iter().any(|q| f.contains(q.as_str())) };
+        let segs: Vec<Value> = lines
+            .iter()
+            .filter(|(_, _, t)| terms.is_empty() || hit(t))
+            .map(|(a, b, t)| json!({ "from": a, "to": b, "text": t.trim() }))
+            .collect();
+        Ok(json!({ "file": src, "duration": end, "query": query, "total": lines.len(), "segments": segs, "silences": silences }))
     }
 
     /// fps e duração (em quadros) da sequência gerada pelo video_scenes, se houver.
@@ -817,6 +828,50 @@ fn inside(dir: &Path, rel: &str) -> Option<PathBuf> {
     p.is_file().then_some(p)
 }
 
+/// Acha o arquivo que o modelo quis dizer: o caminho exato; sem pasta, em public/ ou out/; e, para renders,
+/// o mais recente que começa com o nome ("out/CorteDoVideo.mp4" ou "CorteDoVideo" = out/CorteDoVideo-<data>.mp4).
+/// Devolve o caminho e o nome relativo ao projeto, ou um erro com os arquivos que existem.
+fn find_media(dir: &Path, rel: &str) -> Result<(PathBuf, String), String> {
+    let rel = rel.trim().replace('\\', "/").trim_start_matches("./").to_string();
+    let rel_of = |p: &Path| p.strip_prefix(dir).map(|r| r.to_string_lossy().replace('\\', "/")).unwrap_or_default();
+    if let Some(p) = inside(dir, &rel) {
+        return Ok((p, rel));
+    }
+    let name = rel.rsplit('/').next().unwrap_or(&rel).to_string();
+    let stem = name.rsplit_once('.').map(|(a, _)| a.to_string()).unwrap_or(name.clone()).to_lowercase();
+    let mut cands: Vec<(u64, PathBuf)> = vec![];
+    for sub in ["public", "out"] {
+        if let Some(p) = inside(dir, &format!("{sub}/{name}")) {
+            return Ok((p.clone(), rel_of(&p)));
+        }
+        if stem.is_empty() || !crate::videos_edl::safe_rel(&name) {
+            continue;
+        }
+        for e in std::fs::read_dir(dir.join(sub)).into_iter().flatten().flatten() {
+            let n = e.file_name().to_string_lossy().to_lowercase();
+            if n.starts_with(&stem) && !matches!(media_kind(&n), "other" | "image") {
+                let t = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
+                cands.push((t, e.path()));
+            }
+        }
+    }
+    cands.sort_by(|a, b| b.0.cmp(&a.0));
+    if let Some((_, p)) = cands.into_iter().next() {
+        return Ok((p.clone(), rel_of(&p)));
+    }
+    let mut have: Vec<String> = vec![];
+    for sub in ["public", "out"] {
+        for e in std::fs::read_dir(dir.join(sub)).into_iter().flatten().flatten() {
+            let n = e.file_name().to_string_lossy().to_string();
+            if !n.starts_with('.') && matches!(media_kind(&n), "video" | "audio") {
+                have.push(format!("{sub}/{n}"));
+            }
+        }
+    }
+    have.sort();
+    Err(LF!("Arquivo não encontrado no projeto: {}. Existem: {}", "File not found in the project: {}. Available: {}", rel, if have.is_empty() { "-".into() } else { have.into_iter().take(15).collect::<Vec<_>>().join(", ") }))
+}
+
 /// Pasta do ffmpeg que vem com o Remotion (node_modules/@remotion/compositor-<plataforma>). Pode haver mais de
 /// uma (no Linux, gnu e musl): fica a deste sistema e arquitetura, e no Linux a gnu.
 fn compositor(dir: &Path) -> Option<PathBuf> {
@@ -970,7 +1025,8 @@ impl Videos {
     /// Sem `times`: `count` quadros espaçados entre `from` e `to` (segundos; `to` 0 = fim do vídeo).
     pub async fn frames(&self, app: &App, id: &str, file: &str, times: &[f64], count: usize, from: f64, to: f64, width: u32) -> Result<Value, String> {
         let dir = project_dir(app, id).ok_or_else(|| L!("Projeto não encontrado.", "Project not found.").to_string())?;
-        let path = inside(&dir, file).ok_or_else(|| LF!("Arquivo não encontrado no projeto: {file}", "File not found in the project: {file}"))?;
+        let (path, file) = find_media(&dir, file)?;
+        let file = file.as_str();
         let comp = compositor(&dir).ok_or_else(|| L!("O ffmpeg do Remotion não está no projeto (rode npm install na pasta dele).", "Remotion's ffmpeg is not in the project (run npm install in its folder).").to_string())?;
         let dur = duration_of(&comp, &path, &dir).await;
         let spaced;
@@ -1008,14 +1064,15 @@ impl Videos {
         if frames.is_empty() {
             return Err(L!("Não consegui tirar quadros desse arquivo (é um vídeo?).", "Could not grab frames from that file (is it a video?).").into());
         }
-        Ok(json!({ "duration": dur, "frames": frames }))
+        Ok(json!({ "file": file, "duration": dur, "frames": frames }))
     }
 
     /// Legendas do áudio de um vídeo ou áudio do projeto, com o Whisper (whisper.cpp pelo Remotion). Gera
     /// public/captions/<nome>.json (Caption[] do @remotion/captions) e .srt. Trabalho em segundo plano.
     pub fn captions(self: &std::sync::Arc<Self>, app: std::sync::Arc<App>, id: &str, file: &str, model: &str, lang: &str) -> Result<Value, String> {
         let dir = project_dir(&app, id).ok_or_else(|| L!("Projeto não encontrado.", "Project not found.").to_string())?;
-        let src = inside(&dir, file).ok_or_else(|| LF!("Arquivo não encontrado no projeto: {file}", "File not found in the project: {file}"))?;
+        let (src, file) = find_media(&dir, file)?;
+        let file = file.as_str();
         if !matches!(media_kind(file), "video" | "audio") {
             return Err(L!("Escolha um vídeo ou áudio.", "Choose a video or audio file.").into());
         }
