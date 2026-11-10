@@ -4,6 +4,8 @@
 /* ------------------------------------------------------------ estado e ativação */
 const VID = { data: null, sel: store.get('vidSel', null), comps: {}, compErr: {}, media: {}, up: null, poll: 0, busy: false };
 const VIDEO_SKILL = 'remotion-best-practices';
+// método de edição por situação (receitas), gravado pelo studio na pasta de skills
+const EDITOR_SKILL = 'editor-de-video';
 const VIDEO_NOTE = L('Este projeto é um vídeo do Remotion (React). Para editar gravações que estão em public/ (cortes, tirar pausas, recorte vertical, react com facecam em cima, legendas, transições, zoom, música), use video_edit com uma lista de edição: o studio monta com um modelo pronto, sem você escrever React. Antes de escolher os tempos, veja o vídeo com video_look e a fala com video_find (gere a legenda com video_captions). Para animações criadas do zero, use video_scenes: você escreve o roteiro e a equipe escreve as cenas em paralelo. Depois de mudar código à mão, confira com video_check. A prévia do Remotion Studio atualiza sozinha.');
 
 function videosOn() { return S.settings.videos === true; }
@@ -32,6 +34,8 @@ async function setVideosOn(on) {
 /* ------------------------------------------------------------ página */
 async function loadVideos() {
   try { VID.data = await api('/api/videos'); } catch (e) { VID.data = { error: e.message, projects: [], jobs: [] }; }
+  // a lista grava a skill do editor na primeira vez; recarrega as skills para ela aparecer
+  if (!VID.data.error && !S.skills.some((s) => s.id === EDITOR_SKILL)) loadSkills().catch(() => {});
 }
 
 async function renderVideos() {
@@ -248,9 +252,15 @@ function videoChat(p) {
   if (/^(Este projeto é um vídeo do Remotion|This project is a Remotion)/.test(proj.instructions || '') && proj.instructions !== VIDEO_NOTE) { proj.instructions = VIDEO_NOTE; saveProjects(); }
   // a última conversa do projeto, ou uma nova
   const last = S.convs.filter((c) => c.projectId === proj.id).sort((a, b) => b.updatedAt - a.updatedAt)[0];
-  if (last) { selectConv(last.id); setView('chat'); return; }
+  const editor = S.skills.some((s) => s.id === EDITOR_SKILL);
+  if (last) {
+    // conversas de antes: o método de edição entra junto
+    if (editor && last.auto?.skills && !last.auto.skills.includes(EDITOR_SKILL)) { last.auto.skills.push(EDITOR_SKILL); saveConvs(); }
+    selectConv(last.id); setView('chat'); return;
+  }
   const conv = newConv(proj.id);
   const sk = S.skills.some((s) => s.id === VIDEO_SKILL) ? [VIDEO_SKILL] : S.skills.filter((s) => /^remotion/i.test(s.id)).slice(0, 1).map((s) => s.id);
+  if (editor) sk.push(EDITOR_SKILL);
   conv.auto = { groups: ['read', 'edit', 'write', 'shell', 'video'], mcp: [], skills: sk };
   conv.title = L('Vídeo: {0}', p.id); saveConvs(); renderConvList();
   setView('chat');

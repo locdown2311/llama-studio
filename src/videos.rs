@@ -15,6 +15,30 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use crate::app::App;
 
 const SKILLS_REPO: &str = "remotion-dev/skills";
+/// A skill com o método de edição (receitas por situação), que vem com o studio.
+pub const EDITOR_SKILL: &str = "editor-de-video";
+const EDITOR_SKILL_PT: &str = include_str!("videos_skill.md");
+const EDITOR_SKILL_EN: &str = include_str!("videos_skill_en.md");
+
+fn skill_version(text: &str) -> u32 {
+    crate::skills::parse_frontmatter(text).0.get("version").and_then(|v| v.parse().ok()).unwrap_or(0)
+}
+
+/// Grava a skill do editor na pasta de skills se faltar ou se a gravada for de uma versão anterior
+/// (quem editou à mão sem mudar a versão não perde a edição).
+fn ensure_editor_skill(app: &App) {
+    let body = L!(EDITOR_SKILL_PT, EDITOR_SKILL_EN);
+    let f = app.skills_dir().join(EDITOR_SKILL).join("SKILL.md");
+    if let Ok(old) = std::fs::read_to_string(&f) {
+        if skill_version(&old) >= skill_version(body) {
+            return;
+        }
+    }
+    if let Some(d) = f.parent() {
+        let _ = std::fs::create_dir_all(d);
+    }
+    let _ = std::fs::write(&f, body);
+}
 
 #[derive(Default)]
 pub struct Videos {
@@ -187,6 +211,7 @@ fn renders(dir: &Path) -> Vec<Value> {
 
 impl Videos {
     pub async fn list(&self, app: &App) -> Value {
+        ensure_editor_skill(app);
         let r = root(app);
         let studio = self.studio.lock().unwrap().as_ref().map(|s| json!({ "project": s.project, "port": s.port }));
         let mut projects: Vec<(u64, Value)> = std::fs::read_dir(&r)
@@ -778,6 +803,14 @@ mod t {
         assert_eq!(v["scene"], "Amigos");
         assert_eq!(v["at"], "src/scenes/Amigos.tsx:78");
         assert!(v["message"].as_str().unwrap().starts_with("inputRange must be"), "{v}");
+    }
+
+    #[test]
+    fn skill_do_editor() {
+        for t in [super::EDITOR_SKILL_PT, super::EDITOR_SKILL_EN] {
+            let (meta, body) = crate::skills::parse_frontmatter(t);
+            assert!(super::skill_version(t) >= 1 && meta.contains_key("name") && meta.contains_key("description") && body.contains("video_edit"));
+        }
     }
 
     #[test]
