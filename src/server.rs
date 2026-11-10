@@ -135,6 +135,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/videos/delete", post(videos_delete))
         .route("/api/videos/skills", post(videos_skills))
         .route("/api/videos/check", post(videos_check))
+        .route("/api/videos/smoke", post(videos_smoke))
         .route("/api/videos/media", post(videos_media))
         // vídeos grandes: sem o limite de 200 MB dos outros pedidos (o arquivo vai direto para o disco)
         .route("/api/videos/upload", post(videos_upload).layer(DefaultBodyLimit::disable()))
@@ -360,6 +361,10 @@ async fn videos_frames(State(app): S, b: Bytes) -> Res {
 async fn videos_captions(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     app.videos.captions(app.clone(), st(&v, "id"), st(&v, "file"), st(&v, "model"), st(&v, "lang")).map(ok).map_err(bad)?
+}
+async fn videos_smoke(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    app.videos.smoke(&app, st(&v, "id"), st(&v, "comp")).await.map(ok).map_err(bad)?
 }
 async fn videos_check(State(app): S, b: Bytes) -> Res {
     let v = body(&b);

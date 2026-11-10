@@ -4,7 +4,7 @@
 /* ------------------------------------------------------------ estado e ativação */
 const VID = { data: null, sel: store.get('vidSel', null), comps: {}, compErr: {}, media: {}, up: null, poll: 0, busy: false };
 const VIDEO_SKILL = 'remotion-best-practices';
-const VIDEO_NOTE = L('Este projeto é um vídeo do Remotion (React). As composições ficam em src/ (Root.tsx registra cada uma). Siga a habilidade remotion-best-practices. Para um vídeo novo ou com várias cenas, use a ferramenta video_scenes: você escreve o roteiro (estilo comum e cenas com duração e descrição detalhada) e a equipe escreve as cenas em paralelo; depois revise e ajuste com edit_file. Depois de editar, não precisa rodar nada: a prévia do Remotion Studio no studio atualiza sozinha. Para conferir erros de tipo, rode npx tsc --noEmit.');
+const VIDEO_NOTE = L('Este projeto é um vídeo do Remotion (React). As composições ficam em src/ (Root.tsx registra cada uma). Siga a habilidade remotion-best-practices. Para um vídeo novo ou com várias cenas, use a ferramenta video_scenes: você escreve o roteiro (estilo comum e cenas com duração e descrição detalhada) e a equipe escreve as cenas em paralelo; depois revise e ajuste com edit_file. Depois de editar, a prévia do Remotion Studio no studio atualiza sozinha; confira com video_check (tipos e um teste rodando), que pega erros que só aparecem na prévia.');
 
 function videosOn() { return S.settings.videos === true; }
 function applyVideosNav() {
@@ -175,6 +175,8 @@ function videoChat(p) {
     S.projects.push(proj); saveProjects();
   }
   if (proj.video !== p.id) { proj.video = p.id; saveProjects(); }
+  // projetos criados antes: a nota do projeto acompanha a versão atual (com as ferramentas novas)
+  if (/^(Este projeto é um vídeo do Remotion|This project is a Remotion)/.test(proj.instructions || '') && proj.instructions !== VIDEO_NOTE) { proj.instructions = VIDEO_NOTE; saveProjects(); }
   // a última conversa do projeto, ou uma nova
   const last = S.convs.filter((c) => c.projectId === proj.id).sort((a, b) => b.updatedAt - a.updatedAt)[0];
   if (last) { selectConv(last.id); setView('chat'); return; }
@@ -218,6 +220,7 @@ async function runSceneWriter(sc, plan, tctx, sm, apiId, owner) {
       + L('- Tudo deriva do frame: useCurrentFrame(), useVideoConfig(), interpolate (com extrapolateLeft/extrapolateRight: "clamp") e spring. Nada de animação CSS, setTimeout, fetch ou Math.random (use random("semente") do remotion).') + '\n'
       + L('- Importe de "react", "remotion" e dos pacotes @remotion/* que já estão no projeto (ex.: @remotion/captions). Imagens, vídeos e sons só de public/ com staticFile(); se não houver, desenhe com formas, gradientes e texto.') + '\n'
       + L('- Estilos inline (objetos style). Fonte: as do sistema (ex.: "Inter, system-ui, sans-serif") ou a que o estilo pedir, se for do sistema.') + '\n'
+      + L('- interpolate: a faixa de entrada tem que ser crescente. Para algo que diminui (partícula subindo, contagem regressiva), inverta as duas listas juntas: interpolate(y, [0, h * 0.7, h + 30], [0, 1, 0]), nunca [h + 30, h * 0.7, 0]. Com valores calculados, garanta a ordem para qualquer duração.') + '\n'
       + L('- Termine a cena de um jeito que emende na próxima (a descrição diz como).') + '\n\n'
       + (plan.media?.length ? L('Mídia em public/ (use com staticFile, sem o "public/"; vídeo com <OffthreadVideo>, áudio com <Audio>, recorte com trimBefore/trimAfter em frames):') + '\n' + plan.media.map((f) => `- ${f.file}${f.duration ? ' (' + fmtDur(f.duration) + ')' : ''}${f.captions ? ' · ' + L('legenda: {0}', f.captions) : ''}`).join('\n') + '\n\n' : '')
       + L('Estilo comum a todas as cenas:') + '\n' + plan.style + '\n\n'
@@ -359,6 +362,27 @@ async function runVideoScenes(args, tctx, tmsg) {
     tmsg.phase = L('Corrigindo {0} cena(s)...', fix.length); scheduleRender();
     await write(fix);
   }
+
+  // em execução: o que o tsc não vê (interpolate fora de ordem, undefined, arquivo que falta). Até 2 cenas
+  // voltam para quem as escreveu; o resto vai no relatório para o modelo da conversa
+  let smoke = null;
+  if (checked && !Object.keys(errs).length) {
+    for (let round = 0; round < 3 && !tctx.signal.aborted; round++) {
+      tmsg.phase = L('Testando o vídeo rodando...'); scheduleRender();
+      try { smoke = await api('/api/videos/smoke', { id: vid }); } catch (e) { smoke = { ok: false, message: e.message, skipped: true }; break; }
+      if (smoke.ok) break;
+      const i = only.findIndex((sc) => sc.name === smoke.scene);
+      if (i < 0 || round === 2 || !results[i]?.ok) break;
+      const sm = tmsg.subs[i];
+      sm._msgs?.push({ role: 'user', content: L('Sua cena quebra ao renderizar (quadro {0} do vídeo, {1}): {2}\nCorrija e chame write_scene de novo com o arquivo inteiro.', smoke.frame ?? '?', smoke.at || only[i].name, smoke.message) });
+      sm.status = 'queued'; sm.fixes = (sm.fixes || 0) + 1;
+      tmsg.phase = L('Corrigindo {0}...', only[i].name); scheduleRender();
+      await write([i]);
+      // a correção não pode ter quebrado os tipos
+      try { const c = await api('/api/videos/check', { id: vid }); errs = c.ok ? {} : tscByScene(c.out, plan.scenes.map((s) => s.name)); } catch { /* segue */ }
+      if (Object.keys(errs).length) break;
+    }
+  }
   tmsg.phase = '';
 
   // a página Vídeos relista as composições (a "Video" acabou de entrar)
@@ -375,6 +399,8 @@ async function runVideoScenes(args, tctx, tmsg) {
     + L('Sequência: src/scenes/Video.tsx ({0} cenas, {1} frames = {2}s a {3} fps, {4}x{5}).', plan.scenes.length, total, (total / plan.fps).toFixed(1), plan.fps, plan.width, plan.height) + '\n'
     + (lines.length ? lines.join('\n') + '\n' : '')
     + (!checked ? '' : left.length ? '\n' + L('Erros de tipo que sobraram (corrija você com edit_file):') + '\n```\n' + left.join('\n') + '\n```\n' : L('Tipos: ok.') + '\n')
+    + (!smoke ? '' : smoke.ok ? L('Teste rodando (um quadro por segundo): ok.') + '\n' : smoke.skipped ? L('Não consegui testar o vídeo rodando: {0}', smoke.message) + '\n'
+      : '\n' + L('O vídeo quebra ao rodar, no quadro {0} ({1}): {2}\nCorrija com edit_file e confira com video_check.', smoke.frame ?? '?', smoke.at || smoke.scene || '?', smoke.message) + '\n')
     + '\n' + L('A prévia do Remotion Studio atualiza sozinha (composição "Video"). Para ajustar uma cena, edite o arquivo dela ou chame video_scenes de novo com a lista completa e only com os nomes. Para gerar o MP4, o usuário usa Renderizar na página Vídeos.');
   const failed = only.filter((_, i) => !results[i]?.ok).length;
   return { content, isError: failed === only.length };
@@ -574,4 +600,25 @@ async function runVideoCaptions(args, tctx, tmsg) {
       + (preview ? L('Começo do .srt:') + '\n```\n' + preview + '\n```' : ''),
     isError: false,
   };
+}
+
+/** video_check: tipos (tsc) e o teste rodando, para o modelo conferir depois de editar à mão. */
+async function runVideoCheck(args, tctx, tmsg) {
+  let vid;
+  try { vid = await videoProjectOf(tctx); } catch (e) { return { content: e.message, isError: true }; }
+  tmsg.phase = L('Conferindo os tipos...'); scheduleRender();
+  let c;
+  try { c = await api('/api/videos/check', { id: vid }); } catch (e) { tmsg.phase = ''; return { content: L('Não consegui conferir os tipos: {0}', e.message), isError: true }; }
+  if (!c.ok) {
+    tmsg.phase = '';
+    const lines = String(c.out).split(/\r?\n/).filter((l) => /error TS\d+/.test(l)).slice(0, 25);
+    return { content: L('Erros de tipo (corrija antes do teste rodando):') + '\n```\n' + (lines.join('\n') || String(c.out).slice(0, 3000)) + '\n```', isError: true };
+  }
+  tmsg.phase = L('Testando o vídeo rodando...'); scheduleRender();
+  let r;
+  try { r = await api('/api/videos/smoke', { id: vid, comp: String(args.composition || 'Video') }); } catch (e) { tmsg.phase = ''; return { content: L('Tipos: ok. Não consegui testar o vídeo rodando: {0}', e.message), isError: true }; }
+  tmsg.phase = '';
+  delete VID.comps[vid];
+  if (r.ok) return { content: L('Tipos: ok. Teste rodando (um quadro por segundo): ok.'), isError: false };
+  return { content: L('Tipos: ok. O vídeo quebra ao rodar, no quadro {0} ({1}): {2}', r.frame ?? '?', r.at || r.scene || '?', r.message), isError: true };
 }

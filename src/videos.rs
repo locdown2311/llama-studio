@@ -32,6 +32,26 @@ fn comp_ids(text: &str) -> Vec<String> {
     line.split_whitespace().filter(|w| w.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')).map(str::to_string).collect()
 }
 
+/// O erro do teste em execução: quadro, mensagem e o primeiro arquivo do projeto na pilha (src/...:linha).
+fn smoke_error(text: &str) -> Value {
+    let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let frame = lines.iter().find_map(|l| l.split("rendering frame ").nth(1).and_then(|r| r.trim_end_matches(':').trim().parse::<u64>().ok()));
+    let message = lines
+        .iter()
+        .find(|l| l.starts_with("Error") || l.contains(" Error ") || l.starts_with("TypeError") || l.starts_with("ReferenceError"))
+        .map(|l| l.trim_start_matches("Error").trim().to_string())
+        .unwrap_or_else(|| short_err(text));
+    // "at src/scenes/Amigos.tsx:78" (o primeiro que não é do node_modules)
+    let at = lines.iter().find_map(|l| {
+        let i = l.find("src/")?;
+        let rest = &l[i..];
+        let end = rest.find(|c: char| c.is_whitespace() || c == ')').unwrap_or(rest.len());
+        Some(rest[..end].to_string())
+    });
+    let scene = at.as_deref().and_then(|a| a.strip_prefix("src/scenes/")).and_then(|r| r.split(".tsx").next()).map(str::to_string);
+    json!({ "ok": false, "frame": frame, "message": message.chars().take(400).collect::<String>(), "at": at, "scene": scene })
+}
+
 /// O cache do empacotador ficou preso por outro processo (ou por um que morreu no meio).
 fn cache_race(s: &str) -> bool {
     s.contains("State lock mismatch") || s.contains("This indicates a race condition")
@@ -388,6 +408,56 @@ impl Videos {
         Ok(json!({ "ok": out.status.success(), "out": text.chars().take(20000).collect::<String>() }))
     }
 
+    /// Teste em execução: renderiza cerca de um quadro por segundo da composição, em 10% do tamanho (um GIF
+    /// descartável). Pega o que o tsc não vê: interpolate com faixa fora de ordem, undefined no meio do
+    /// desenho, staticFile de arquivo que não existe... Devolve o quadro, a mensagem e o arquivo:linha.
+    pub async fn smoke(&self, app: &App, id: &str, comp: &str) -> Result<Value, String> {
+        let dir = project_dir(app, id).ok_or_else(|| L!("Projeto não encontrado.", "Project not found.").to_string())?;
+        let comp = if comp.trim().is_empty() { "Video" } else { comp.trim() };
+        if !comp.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+            return Err(L!("Composição inválida.", "Invalid composition.").into());
+        }
+        let work = dir.join(".studio");
+        let _ = std::fs::create_dir_all(&work);
+        let gif = work.join("smoke.gif");
+        let g = gif.to_string_lossy().to_string();
+        // um quadro por segundo (30 fps é o comum); vídeos longos: no máximo uns 150 quadros
+        let nth = self.frames_hint(&dir).map(|(fps, total)| fps.max(total / 150).max(1)).unwrap_or(30).to_string();
+        let lock = self.bundle_lock(id);
+        let _g = lock.lock().await;
+        let run = |no_cache: bool| {
+            let mut args = vec!["--yes", "remotion", "render", comp, &g, "--codec=gif", "--every-nth-frame", &nth, "--scale=0.1", "--overwrite"];
+            if no_cache {
+                args.push("--bundle-cache=false");
+            }
+            let c = command(&npx(), &args, &dir);
+            async move {
+                tokio::time::timeout(Duration::from_secs(300), { let mut c = c; c.stdout(Stdio::piped()); c.output() })
+                    .await
+                    .map_err(|_| L!("O teste do vídeo demorou demais.", "The video test took too long.").to_string())?
+                    .map_err(|e| e.to_string())
+            }
+        };
+        let mut out = run(false).await?;
+        let mut text = format!("{}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        if !out.status.success() && cache_race(&text) {
+            out = run(true).await?;
+            text = format!("{}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        }
+        let _ = std::fs::remove_file(&gif);
+        if out.status.success() {
+            return Ok(json!({ "ok": true }));
+        }
+        Ok(smoke_error(&text))
+    }
+
+    /// fps e duração (em quadros) da sequência gerada pelo video_scenes, se houver.
+    fn frames_hint(&self, dir: &Path) -> Option<(u64, u64)> {
+        let t = std::fs::read_to_string(dir.join("src").join("scenes").join("Video.tsx")).ok()?;
+        let num = |k: &str| -> Option<u64> { let i = t.find(k)? + k.len(); t[i..].trim_start_matches([' ', ':']).split(|c: char| !c.is_ascii_digit()).next()?.parse().ok() };
+        Some((num("fps")?, num("durationInFrames")?))
+    }
+
     /// Registra a composição "Video" (src/scenes/Video.tsx) no src/Root.tsx, uma vez. As medidas vêm do
     /// VIDEO exportado pela sequência, então refazer as cenas não precisa mexer no Root de novo.
     pub fn wire(&self, app: &App, id: &str) -> Result<Value, String> {
@@ -598,6 +668,16 @@ mod t {
     fn ids_das_composicoes() {
         assert_eq!(super::comp_ids("⚡️ Cached bundle. Subsequent renders will be faster.\nMyComp Video\n"), ["MyComp", "Video"]);
         assert_eq!(super::comp_ids("MyComp Video\n\n"), ["MyComp", "Video"]);
+    }
+
+    #[test]
+    fn erro_do_teste_em_execucao() {
+        let out = "Rendered 6/35\nAn error occurred while rendering frame 180:\n Error  inputRange must be strictly monotonically increasing but got [1110,756,0]\nat ../x/node_modules/remotion/dist/esm/index.mjs:5051\nat interpolate (../x/node_modules/remotion/dist/esm/index.mjs:5119)\nat src/scenes/Amigos.tsx:78\n";
+        let v = super::smoke_error(out);
+        assert_eq!(v["frame"], 180);
+        assert_eq!(v["scene"], "Amigos");
+        assert_eq!(v["at"], "src/scenes/Amigos.tsx:78");
+        assert!(v["message"].as_str().unwrap().starts_with("inputRange must be"), "{v}");
     }
 
     #[test]
