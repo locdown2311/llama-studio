@@ -508,7 +508,7 @@ async function contactSheet(frames, cols = 4) {
   ok.forEach(({ im, t }, k) => {
     const x = (k % cols) * (w + gap), y = Math.floor(k / cols) * (hh + gap);
     g.drawImage(im, x, y, w, hh);
-    const label = fmtDur(t), tw = g.measureText(label).width;
+    const label = `${fmtDur(t)} · ${Math.round(t)}s`, tw = g.measureText(label).width;
     g.fillStyle = 'rgba(0,0,0,.72)'; g.fillRect(x + 6, y + 6, tw + 12, fs + 8);
     g.fillStyle = '#ffd84d'; g.fillText(label, x + 12, y + 10);
   });
@@ -543,8 +543,8 @@ async function runVideoLook(args, tctx, tmsg) {
   catch (e) { return { content: e.message, isError: true }; }
   const sheets = [];
   for (let i = 0; i < r.frames.length; i += 12) sheets.push(await contactSheet(r.frames.slice(i, i + 12)));
-  const times = r.frames.map((f) => fmtDur(f.t));
-  let text = L('{0}: {1} de duração. {2} quadros em {3} folha(s), da esquerda para a direita e de cima para baixo, cada um com o tempo no canto: {4}.', file, fmtDur(r.duration) || '?', r.frames.length, sheets.length, times.join(', '));
+  const times = r.frames.map((f) => `${f.t.toFixed(1)}s`);
+  let text = L('{0}: {1} de duração. {2} quadros em {3} folha(s), da esquerda para a direita e de cima para baixo, cada um com o tempo no canto: {4}.', file, r.duration ? `${r.duration.toFixed(1)}s (${fmtDur(r.duration)})` : '?', r.frames.length, sheets.length, times.join(', ')) + ' ' + L('Na lista de edição, use os tempos em segundos (175.5) ou como texto "2:55.5"; nunca 2.55 para dizer 2:55.');
   // a fala do trecho, se o vídeo já tem legenda
   const stem = file.split('/').pop().replace(/\.[^.]+$/, '');
   try {
@@ -552,7 +552,7 @@ async function runVideoLook(args, tctx, tmsg) {
     if (res.ok) {
       const end = to || r.duration || 1e9;
       const lines = captionLines(await res.json()).filter((l) => l.endMs / 1000 >= from && l.startMs / 1000 <= end).slice(0, 80);
-      if (lines.length) text += '\n\n' + L('Fala nesse trecho (da legenda):') + '\n' + lines.map((l) => `[${fmtDur(l.startMs / 1000)}] ${l.text.trim()}`).join('\n');
+      if (lines.length) text += '\n\n' + L('Fala nesse trecho (da legenda):') + '\n' + lines.map((l) => `[${(l.startMs / 1000).toFixed(1)}s] ${l.text.trim()}`).join('\n');
     }
   } catch { /* sem legenda */ }
   const imgs = sheets.filter(Boolean);
@@ -666,12 +666,12 @@ async function runVideoFind(args, tctx) {
   let r;
   try { r = await api('/api/videos/speech', { id: vid, file: String(args.file || ''), gap: Number(args.gap) || 0, from: Number(args.from) || 0, to: Number(args.to) || 0 }); }
   catch (e) { return { content: e.message, isError: true }; }
-  const segs = r.segments.slice(0, 250).map((s) => `[${fmtDur(s.from)}–${fmtDur(s.to)}] ${s.text}`);
-  const sil = r.silences.filter((s) => s.to - s.from >= 0.3).slice(0, 120).map((s) => `${fmtDur(s.from)}–${fmtDur(s.to)} (${(s.to - s.from).toFixed(1)}s)`);
+  const segs = r.segments.slice(0, 250).map((s) => `[${s.from.toFixed(1)}–${s.to.toFixed(1)}s | ${fmtDur(s.from)}–${fmtDur(s.to)}] ${s.text}`);
+  const sil = r.silences.filter((s) => s.to - s.from >= 0.3).slice(0, 120).map((s) => `${s.from.toFixed(1)}–${s.to.toFixed(1)}s (${(s.to - s.from).toFixed(1)}s)`);
   const total = r.silences.reduce((n, s) => n + (s.to - s.from), 0);
   return {
     content: L('public/{0}: {1} trecho(s) falado(s), {2} pausa(s) somando {3}s.', r.file, r.segments.length, r.silences.length, total.toFixed(1)) + '\n\n'
-      + L('Trechos (tempos no arquivo):') + '\n' + segs.join('\n') + (r.segments.length > segs.length ? '\n…' : '')
+      + L('Trechos (tempos no arquivo, em segundos | m:ss):') + '\n' + segs.join('\n') + (r.segments.length > segs.length ? '\n…' : '')
       + (sil.length ? '\n\n' + L('Pausas:') + '\n' + sil.join(', ') : ''),
     isError: false,
   };

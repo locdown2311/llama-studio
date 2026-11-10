@@ -9,11 +9,44 @@ use std::path::Path;
 
 pub const TEMPLATE: &str = include_str!("videos_edit.tsx");
 
+/// Tempo em segundos: número (175.5) ou texto "2:55.5" / "1:02:03" / "175". Aceitar "m:ss" evita o erro de o
+/// modelo ler "2:55" numa resposta e escrever 2.55.
+pub fn parse_time(v: &Value) -> Option<f64> {
+    match v {
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => {
+            let s = s.trim().trim_end_matches('s');
+            if !s.contains(':') {
+                return s.parse().ok();
+            }
+            let mut total = 0.0;
+            for part in s.split(':') {
+                total = total * 60.0 + part.trim().parse::<f64>().ok()?;
+            }
+            Some(total)
+        }
+        _ => None,
+    }
+}
+
+fn de_time<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
+    let v = Value::deserialize(d)?;
+    parse_time(&v).ok_or_else(|| serde::de::Error::custom(format!("tempo inválido {v}: use segundos (175.5) ou \"2:55.5\"")))
+}
+
+fn de_time_opt<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    let v = Value::deserialize(d)?;
+    if v.is_null() {
+        return Ok(None);
+    }
+    parse_time(&v).map(Some).ok_or_else(|| serde::de::Error::custom(format!("tempo inválido {v}: use segundos (175.5) ou \"2:55.5\"")))
+}
+
 #[derive(Deserialize, Serialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Cam {
     pub src: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_time")]
     pub from: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub volume: Option<f64>,
@@ -26,9 +59,9 @@ pub struct Cam {
 #[derive(Deserialize, Serialize, Clone)]
 pub struct Text {
     pub text: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_time")]
     pub at: f64,
-    #[serde(default = "two")]
+    #[serde(default = "two", deserialize_with = "de_time")]
     pub dur: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pos: Option<String>,
@@ -41,6 +74,7 @@ fn two() -> f64 {
 
 #[derive(Deserialize, Serialize, Clone)]
 pub struct Punch {
+    #[serde(deserialize_with = "de_time")]
     pub at: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scale: Option<f64>,
@@ -52,9 +86,9 @@ pub struct Punch {
 #[serde(rename_all = "camelCase")]
 pub struct Clip {
     pub src: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_time")]
     pub from: f64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_time")]
     pub to: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layout: Option<String>,
@@ -96,7 +130,7 @@ pub struct Music {
     pub src: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub volume: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "de_time_opt")]
     pub from: Option<f64>,
 }
 
@@ -288,6 +322,22 @@ pub fn prepare(mut e: Edl, dir: &Path, dur: &dyn Fn(&str) -> Option<Option<f64>>
         }
         if c.from < 0.0 || c.to <= c.from {
             errs.push(format!("trecho {n}: from {} e to {} (to precisa ser maior)", c.from, c.to));
+        } else if c.to - c.from < 1.0 {
+            // 2.55 a 3.01 quase sempre é "2:55 a 3:01" escrito como decimal
+            let as_mmss = |x: f64| x.trunc() * 60.0 + (x.fract() * 100.0).round();
+            let looks_mmss = c.from.fract() * 100.0 < 59.5 && c.to.fract() * 100.0 < 59.5 && {
+                let len = as_mmss(c.to) - as_mmss(c.from);
+                len >= 1.0 && d.map_or(true, |d| as_mmss(c.to) <= d + 0.5)
+            };
+            if looks_mmss {
+                let mmss = |x: f64| format!("{}:{:05.2}", x.trunc() as i64, x.fract() * 100.0);
+                errs.push(format!(
+                    "trecho {n}: só {:.2}s ({} a {}). Os tempos são em SEGUNDOS do arquivo: se quis dizer {} a {}, mande \"{}\" e \"{}\" (ou {} e {})",
+                    c.to - c.from, c.from, c.to, mmss(c.from), mmss(c.to), mmss(c.from), mmss(c.to), as_mmss(c.from), as_mmss(c.to)
+                ));
+            } else if c.to - c.from < 0.2 {
+                errs.push(format!("trecho {n}: só {:.2}s; os tempos são em segundos do arquivo", c.to - c.from));
+            }
         }
         if let Some(d) = d {
             if c.from >= d {
@@ -447,6 +497,21 @@ mod t {
         assert!(errs.iter().any(|x| x.contains("a cam (public/cam.mp4) termina em 10.00s")), "{errs:?}");
         assert!(errs.iter().any(|x| x.contains("layout react precisa de cam")), "{errs:?}");
         assert!(!errs.iter().any(|x| x.contains("trecho 1")), "o to além do fim só é cortado: {errs:?}");
+    }
+
+    #[test]
+    fn tempos_em_minutos() {
+        assert_eq!(parse_time(&json!("2:55")), Some(175.0));
+        assert_eq!(parse_time(&json!("1:02:03.5")), Some(3723.5));
+        assert_eq!(parse_time(&json!(12.5)), Some(12.5));
+        assert_eq!(parse_time(&json!("40s")), Some(40.0));
+        let c: Clip = serde_json::from_value(json!({ "src": "a.mp4", "from": "2:55", "to": "3:01.5" })).unwrap();
+        assert_eq!((c.from, c.to), (175.0, 181.5));
+        // 2.55 a 3.01 (o erro real): recusado com a dica
+        let dur = |_: &str| -> Option<Option<f64>> { Some(Some(1140.0)) };
+        let e: Edl = serde_json::from_value(json!({ "clips": [{ "src": "v.mp4", "from": 2.55, "to": 3.01 }] })).unwrap();
+        let errs = prepare(e, Path::new("/x"), &dur).err().unwrap();
+        assert!(errs[0].contains("\"2:55.00\" e \"3:01.00\" (ou 175 e 181)"), "{errs:?}");
     }
 
     #[test]
