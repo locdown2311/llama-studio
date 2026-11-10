@@ -2,3 +2,6 @@
 *.exe
 /dist
 node_modules/
+
+# registros de testes locais
+*.log
