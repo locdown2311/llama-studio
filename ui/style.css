@@ -1729,7 +1729,7 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .prompt-row .pr-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ditado por voz */
-.mic-btn { width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--line); background: transparent; color: var(--text-2); display: grid; place-items: center; cursor: pointer; flex-shrink: 0; }
+.mic-btn { width: 32px; height: 32px; margin: 0 2px 0 4px; border-radius: 9px; border: 0; background: transparent; color: var(--text-2); display: grid; place-items: center; cursor: pointer; flex-shrink: 0; }
 .mic-btn svg { width: 17px; height: 17px; }
 .mic-btn:hover { background: var(--hover, color-mix(in srgb, var(--text) 6%, transparent)); color: var(--text); }
 .mic-btn.rec { background: #d14343; border-color: #d14343; color: #fff; animation: micpulse 1.2s ease-in-out infinite; }
