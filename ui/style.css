@@ -1538,9 +1538,31 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .onb-lang > span svg { width: 15px; height: 15px; }
 .srv-memsum { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); margin: 0 2px 10px; }
 .srv-memsum svg { width: 14px; height: 14px; }
-.api-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 8px; }
-.api-head { display: flex; align-items: center; gap: 8px; }
+.api-card { border: 1px solid var(--line); border-radius: 12px; margin-bottom: 8px; display: flex; flex-direction: column; background: var(--card); }
+.api-card.closed:hover { border-color: var(--line-2); }
+.api-head { display: flex; align-items: center; gap: 10px; padding: 9px 10px 9px 8px; cursor: pointer; min-width: 0; }
 .api-head .spacer { flex: 1; }
+.api-chev { display: grid; place-items: center; width: 20px; height: 20px; flex: none; color: var(--muted); transition: transform .15s; }
+.api-chev svg { width: 14px; height: 14px; }
+.api-chev.open { transform: rotate(90deg); }
+.api-title { display: flex; flex-direction: column; min-width: 0; flex: 1 1 180px; }
+.api-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.api-name b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.api-title small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.api-badges { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; min-width: 0; }
+.api-badges .tag { font-size: 11px; gap: 3px; }
+.api-badges .tag svg { width: 11px; height: 11px; }
+.api-badges .tag.role { background: var(--accent-soft); color: var(--accent-ink); }
+.api-acts { display: flex; gap: 2px; flex: none; }
+.api-body { display: flex; flex-direction: column; gap: 8px; padding: 2px 14px 14px 36px; border-top: 1px solid var(--line); padding-top: 12px; }
+.api-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.api-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.api-grid > .field { margin: 0; }
+.api-model-row { display: flex; gap: 8px; align-items: center; }
+.api-model-row .input { flex: 1; min-width: 0; }
+.api-model-row .btn { flex: none; }
+.api-list-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+@media (max-width: 720px) { .api-grid, .api-grid.three { grid-template-columns: 1fr; } .api-body { padding-left: 14px; } .api-badges { display: none; } }
 .api-role { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
 .api-role:last-of-type { border-bottom: 0; }
 .api-role-main { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }

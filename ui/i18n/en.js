@@ -1732,5 +1732,19 @@ const I18N_EN = {
 "Voltar à prévia": "Back to the preview",
 "A prévia está fechada. Abra para ver o vídeo ao vivo enquanto o modelo edita, ou escolha um vídeo no painel ao lado para assistir.": "The preview is closed. Open it to watch the video live while the model edits, or pick a video in the side panel to watch.",
 "Nenhum vídeo renderizado ainda. Escolha a composição na barra e clique em Renderizar MP4.": "No rendered videos yet. Pick the composition in the bar and click Render MP4.",
-"Assistir no palco": "Watch on stage"
+"Assistir no palco": "Watch on stage",
+"Exploradores": "Explorers",
+"Fundo": "Background",
+"Conversa": "Chat",
+"sem modelo": "no model",
+"imagens": "images",
+"Fila do NVIDIA NIM (40 pedidos por minuto)": "NVIDIA NIM queue (40 requests per minute)",
+"{0} hoje": "{0} today",
+"Se o principal falhar ou a API cair.": "If the main one fails or the API goes down.",
+"Tentativas": "Retries",
+"Reenvios em falha temporária (0 a 10).": "Resends on temporary failures (0 to 10).",
+"Janela do modelo, para o medidor e a compactação.": "The model's window, for the meter and compaction.",
+"{0} APIs · clique numa para editar": "{0} APIs · click one to edit",
+"Fechar todas": "Collapse all",
+"Abrir todas": "Expand all"
 };

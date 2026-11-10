@@ -173,6 +173,9 @@ const API_ROLES = [
   ['background', L('Tarefas de fundo'), L('Resumo do mapa da pasta, regras aprendidas, habilidades geradas, regras de arrumar pastas e temas de posts.')],
   ['compact', L('Resumo da compactação'), L('Manda a conversa inteira para resumir. Rápido, mas é o que mais expõe e mais gasta.')],
 ];
+/** Cartões de API abertos (o resto fica numa linha só). */
+const API_OPEN = new Set(store.get('apiOpen', []));
+const API_ROLE_SHORT = { auditor: L('Auditor'), explorer: L('Exploradores'), background: L('Fundo'), compact: L('Resumo') };
 const presetOf = (base) => API_PRESETS.find((p) => p[2] && base && base.replace(/\/+$/, '') === p[2]);
 const apiLabel = (a) => a.name || presetOf(a.base)?.[1] || a.base || L('API');
 
@@ -290,21 +293,41 @@ function apiSection(put, field, saved) {
       } catch (e) { toast(e.message, 'err'); pingBtn.classList.remove('ok'); pingBtn.classList.add('err'); }
       setTimeout(() => pingBtn.classList.remove('spinning', 'ok', 'err'), 3000);
     } });
+    // fechado: uma linha com o essencial (nome, modelo, para que serve, uso de hoje); incompleta abre sozinha
+    const open = API_OPEN.has(a.id) || !a.ready;
+    const toggle = () => { API_OPEN.has(a.id) || !a.ready ? API_OPEN.delete(a.id) : API_OPEN.add(a.id); store.set('apiOpen', [...API_OPEN]); draw(); };
+    const roles = Object.keys(API_ROLE_SHORT).filter((r) => apiForAll(r).includes(a.id)).map((r) => API_ROLE_SHORT[r]);
+    if (mainApiForChat() && mainApiForChat().id === a.id) roles.unshift(L('Conversa'));
+    const head = h('div.api-head', { onclick: (e) => { if (!e.target.closest('button, a, input, select, label')) toggle(); } },
+      h('span.api-chev' + (open ? '.open' : ''), { html: svg('chev') }),
+      h('div.api-title', null,
+        h('div.api-name', null, h('b', null, apiLabel(a)), a.ready ? null : h('span.tag.off', null, L('incompleta'))),
+        h('small.muted.mono', { title: a.model || '' }, a.model || L('sem modelo'))),
+      h('div.api-badges', null,
+        ...roles.map((r) => h('span.tag.role', null, r)),
+        a.vision ? h('span.tag', { title: L('Aceita imagens') }, ic('image'), L('imagens')) : null,
+        isNimApi(a) ? h('span.tag', { title: L('Fila do NVIDIA NIM (40 pedidos por minuto)') }, 'NIM') : null,
+        u.calls ? h('span.tag.use', { title: L('Hoje: {0} pedidos, {1} tokens, {2} falhas (voltaram para o modelo local).', u.calls, u.tokens.toLocaleString(LOCALE), u.fails) }, L('{0} hoje', u.calls) + (u.fails ? ` · ${u.fails}×` : '')) : null),
+      h('div.api-acts', null, pingBtn, del));
+    if (!open) return h('div.api-card.closed', null, head);
     return h('div.api-card', null,
-      h('div.api-head', null, h('b', null, apiLabel(a)), a.ready ? h('span.tag.ok', null, L('pronta')) : h('span.tag.off', null, L('incompleta')),
-        h('span.spacer'), pre?.[3] ? h('a.bin-link', { href: pre[3], target: '_blank', rel: 'noopener' }, ic('external'), L('Pegar uma chave grátis')) : null, pingBtn, del),
-      pre ? null : field(L('Endereço'), base, L('O que vem antes de /chat/completions.')),
-      field(L('Nome'), nome, L('Como aparece na lista de modelos. Vazio = id do modelo.')),
-      field(L('Chave'), key),
-      field(L('Modelo'), h('div.row', null, model, dl, listBtn, test)),
-      testOut, field(L('Modelo de fallback'), fallbackModel, L('Opcional. Se o modelo principal falhar (400, 404, 429, 500...) ou a API cair, tenta este modelo no mesmo servidor.')),
-      field(L('Tentativas de reconexão'), retries, L('Tentativas de reenvio em caso de falha de conexão, timeout ou erro temporário do servidor (0 a 10, padrão: 1).')),
-      h('label.tcard.wrap', null, h('span.tc-main', null, h('span.tc-title', null, L('Aceita imagens')),
-        h('span.tc-desc', null, L('Marque se o modelo enxerga imagens (Gemini, GPT-4o, Llama 4, Qwen-VL...). Aí ele recebe fotos anexadas, capturas de tela e os quadros dos vídeos.'))),
-        h('span.switch', null, h('input', { type: 'checkbox', checked: a.vision === true, onchange: (e) => save({ apiProvider: { id: a.id, vision: e.target.checked } }) }), h('span'))),
-      field(L('Contexto (tokens)'), ctxIn, L('Tamanho da janela do modelo. O medidor de contexto e a compactação automática usam este número quando a conversa roda nesta API.')),
-      params,
-      h('small.muted', null, L('Hoje: {0} pedidos, {1} tokens, {2} falhas (voltaram para o modelo local).', u.calls, u.tokens.toLocaleString(LOCALE), u.fails)));
+      head,
+      h('div.api-body', null,
+        h('div.api-grid', null,
+          field(L('Nome'), nome, L('Como aparece na lista de modelos. Vazio = id do modelo.')),
+          field(L('Chave'), key, pre?.[3] ? h('a.bin-link', { href: pre[3], target: '_blank', rel: 'noopener' }, ic('external'), L('Pegar uma chave grátis')) : null)),
+        pre ? null : field(L('Endereço'), base, L('O que vem antes de /chat/completions.')),
+        field(L('Modelo'), h('div.api-model-row', null, model, dl, listBtn, test)),
+        testOut,
+        h('div.api-grid.three', null,
+          field(L('Modelo de fallback'), fallbackModel, L('Se o principal falhar ou a API cair.')),
+          field(L('Tentativas'), retries, L('Reenvios em falha temporária (0 a 10).')),
+          field(L('Contexto (tokens)'), ctxIn, L('Janela do modelo, para o medidor e a compactação.'))),
+        h('label.tcard.wrap', null, h('span.tc-main', null, h('span.tc-title', null, L('Aceita imagens')),
+          h('span.tc-desc', null, L('Marque se o modelo enxerga imagens (Gemini, GPT-4o, Llama 4, Qwen-VL...). Aí ele recebe fotos anexadas, capturas de tela e os quadros dos vídeos.'))),
+          h('span.switch', null, h('input', { type: 'checkbox', checked: a.vision === true, onchange: (e) => save({ apiProvider: { id: a.id, vision: e.target.checked } }) }), h('span'))),
+        params,
+        h('small.muted', null, L('Hoje: {0} pedidos, {1} tokens, {2} falhas (voltaram para o modelo local).', u.calls, u.tokens.toLocaleString(LOCALE), u.fails))));
   };
   const draw = () => {
     box.innerHTML = '';
@@ -314,6 +337,7 @@ function apiSection(put, field, saved) {
       const p = API_PRESETS.find((x) => x[0] === add.value); if (!p) return;
       let n = 1; while (apis.some((a) => a.id === 'p' + n)) n++;
       const patch = { id: 'p' + n, base: p[2], name: p[0] === 'custom' ? '' : '' };
+      API_OPEN.add(patch.id); store.set('apiOpen', [...API_OPEN]);
       if (p[0] === 'nim-test') { patch.model = 'deepseek-ai/deepseek-v4.1-flash'; patch.params = { temperature: 1, top_p: 0.95, max_tokens: 262144 }; }
       save({ apiProvider: patch });
     });
@@ -356,7 +380,10 @@ function apiSection(put, field, saved) {
       sel.addEventListener('change', () => put({ apiRoles: { ...(S.settings.apiRoles || {}), [id]: sel.value } }));
       return h('div.api-role', null, h('div.api-role-main', null, h('b', null, title), h('small.muted', null, desc)), sel);
     });
+    const allOpen = apis.length && apis.every((a) => API_OPEN.has(a.id) || !a.ready);
     box.append(
+      apis.length > 1 ? h('div.api-list-head', null, h('small.muted', null, L('{0} APIs · clique numa para editar', apis.length)), h('span.spacer'),
+        h('button.btn.sm.ghost', { type: 'button', onclick: () => { if (allOpen) API_OPEN.clear(); else apis.forEach((a) => API_OPEN.add(a.id)); store.set('apiOpen', [...API_OPEN]); draw(); } }, allOpen ? L('Fechar todas') : L('Abrir todas'))) : null,
       ...apis.map(card),
       field(apis.length ? L('Outra API') : L('Provedor'), add, apis.length ? L('Dá para ter várias e mandar cada função para uma, espalhando os limites dos planos grátis.') : null),
       h('div.field', null, h('label', null, L('Quem faz cada função')), ...roleRows,
