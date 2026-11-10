@@ -118,6 +118,16 @@ O programa baixa e mantém na pasta dele, sem mexer no sistema: **RTK**, **ripgr
 - **Ponytail** ([DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail), MIT): a menor mudança que resolve, reaproveitando o que já existe e dizendo no fim o que pulou. Níveis Leve, Completo e Ultra; cerca de 700 tokens. Traz `ponytail-review`, `ponytail-audit` e `ponytail-debt`.
 - **Caveman** ([JuliusBrussee/caveman](https://github.com/JuliusBrussee/caveman), Apache-2.0): respostas telegráficas, com a resposta primeiro e código, caminhos e erros exatos. Gerar texto é a parte lenta de um modelo local. Níveis Normal e Ultra; cerca de 900 e 500 tokens. Ligado, substitui a instrução de respostas enxutas. Traz `caveman-review` e `caveman-commit`.
 
+### Vídeos (opcional)
+Ligue em Utilitários › Apps opcionais. Aparece **Vídeos** na barra lateral, com projetos do [Remotion](https://github.com/remotion-dev/remotion): vídeos escritos em React pelo modelo.
+- **Projetos:** criar (`create-video`, modelo em branco), listar, apagar. Na criação o studio já baixa o navegador que o Remotion usa (~100 MB, uma vez).
+- **Prévia ao vivo:** o Remotion Studio do projeto embutido na página; atualiza sozinho quando o modelo edita os arquivos.
+- **Render:** escolhe a composição e gera o MP4 em `out/`, com progresso; os vídeos ficam na página para assistir e baixar.
+- **Conversa do projeto:** abre uma conversa ligada à pasta do vídeo, com a habilidade oficial do Remotion. O modelo é o que você escolher no seletor (local ou uma API, pelos perfis ☁️).
+- **Cenas em equipe (`video_scenes`):** o modelo da conversa escreve o roteiro (estilo comum e cenas com duração e descrição) e as APIs da equipe dos exploradores escrevem as cenas em paralelo, cada uma no seu arquivo (`src/scenes/<Nome>.tsx`). O studio monta a sequência (`src/scenes/Video.tsx`), registra a composição `Video` no `Root.tsx`, roda o `tsc` e devolve os erros a quem escreveu cada cena (até duas rodadas). Se uma API falhar, outra assume a cena.
+
+Precisa do **Node.js** (18 ou mais novo) e do **Git**. O Remotion é grátis para pessoas e empresas pequenas; empresas maiores precisam de licença ([remotion.dev/license](https://remotion.dev/license)).
+
 ## Como ele economiza
 
 Modelo local tem contexto curto e processamento caro, então o harness foi pensado para gastar pouco:

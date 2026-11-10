@@ -35,6 +35,7 @@ mod skills;
 mod tools;
 mod tools_en;
 mod update;
+mod videos;
 
 use std::io::{Read, Write};
 use std::time::Duration;

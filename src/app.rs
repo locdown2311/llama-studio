@@ -147,6 +147,8 @@ pub struct App {
     ui: OnceLock<Box<dyn Fn(UiMsg) + Send + Sync>>,
     pub rt: OnceLock<tokio::runtime::Handle>,
     pub native_window: std::sync::atomic::AtomicBool,
+    /// projetos de vídeo (Remotion): trabalhos de criar/renderizar e o Remotion Studio aberto
+    pub videos: Arc<crate::videos::Videos>,
 }
 
 impl App {
@@ -215,6 +217,7 @@ impl App {
             rt: OnceLock::new(),
             native_window: std::sync::atomic::AtomicBool::new(false),
             nim: Default::default(),
+            videos: Arc::new(crate::videos::Videos::default()),
         });
         app.save_config();
         app

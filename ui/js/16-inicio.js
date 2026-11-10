@@ -10,8 +10,8 @@ async function init() {
     $('#set-pane').append(h('div.set-embed', { dataset: { v }, hidden: true }, page));
     sec.remove();
   }
-  const navIcons = { chat: 'chat', skills: 'sparkles', mcp: 'plug', personas: 'user', tools: 'wrench', server: 'server', settings: 'gear', calendar: 'calendar' };
-  const navLabels = { chat: L('Nova conversa'), skills: L('Habilidades'), mcp: L('Conectores'), personas: L('Personalidades'), tools: L('Utilitários'), server: L('Servidor'), settings: L('Configurações'), calendar: L('Calendário') };
+  const navIcons = { chat: 'chat', skills: 'sparkles', mcp: 'plug', personas: 'user', tools: 'wrench', server: 'server', settings: 'gear', calendar: 'calendar', videos: 'film' };
+  const navLabels = { chat: L('Nova conversa'), skills: L('Habilidades'), mcp: L('Conectores'), personas: L('Personalidades'), tools: L('Utilitários'), server: L('Servidor'), settings: L('Configurações'), calendar: L('Calendário'), videos: L('Vídeos') };
   $$('.nav-item').forEach((b) => {
     b.innerHTML = svg(navIcons[b.dataset.view]) + `<span>${navLabels[b.dataset.view]}</span>`;
     b.addEventListener('click', () => {
@@ -19,6 +19,7 @@ async function init() {
       else setView(b.dataset.view);
     });
   });
+  applyVideosNav();
   $('.search-ico').innerHTML = svg('search');
   $('#search').addEventListener('input', () => { if (S.view !== 'chat') setView('chat'); renderConvList(); });
   $('#bins-check').append(ic('refresh'), L('Procurar versões novas'));

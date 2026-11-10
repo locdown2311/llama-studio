@@ -1611,3 +1611,48 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .team-row .icon-btn:disabled { opacity: .3; cursor: default; }
 .team > .select { align-self: flex-start; max-width: 100%; }
 @media (max-width: 640px) { .team-conc-wrap small { display: none; } }
+
+/* ------------------------------------------------------------ Vídeos (Remotion) */
+.page.wide { max-width: 1400px; }
+.vid-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 20px; align-items: start; }
+.vid-list { display: flex; flex-direction: column; gap: 4px; position: sticky; top: 12px; }
+.vid-new { display: flex; gap: 6px; margin-bottom: 8px; }
+.vid-new .input { flex: 1; min-width: 0; }
+.vid-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 9px; border: 1px solid transparent; background: none; color: inherit; text-align: left; cursor: pointer; font: inherit; width: 100%; }
+.vid-item:hover { background: var(--hover); }
+.vid-item.on { background: var(--hover); border-color: var(--line); }
+.vid-item svg { width: 17px; height: 17px; flex-shrink: 0; opacity: .75; }
+.vi-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.vi-main b { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vid-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.vid-warn { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; background: var(--hover); margin-bottom: 12px; font-size: 13.5px; }
+.vid-warn > svg { width: 17px; height: 17px; flex-shrink: 0; margin-top: 2px; }
+.vid-warn span { flex: 1; }
+.vid-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 60px 20px; color: var(--text-2); text-align: center; }
+.vid-empty svg { width: 40px; height: 40px; opacity: .5; }
+.vid-empty p { max-width: 460px; }
+.vid-panel { display: flex; flex-direction: column; gap: 14px; }
+.vid-head { display: flex; align-items: flex-start; gap: 10px; }
+.vid-head h2 { margin: 0 0 2px; font-size: 20px; }
+.vid-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.vid-render { display: inline-flex; gap: 6px; margin-left: auto; }
+.vid-render .select { max-width: 200px; }
+.vid-preview { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: #000; }
+.vid-preview iframe { display: block; width: 100%; aspect-ratio: 16 / 9; min-height: 420px; border: 0; background: #1a1a1a; }
+.vid-preview-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 7px 12px; background: var(--card); border-top: 1px solid var(--line); }
+.vid-preview-foot a { display: inline-flex; gap: 5px; align-items: center; }
+.vid-preview-foot svg, .vr-meta a svg { width: 14px; height: 14px; }
+.vid-job { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.vid-job.ok { border-color: #8fd3a9; }
+.vid-job.err { border-color: #e0a0a0; }
+.vid-bar { height: 6px; border-radius: 99px; background: var(--hover); overflow: hidden; }
+.vid-bar i { display: block; height: 100%; background: var(--accent); transition: width .4s; }
+.vid-log { margin: 0; font-size: 11.5px; max-height: 140px; overflow: auto; white-space: pre-wrap; word-break: break-word; opacity: .8; }
+.vid-renders { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.vid-render-item { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
+.vid-render-item video, .vid-render-item img { width: 100%; aspect-ratio: 16 / 9; background: #000; object-fit: contain; display: block; }
+.vr-meta { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; font-size: 13px; }
+.vr-meta b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
+.vr-meta a { display: inline-flex; gap: 5px; align-items: center; margin-top: 3px; }
+.tc-title svg { width: 15px; height: 15px; vertical-align: -2px; margin-right: 6px; }
+@media (max-width: 860px) { .vid-layout { grid-template-columns: 1fr; } .vid-list { position: static; } .vid-render { margin-left: 0; } }

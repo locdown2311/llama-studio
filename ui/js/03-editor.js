@@ -287,7 +287,7 @@ function fillMcpPop() {
   pop.append(h('div.pop-head', null, h('span', null, L('Ferramentas disponíveis ao modelo'))));
   const on = enabledGroups();
   pop.append(h('button.menu-item', { onclick: () => { closePops(); openSettings('tools'); } },
-    ic('wrench'), h('span.mi-main', null, L('Ferramentas internas: {0} de {1} ativas', on.length, TOOL_GROUPS.length), h('span.mi-sub', null, on.map((g) => TOOL_INFO[g].short).join(', ') || 'nenhuma')), h('span.tag', null, L('Configurar'))));
+    ic('wrench'), h('span.mi-main', null, L('Ferramentas internas: {0} de {1} ativas', on.length, TOOL_GROUPS.length - 1), h('span.mi-sub', null, on.map((g) => TOOL_INFO[g].short).join(', ') || 'nenhuma')), h('span.tag', null, L('Configurar'))));
   pop.append(h('div.menu-sep'));
   if (!S.mcp.length) pop.append(h('div.pop-empty', null, L('Nenhum conector MCP configurado.')));
   for (const s of S.mcp) {

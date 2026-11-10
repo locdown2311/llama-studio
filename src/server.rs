@@ -126,6 +126,17 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/hf/cancel", post(hf_cancel))
         .route("/remote/v1/chat/completions", post(remote_chat))
         .route("/api/remote/models", get(remote_models))
+        .route("/api/videos", get(videos_list))
+        .route("/api/videos/create", post(videos_create))
+        .route("/api/videos/job", get(videos_job))
+        .route("/api/videos/compositions", get(videos_comps))
+        .route("/api/videos/render", post(videos_render))
+        .route("/api/videos/studio", post(videos_studio))
+        .route("/api/videos/delete", post(videos_delete))
+        .route("/api/videos/skills", post(videos_skills))
+        .route("/api/videos/check", post(videos_check))
+        .route("/api/videos/wire", post(videos_wire))
+        .route("/api/videos/file", get(videos_file))
         .route("/api/remote/warm", post(remote_warm))
         .route("/api/remote/ping", get(remote_ping))
         .route("/v1/{*rest}", any(proxy))
@@ -177,7 +188,8 @@ async fn guard(req: Request, next: Next) -> Response {
         return (StatusCode::FORBIDDEN, L!("Host não permitido", "Host not allowed")).into_response();
     }
     let path = req.uri().path();
-    let is_api = path.starts_with("/api/");
+    // o <video> da página não manda cabeçalhos: o arquivo renderizado é só leitura
+    let is_api = path.starts_with("/api/") && !(req.method() == Method::GET && path == "/api/videos/file");
     let is_proxy_write = req.method() != Method::GET && !is_api && path != "/" && !path.contains('.');
     if (is_api || is_proxy_write) && req.headers().get("x-studio").map(|v| v.as_bytes()) != Some(b"1") {
         return (StatusCode::FORBIDDEN, Json(json!({"error":L!("Cabeçalho ausente", "Missing header")}))).into_response();
@@ -284,6 +296,90 @@ async fn proxy(State(app): S, req: Request) -> Response {
 
 async fn remote_chat(State(app): S, Query(qs): Q, b: Bytes) -> Response {
     crate::remote::chat(&app, q(&qs, "p"), b, q(&qs, "bg") == "1").await
+}
+
+// ---------------------------------------------------------------- vídeos (Remotion)
+async fn videos_list(State(app): S) -> Res {
+    ok(app.videos.list(&app).await)
+}
+async fn videos_create(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    app.videos.create(app.clone(), st(&v, "name")).map(ok).map_err(bad)?
+}
+async fn videos_job(State(app): S, Query(qs): Q) -> Res {
+    ok(app.videos.job(q(&qs, "id")))
+}
+async fn videos_comps(State(app): S, Query(qs): Q) -> Res {
+    match app.videos.compositions(&app, q(&qs, "id")).await {
+        Ok(c) => ok(json!({ "compositions": c })),
+        Err(e) => Err(bad(e)),
+    }
+}
+async fn videos_render(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    app.videos.render(&app, st(&v, "id"), st(&v, "comp")).map(ok).map_err(bad)?
+}
+async fn videos_studio(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    if st(&v, "action") == "stop" {
+        app.videos.studio_stop();
+        return ok(json!({}));
+    }
+    match app.videos.studio_start(&app, st(&v, "id")).await {
+        Ok(r) => ok(r),
+        Err(e) => Err(bad(e)),
+    }
+}
+async fn videos_delete(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    app.videos.delete(&app, st(&v, "id")).map(|_| ok(json!({}))).map_err(bad)?
+}
+async fn videos_check(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    app.videos.check(&app, st(&v, "id")).await.map(ok).map_err(bad)?
+}
+async fn videos_wire(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    app.videos.wire(&app, st(&v, "id")).map(ok).map_err(bad)?
+}
+async fn videos_skills(State(app): S) -> Res {
+    match app.videos.install_skills(&app).await {
+        Ok(n) => ok(json!({ "installed": n })),
+        Err(e) => Err(bad(e)),
+    }
+}
+/// Vídeo renderizado, com Range (o player precisa para pular para um ponto).
+async fn videos_file(State(app): S, Query(qs): Q, headers: axum::http::HeaderMap) -> Response {
+    let (id, f) = (q(&qs, "id"), q(&qs, "f"));
+    if id.is_empty() || f.is_empty() || [id, f].iter().any(|x| x.contains(['/', '\\', ':']) || x.starts_with('.')) {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let path = crate::videos::root(&app).join(id).join("out").join(f);
+    let Ok(data) = tokio::fs::read(&path).await else { return StatusCode::NOT_FOUND.into_response() };
+    let ct = match f.rsplit('.').next().unwrap_or("").to_lowercase().as_str() {
+        "webm" => "video/webm",
+        "gif" => "image/gif",
+        "png" => "image/png",
+        "mov" => "video/quicktime",
+        _ => "video/mp4",
+    };
+    let total = data.len();
+    let range = headers.get("range").and_then(|h| h.to_str().ok()).and_then(|r| r.strip_prefix("bytes=")).and_then(|r| {
+        let (a, b) = r.split_once('-')?;
+        let a: usize = a.parse().ok()?;
+        let b: usize = if b.is_empty() { total.saturating_sub(1) } else { b.parse().ok()? };
+        (a <= b && b < total).then_some((a, b))
+    });
+    match range {
+        Some((a, b)) => Response::builder()
+            .status(StatusCode::PARTIAL_CONTENT)
+            .header("Content-Type", ct)
+            .header("Accept-Ranges", "bytes")
+            .header("Content-Range", format!("bytes {a}-{b}/{total}"))
+            .body(axum::body::Body::from(data[a..=b].to_vec()))
+            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()),
+        None => Response::builder().header("Content-Type", ct).header("Accept-Ranges", "bytes").body(axum::body::Body::from(data)).unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()),
+    }
 }
 
 async fn remote_warm(State(app): S, Query(qs): Q) -> Res {

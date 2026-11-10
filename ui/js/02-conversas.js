@@ -3001,7 +3001,7 @@ function renderTool(tc, res, live) {
       ".src-" +
       source +
       (open ? ".open" : "") +
-      (name === "multi_explore" && res?.subs?.length ? ".multi" : ""),
+      ((name === "multi_explore" || name === "video_scenes") && res?.subs?.length ? ".multi" : ""),
     { dataset: { id: key } }
   );
 
@@ -3120,6 +3120,22 @@ function renderTool(tc, res, live) {
           html: md(
             args.task +
               (args.where ? L("\n\n**Começar por:** {0}", args.where) : "")
+          ),
+        })
+      )
+    );
+  } else if (name === "video_scenes" && args) {
+    const scenes = Array.isArray(args.scenes) ? args.scenes : [];
+    const only = Array.isArray(args.only) ? args.only : [];
+    bodyEl.append(
+      h(
+        "div.tool-sec",
+        null,
+        h("div.tool-sec-label", null, L("Roteiro ({0} cenas, {1}s)", scenes.length, scenes.reduce((n, x) => n + (Number(x?.seconds) || 0), 0).toFixed(1).replace(/\.0$/, ""))),
+        h("div.md", {
+          html: md(
+            (args.style ? L("**Estilo:** {0}", args.style) + "\n\n" : "") +
+              scenes.map((x, i) => `**${i + 1}. ${x.name}** (${x.seconds}s)${only.length && !only.includes(x.name) ? " · " + L("mantida") : ""}: ${x.description}`).join("\n\n")
           ),
         })
       )
@@ -3398,14 +3414,14 @@ function renderTool(tc, res, live) {
             "Agentes ({0}/{1} concluídos)",
             res.subs.filter((s) => s.status === "ok").length,
             res.subs.length
-          )
+          ) + (res.phase ? " · " + res.phase : "")
         ),
         rows
       )
     );
 
     for (const s of res.subs)
-      if (s.content && s.status !== "error")
+      if (s.content && s.status !== "error" && name !== "video_scenes")
         bodyEl.append(
           h(
             "div.tool-sec",
@@ -3465,7 +3481,7 @@ function renderTool(tc, res, live) {
           collapse: true,
         }),
       });
-    else if ((name === "explore" || name === "multi_explore") && !res.isError)
+    else if ((name === "explore" || name === "multi_explore" || name === "video_scenes") && !res.isError)
       inner = h("div.md.report", { html: md(content) });
     else if (name === "run_command") inner = h("pre.term", null, content);
     else inner = h("pre.result-text", null, content);

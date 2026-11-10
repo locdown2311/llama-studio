@@ -341,7 +341,7 @@ function apiSection(put, field, saved) {
         add.addEventListener('change', () => { if (add.value) setRole([...picked, add.value]); });
         const seats = picked.reduce((n, pid) => n + explorerConc(pid), 0);
         return h('div.api-role.team', null, h('div.api-role-main', null, h('b', null, title),
-          h('small.muted', null, desc + ' ' + L('As marcadas formam uma equipe: no multi_explore cada uma puxa a próxima subtarefa ao terminar a dela, e se uma falhar outra assume do ponto em que parou. O modelo local só entra quando nenhuma responde.'))),
+          h('small.muted', null, desc + ' ' + L('As marcadas formam uma equipe: no multi_explore (e nas cenas do app Vídeos) cada uma puxa a próxima tarefa ao terminar a dela, e se uma falhar outra assume do ponto em que parou. O modelo local só entra quando nenhuma responde.'))),
           h('div.team', null,
             picked.length ? rows : h('div.muted.small', null, L('Nenhuma API na equipe: os exploradores usam o modelo local.')),
             rest.length ? add : null,

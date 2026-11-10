@@ -32,6 +32,7 @@
       <button class="nav-item" data-view="tools"></button>
       <button class="nav-item" data-view="server"></button>
       <button class="nav-item" data-view="calendar"></button>
+      <button class="nav-item" data-view="videos" hidden></button>
       <button class="nav-item" data-view="settings"></button>
     </nav>
     <div class="side-scroll" id="conv-list"></div>
@@ -228,6 +229,8 @@
       </header>
       <h2 class="sec-title">Economia de contexto</h2>
       <div class="tgrid" id="ctx-opts"></div>
+      <h2 class="sec-title">Apps opcionais</h2>
+      <div class="tgrid" id="apps-opts"></div>
       <h2 class="sec-title">Programas</h2>
       <div class="grid bins" id="bins-grid"></div>
       <h2 class="sec-title">Arrumar pastas</h2>
@@ -266,6 +269,17 @@
   </section>
 
   <!-- ===================== CONFIG ===================== -->
+  <section class="view" id="view-videos">
+    <div class="page wide">
+      <header class="page-head">
+        <div>
+          <h1>Vídeos</h1>
+          <p class="lead">Vídeos feitos com código (React) pelo Remotion. Crie um projeto, peça as cenas numa conversa ligada a ele, acompanhe na prévia e renderize para MP4.</p>
+        </div>
+      </header>
+      <div id="vid-body"></div>
+    </div>
+  </section>
   <section class="view" id="view-calendar">
     <div class="page">
       <header class="page-head">
@@ -325,6 +339,7 @@
 <script src="/js/13-aprendizado.js"></script>
 <script src="/js/14-investigacao.js"></script>
 <script src="/js/15-atividade.js"></script>
+<script src="/js/15-videos.js"></script>
 <script src="/js/16-inicio.js"></script>
 </body>
 </html>

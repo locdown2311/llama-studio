@@ -56,6 +56,11 @@ function renderToolsPage() {
       return h('label.tcard.wrap', null, h('span.tc-main', null, h('span.tc-title', null, L('Carregar ferramentas e habilidades sob demanda')),
         h('span.tc-desc', null, L('Em vez de mandar o esquema de todas as ferramentas dos conectores e o texto inteiro das habilidades em todo pedido, manda só um catálogo com nome e uma linha. O modelo carrega o que for usar. Reduz muito o contexto fixo.'))), h('span.switch', null, i, h('span')));
     })());
+  const apps = $('#apps-opts'); apps.innerHTML = '';
+  const vi = h('input', { type: 'checkbox', checked: videosOn(), onchange: () => setVideosOn(vi.checked) });
+  apps.append(h('label.tcard.wrap', null, h('span.tc-main', null, h('span.tc-title', null, ic('film'), L('Vídeos (Remotion)')),
+    h('span.tc-desc', null, L('Põe "Vídeos" na barra lateral: projetos do Remotion em que o modelo escreve o vídeo em React, com prévia ao vivo e render para MP4. Precisa do Node.js e do Git. O Remotion é grátis para pessoas e empresas pequenas; empresas maiores precisam de licença (remotion.dev/license).'))),
+    h('span.switch', null, vi, h('span'))));
   drawBins();
   drawArr();
   loadBins(false).then(() => { if (!S.bins?.items.some((b) => 'latest' in b)) loadBins(true); });
