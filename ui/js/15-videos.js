@@ -59,54 +59,75 @@ function pollVideos() {
 
 function vidProject(id) { return (VID.data?.projects || []).find((p) => p.id === id); }
 
+/* Layout de editor: barra no topo (projeto e ações), palco grande (prévia do Remotion Studio ou o vídeo escolhido)
+   e um painel lateral que rola sozinho (trabalhos, vídeos renderizados, mídia). Em tela estreita vira uma coluna. */
 function drawVideos(keepPreview) {
   const box = $('#vid-body');
   const d = VID.data || {};
   const oldFrame = keepPreview ? $('#vid-frame') : null;
+  const sideTop = $('.vid-side')?.scrollTop || 0;
   box.innerHTML = '';
-  if (d.error) box.append(h('div.vid-warn', null, ic('alert'), d.error));
-  if (!d.node) box.append(h('div.vid-warn', null, ic('alert'), h('span', null, L('O Node.js não foi encontrado neste PC. O Remotion precisa do Node 18 ou mais novo (nodejs.org) e do Git para criar projetos. Depois de instalar, reabra o studio.'))));
-  if (!d.skills?.length) box.append(h('div.vid-warn', null, ic('sparkles'), h('span', null, L('As habilidades do Remotion não estão instaladas: sem elas o modelo escreve vídeos piores.')),
-    h('button.btn.sm', { onclick: async (e) => { e.target.disabled = true; try { const r = await api('/api/videos/skills', {}); toast(L('{0} habilidades do Remotion instaladas', r.installed)); loadSkills().catch(() => {}); await loadVideos(); drawVideos(); } catch (er) { toast(er.message, 'err'); e.target.disabled = false; } } }, L('Instalar'))));
+  const creating = (d.jobs || []).filter((j) => j.kind === 'create' && !j.done);
+  const failed = (d.jobs || []).filter((j) => j.kind === 'create' && j.done && !j.ok);
+  const p = vidProject(VID.sel) || (d.projects || [])[0];
+  if (p && VID.sel !== p.id) VID.sel = p.id;
 
-  // coluna dos projetos
+  // criar projeto (na barra, ou no meio da tela quando ainda não há nenhum)
   const name = h('input.input', { placeholder: L('Nome do vídeo (ex.: abertura do canal)'), maxlength: 60 });
   const create = h('button.btn.primary', { type: 'button', disabled: !d.node, onclick: async () => {
     if (!name.value.trim()) { name.focus(); return; }
     create.disabled = true;
-    try { const r = await api('/api/videos/create', { name: name.value.trim() }); VID.sel = r.id; store.set('vidSel', r.id); toast(L('Criando "{0}"... (baixa o modelo e instala as dependências, alguns minutos na primeira vez)', r.id)); await loadVideos(); drawVideos(); pollVideos(); }
+    try { const r = await api('/api/videos/create', { name: name.value.trim() }); VID.sel = r.id; store.set('vidSel', r.id); VID.newOpen = false; toast(L('Criando "{0}"... (baixa o modelo e instala as dependências, alguns minutos na primeira vez)', r.id)); await loadVideos(); drawVideos(); pollVideos(); }
     catch (e) { toast(e.message, 'err'); create.disabled = false; }
   } }, ic('plus'), L('Criar'));
-  name.addEventListener('keydown', (e) => { if (e.key === 'Enter') create.click(); });
-  const creating = (d.jobs || []).filter((j) => j.kind === 'create' && !j.done);
-  const list = h('div.vid-list', null,
-    h('div.vid-new', null, name, create),
-    ...creating.map((j) => h('div.vid-item.busy', null, h('span', { html: svg('loader', 'spin') }), h('div.vi-main', null, h('b', null, j.project), h('small.muted', null, L('criando...'))))),
-    ...(d.projects || []).map((p) => h('button.vid-item' + (VID.sel === p.id ? '.on' : ''), { onclick: () => { VID.sel = p.id; store.set('vidSel', p.id); drawVideos(); } },
-      h('span', { html: svg('film') }),
-      h('div.vi-main', null, h('b', null, p.id), h('small.muted', null, !p.ready ? L('sem dependências') : p.renders.length ? L('{0} vídeo(s) renderizado(s)', p.renders.length) : L('nenhum vídeo ainda'))),
-      d.studio?.project === p.id ? h('span.tag.ok', null, L('prévia')) : null)),
-    !(d.projects || []).length && !creating.length ? h('div.muted.small', null, L('Nenhum projeto ainda. Dê um nome e clique em Criar.')) : null);
+  name.addEventListener('keydown', (e) => { if (e.key === 'Enter') create.click(); if (e.key === 'Escape') { VID.newOpen = false; drawVideos(true); } });
+  const newForm = h('div.vid-new', null, name, create);
 
-  // projeto escolhido
-  const p = vidProject(VID.sel) || (d.projects || [])[0];
-  if (p && VID.sel !== p.id) { VID.sel = p.id; }
-  const main = h('div.vid-main');
-  const failed = (d.jobs || []).filter((j) => j.kind === 'create' && j.done && !j.ok);
-  for (const j of failed) main.append(h('div.vid-warn', null, ic('alert'), h('div', null, h('b', null, L('Não consegui criar "{0}"', j.project)), h('pre.vid-log', null, j.tail))));
-  if (p) main.append(projectPanel(p, d, oldFrame));
-  else if (!failed.length) main.append(h('div.vid-empty', null, ic('film'), h('p', null, L('Crie um projeto à esquerda. O studio monta um projeto do Remotion em branco; depois, numa conversa ligada a ele, você pede o vídeo e o modelo escreve as cenas em React, com a prévia ao lado.'))));
-  box.append(h('div.vid-layout', null, list, main));
+  const top = h('div.vid-top', null, h('h1.vid-title', null, L('Vídeos')));
+  if ((d.projects || []).length || creating.length) {
+    const sel = h('select.select.vid-proj', { title: p ? p.path : '' },
+      (d.projects || []).map((x) => h('option', { value: x.id }, x.id + (d.studio?.project === x.id ? ' · ' + L('prévia') : ''))),
+      creating.map((j) => h('option', { value: '', disabled: true }, `${j.project} · ${L('criando...')}`)));
+    if (p) sel.value = p.id;
+    sel.addEventListener('change', () => { if (!sel.value) return; VID.sel = sel.value; VID.watch = null; store.set('vidSel', sel.value); drawVideos(); });
+    top.append(sel, h('button.icon-btn', { type: 'button', title: L('Novo projeto'), 'aria-label': L('Novo projeto'), html: svg('plus'), onclick: () => { VID.newOpen = !VID.newOpen; drawVideos(true); if (VID.newOpen) setTimeout(() => $('.vid-top .vid-new input')?.focus()); } }));
+    if (VID.newOpen) top.append(newForm);
+  }
+  if (p) top.append(...projectActions(p, d));
+  box.append(top);
+
+  // avisos em uma linha cada
+  const warn = (icon, ...kids) => box.append(h('div.vid-warn', null, ic(icon), ...kids));
+  if (d.error) warn('alert', d.error);
+  if (!d.node) warn('alert', h('span', null, L('O Node.js não foi encontrado neste PC. O Remotion precisa do Node 18 ou mais novo (nodejs.org) e do Git para criar projetos. Depois de instalar, reabra o studio.')));
+  if (!d.skills?.length) warn('sparkles', h('span', null, L('As habilidades do Remotion não estão instaladas: sem elas o modelo escreve vídeos piores.')),
+    h('button.btn.sm', { onclick: async (e) => { e.target.disabled = true; try { const r = await api('/api/videos/skills', {}); toast(L('{0} habilidades do Remotion instaladas', r.installed)); loadSkills().catch(() => {}); await loadVideos(); drawVideos(); } catch (er) { toast(er.message, 'err'); e.target.disabled = false; } } }, L('Instalar')));
+  for (const j of failed) warn('alert', h('div', null, h('b', null, L('Não consegui criar "{0}"', j.project)), h('pre.vid-log', null, j.tail)));
+  if (p && VID.compErr[p.id]) warn('alert', h('span', null, L('Não consegui listar as composições: {0}', VID.compErr[p.id])),
+    h('button.btn.sm', { onclick: () => { delete VID.comps[p.id]; delete VID.compErr[p.id]; drawVideos(true); } }, L('Tentar de novo')));
+  if (p && !p.ready) warn('alert', h('span', null, L('As dependências deste projeto não estão instaladas. Rode "npm install" na pasta dele (pela conversa do projeto, por exemplo).')));
+
+  if (!p) {
+    box.append(h('div.vid-empty', null, ic('film'),
+      h('p', null, L('Crie um projeto. O studio monta um projeto do Remotion em branco; depois, numa conversa ligada a ele, você pede o vídeo (ou envia gravações para editar) e acompanha na prévia.')),
+      creating.length ? h('div.muted', null, L('Criando "{0}"...', creating[0].project)) : newForm));
+    return;
+  }
+  const side = h('div.vid-side', null, ...jobCards(p, d), rendersSection(p), mediaSection(p));
+  box.append(h('div.vid-work', null, stage(p, d, oldFrame), side));
+  side.scrollTop = sideTop;
 }
 
-function projectPanel(p, d, oldFrame) {
+/** Ações do projeto, na barra: conversa, prévia, composição + renderizar, apagar. */
+function projectActions(p, d) {
   const live = d.studio?.project === p.id;
-  const jobs = (d.jobs || []).filter((j) => j.project === p.id && (j.kind === 'render' || j.kind === 'captions'));
-  const rendering = jobs.find((j) => j.kind === 'render' && !j.done);
+  const rendering = (d.jobs || []).some((j) => j.project === p.id && j.kind === 'render' && !j.done);
   // composições: o CLI do Remotion lista (demora uns segundos na primeira vez)
   const comps = VID.comps[p.id];
-  const sel = h('select.select', { disabled: !comps?.length }, (comps || []).map((c) => h('option', { value: c }, c)));
-  if (comps?.includes('Video')) sel.value = 'Video';
+  const sel = h('select.select.vid-comp', { disabled: !comps?.length, title: L('Composição') }, (comps || []).map((c) => h('option', { value: c }, c)));
+  if (comps?.includes(VID.comp?.[p.id])) sel.value = VID.comp[p.id];
+  else if (comps?.includes('Video')) sel.value = 'Video';
+  sel.addEventListener('change', () => { (VID.comp ||= {})[p.id] = sel.value; });
   // undefined = ainda não pediu; null = pedindo (não pede de novo a cada atualização da página)
   if (comps === undefined && p.ready) {
     VID.comps[p.id] = null;
@@ -117,54 +138,73 @@ function projectPanel(p, d, oldFrame) {
     VID.busy = true; preview.disabled = true;
     try {
       if (live) await api('/api/videos/studio', { action: 'stop' });
-      else { toast(L('Abrindo o Remotion Studio... (a primeira vez empacota o projeto)')); await api('/api/videos/studio', { id: p.id }); }
+      else { VID.watch = null; toast(L('Abrindo o Remotion Studio... (a primeira vez empacota o projeto)')); await api('/api/videos/studio', { id: p.id }); }
       await loadVideos();
     } catch (e) { toast(e.message, 'err'); }
     VID.busy = false; drawVideos();
   } }, ic(live ? 'stop' : 'play'), live ? L('Fechar prévia') : L('Abrir prévia'));
-  const render = h('button.btn', { type: 'button', disabled: !p.ready || !comps?.length || !!rendering, onclick: async () => {
+  const render = h('button.btn', { type: 'button', disabled: !p.ready || !comps?.length || rendering, title: comps === null ? L('Listando as composições...') : '', onclick: async () => {
     try { await api('/api/videos/render', { id: p.id, comp: sel.value }); await loadVideos(); drawVideos(true); pollVideos(); } catch (e) { toast(e.message, 'err'); }
   } }, ic('download'), L('Renderizar MP4'));
   const chat = h('button.btn', { type: 'button', onclick: () => videoChat(p) }, ic('chat'), L('Conversa do projeto'));
   const del = h('button.icon-btn', { type: 'button', title: L('Apagar projeto'), 'aria-label': L('Apagar projeto'), html: svg('trash'), onclick: async () => {
     if (!(await confirmBox(L('Apagar o projeto "{0}" e os vídeos dele? Não dá para desfazer.', p.id), L('Apagar'), true))) return;
-    try { await api('/api/videos/delete', { id: p.id }); VID.sel = null; await loadVideos(); drawVideos(); } catch (e) { toast(e.message, 'err'); }
+    try { await api('/api/videos/delete', { id: p.id }); VID.sel = null; VID.watch = null; await loadVideos(); drawVideos(); } catch (e) { toast(e.message, 'err'); }
   } });
-  const panel = h('div.vid-panel', null,
-    h('div.vid-head', null, h('div', null, h('h2', null, p.id), h('code.muted.small', null, p.path)), h('span.spacer'), del),
-    h('div.vid-actions', null, chat, preview, h('span.vid-render', null, sel, render)));
-  if (VID.compErr[p.id]) panel.append(h('div.vid-warn', null, ic('alert'), h('span', null, L('Não consegui listar as composições: {0}', VID.compErr[p.id])),
-    h('button.btn.sm', { onclick: () => { delete VID.comps[p.id]; delete VID.compErr[p.id]; drawVideos(true); } }, L('Tentar de novo'))));
-  if (!p.ready) panel.append(h('div.vid-warn', null, ic('alert'), L('As dependências deste projeto não estão instaladas. Rode "npm install" na pasta dele (pela conversa do projeto, por exemplo).')));
-  // prévia ao vivo: o Remotion Studio do projeto, embutido
+  return [chat, preview, h('span.spacer'), h('span.vid-render', null, sel, render), del];
+}
+
+/** O palco: o vídeo escolhido no painel, ou a prévia ao vivo do Remotion Studio, ou um convite para abri-la. */
+function stage(p, d, oldFrame) {
+  const live = d.studio?.project === p.id;
+  const w = VID.watch?.project === p.id ? VID.watch : null;
+  if (w) {
+    const url = w.from === 'public' ? mediaUrl(p.id, w.file) : `/api/videos/file?id=${encodeURIComponent(p.id)}&f=${encodeURIComponent(w.file)}`;
+    const media = /\.(png|jpe?g|gif|webp|svg)$/i.test(w.file) ? h('img', { src: url, alt: w.file }) : /\.(mp3|wav|m4a|aac|ogg|flac|opus)$/i.test(w.file) ? h('audio', { src: url, controls: true }) : h('video', { src: url, controls: true, autoplay: true });
+    return h('div.vid-stage.watch', null,
+      h('div.vid-stage-bar', null, h('b', null, w.file), h('span.spacer'), h('a.btn.sm', { href: url + (w.from === 'public' ? '&dl=1' : ''), download: w.file.split('/').pop() }, ic('download'), L('Baixar')),
+        h('button.btn.sm', { type: 'button', onclick: () => { VID.watch = null; drawVideos(); } }, ic('x'), live ? L('Voltar à prévia') : L('Fechar'))),
+      h('div.vid-stage-media', null, media));
+  }
   if (live) {
     const src = `http://127.0.0.1:${d.studio.port}/`;
     const frame = oldFrame && oldFrame.dataset.src === src ? oldFrame : h('iframe#vid-frame', { src, dataset: { src }, allow: 'autoplay; fullscreen; clipboard-write', title: L('Prévia do Remotion Studio') });
-    panel.append(h('div.vid-preview', null, frame,
+    return h('div.vid-stage', null, frame,
       h('div.vid-preview-foot', null, h('small.muted', null, L('Remotion Studio na porta {0}. Atualiza sozinho quando o agente edita os arquivos.', d.studio.port)),
-        h('a.small', { href: src, target: '_blank', rel: 'noopener' }, ic('external'), L('Abrir no navegador')))));
+        h('a.small', { href: src, target: '_blank', rel: 'noopener' }, ic('external'), L('Abrir no navegador'))));
   }
-  for (const j of jobs) {
+  return h('div.vid-stage.idle', null, h('div.vid-stage-empty', null, ic('play'),
+    h('p', null, L('A prévia está fechada. Abra para ver o vídeo ao vivo enquanto o modelo edita, ou escolha um vídeo no painel ao lado para assistir.')),
+    h('button.btn.primary', { type: 'button', disabled: !p.ready, onclick: () => $('.vid-top .btn.primary')?.click() }, ic('play'), L('Abrir prévia'))));
+}
+
+function jobCards(p, d) {
+  return (d.jobs || []).filter((j) => j.project === p.id && (j.kind === 'render' || j.kind === 'captions')).map((j) => {
     const pct = Math.round((j.progress || 0) * 100);
-    panel.append(h('div.vid-job' + (j.done ? (j.ok ? '.ok' : '.err') : ''), null,
+    return h('div.vid-job' + (j.done ? (j.ok ? '.ok' : '.err') : ''), null,
       h('div.vid-job-head', null, h('b', null, j.kind === 'captions'
         ? (j.done ? (j.ok ? L('Legendas prontas: {0}', j.out) : L('As legendas falharam')) : L('Gerando legendas... {0}%', pct))
         : (j.done ? (j.ok ? L('Renderizado: {0}', j.out) : L('O render falhou')) : L('Renderizando {0}... {1}%', j.out, pct)))),
       j.done ? null : h('div.vid-bar', null, h('i', { style: { width: pct + '%' } })),
       j.done && !j.ok && j.err ? h('div.small', null, j.err) : null,
-      !j.done || (!j.ok && !j.err) ? h('pre.vid-log', null, j.tail) : null));
-  }
-  panel.append(mediaSection(p));
-  if (p.renders.length) {
-    panel.append(h('h3.sec-title', null, L('Vídeos')));
-    panel.append(h('div.vid-renders', null, p.renders.slice(0, 12).map((r) => {
-      const url = `/api/videos/file?id=${encodeURIComponent(p.id)}&f=${encodeURIComponent(r.file)}`;
-      const media = /\.(png|gif)$/i.test(r.file) ? h('img', { src: url, alt: r.file }) : h('video', { src: url, controls: true, preload: 'metadata' });
-      return h('div.vid-render-item', null, media, h('div.vr-meta', null, h('b', null, r.file), h('small.muted', null, `${fmtBytes(r.size)} · ${new Date(r.mtime * 1000).toLocaleString(LOCALE)}`),
-        h('a.small', { href: url, download: r.file }, ic('download'), L('Baixar'))));
-    })));
-  }
-  return panel;
+      !j.done || (!j.ok && !j.err) ? h('pre.vid-log', null, j.tail) : null);
+  });
+}
+
+/** Vídeos renderizados: lista compacta; clicar abre no palco. */
+function rendersSection(p) {
+  const box = h('div.vid-sec', null, h('div.vid-sec-head', null, h('h3.sec-title', null, L('Vídeos')), h('small.muted', null, p.renders.length ? String(p.renders.length) : '')));
+  if (!p.renders.length) { box.append(h('div.muted.small', null, L('Nenhum vídeo renderizado ainda. Escolha a composição na barra e clique em Renderizar MP4.'))); return box; }
+  box.append(h('div.vid-rows', null, p.renders.slice(0, 30).map((r) => {
+    const url = `/api/videos/file?id=${encodeURIComponent(p.id)}&f=${encodeURIComponent(r.file)}`;
+    const on = VID.watch?.project === p.id && VID.watch.file === r.file;
+    const thumb = /\.(png|gif)$/i.test(r.file) ? h('img', { src: url, alt: '', loading: 'lazy' }) : h('video', { src: url + '#t=1', preload: 'metadata', muted: true });
+    return h('div.vid-row' + (on ? '.on' : ''), { title: L('Assistir no palco'), onclick: (e) => { if (e.target.closest('a')) return; VID.watch = { project: p.id, file: r.file, from: 'out' }; drawVideos(true); } },
+      h('div.vm-thumb', null, thumb),
+      h('div.vm-main', null, h('b', null, r.file), h('small.muted', null, `${fmtBytes(r.size)} · ${new Date(r.mtime * 1000).toLocaleString(LOCALE, { dateStyle: 'short', timeStyle: 'short' })}`)),
+      h('a.icon-btn.sm', { href: url, download: r.file, title: L('Baixar'), 'aria-label': L('Baixar'), html: svg('download') }));
+  })));
+  return box;
 }
 
 /** Conversa ligada ao projeto: um projeto do studio com a pasta do vídeo, a habilidade do Remotion e a nota. */
@@ -449,7 +489,7 @@ function drawUpload() {
 }
 
 function mediaSection(p) {
-  const box = h('div.vid-media');
+  const box = h('div.vid-sec.vid-media');
   const m = VID.media[p.id];
   if (m === undefined && p.ready) {
     VID.media[p.id] = null;
@@ -464,8 +504,7 @@ function mediaSection(p) {
   lang.value = S.settings.whisperLang ?? 'pt';
   lang.addEventListener('change', () => { S.settings.whisperLang = lang.value; store.set('settings', S.settings); });
   const busy = (VID.data?.jobs || []).some((j) => j.kind === 'captions' && !j.done);
-  box.append(h('div.vid-media-head', null, h('h3.sec-title', null, L('Mídia')),
-    h('small.muted', null, L('Vídeos, áudios e imagens em public/ para o vídeo usar. O modelo pode olhar os quadros e gerar legendas.')),
+  box.append(h('div.vid-sec-head', null, h('h3.sec-title', { title: L('Vídeos, áudios e imagens em public/ para o vídeo usar. O modelo pode olhar os quadros e gerar legendas.') }, L('Mídia')),
     h('span.spacer'), h('button.btn.sm', { type: 'button', disabled: !p.ready, onclick: () => input.click() }, ic('plus'), L('Adicionar')), input));
   box.append(h('div#vid-up', { hidden: !VID.up }));
   setTimeout(drawUpload);
@@ -477,14 +516,16 @@ function mediaSection(p) {
       const thumb = f.kind === 'image' ? h('img', { src: mediaUrl(p.id, f.file), alt: '', loading: 'lazy' })
         : f.kind === 'video' ? h('video', { src: mediaUrl(p.id, f.file) + '#t=1', preload: 'metadata', muted: true })
         : h('span.vm-ico', { html: svg(f.kind === 'audio' ? 'mic' : 'file') });
-      return h('div.vid-media-item', null, h('div.vm-thumb', null, thumb),
+      const on = VID.watch?.project === p.id && VID.watch.file === f.file;
+      return h('div.vid-media-item' + (on ? '.on' : ''), null, h('div.vm-thumb', { title: L('Assistir no palco'), onclick: () => { VID.watch = { project: p.id, file: f.file, from: 'public' }; drawVideos(true); } }, thumb),
         h('div.vm-main', null, h('b', { title: f.file }, f.file.replace(/^public\//, '')),
           h('small.muted', null, [fmtBytes(f.size), f.duration ? fmtDur(f.duration) : ''].filter(Boolean).join(' · '))),
+        h('div.vm-acts', null,
         f.captions ? h('a.tag.ok', { href: mediaUrl(p.id, f.captions.replace(/\.json$/, '.srt'), true), title: L('Baixar as legendas (.srt)') }, L('legendas')) : null,
         av ? h('button.btn.sm', { type: 'button', disabled: busy, title: L('Transcrever a fala com o Whisper (no seu PC)'), onclick: async () => {
           try { await api('/api/videos/captions', { id: p.id, file: f.file, model: model.value, lang: lang.value }); await loadVideos(); drawVideos(true); pollVideos(); }
           catch (e) { toast(e.message, 'err'); }
-        } }, ic('captions'), f.captions ? L('Refazer legendas') : L('Gerar legendas')) : null);
+        } }, ic('captions'), f.captions ? L('Refazer legendas') : L('Gerar legendas')) : null));
     })));
   } else if (m) box.append(h('div.muted.small', null, L('Nada em public/ ainda. Adicione gravações, músicas, logos ou fotos que o vídeo deve usar.')));
   return box;

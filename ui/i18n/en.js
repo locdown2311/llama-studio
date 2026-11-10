@@ -1724,5 +1724,13 @@ const I18N_EN = {
 "Para investigar mais de uma coisa, use multi_explore numa chamada só, com todas as partes como subtarefas independentes (cada uma com o seu escopo): aqui ele é bem mais rápido que vários explore. Use explore só para uma investigação única e pequena.": "To investigate more than one thing, use multi_explore in a single call, with every part as an independent subtask (each with its own scope): here it is much faster than several explore calls. Use explore only for a single, small investigation.",
 "Um subagente explorador para UMA investigação pequena (só leitura, contexto próprio, devolve um relatório). Com mais de uma parte, use multi_explore: aqui ele é bem mais rápido.": "One explorer subagent for ONE small investigation (read only, its own context, returns a report). With more than one part, use multi_explore: here it is much faster.",
 "Na lista de edição, use os tempos em segundos (175.5) ou como texto \"2:55.5\"; nunca 2.55 para dizer 2:55.": "In the edit list, use times in seconds (175.5) or as text \"2:55.5\"; never 2.55 to mean 2:55.",
-"Trechos (tempos no arquivo, em segundos | m:ss):": "Stretches (times in the file, in seconds | m:ss):"
+"Trechos (tempos no arquivo, em segundos | m:ss):": "Stretches (times in the file, in seconds | m:ss):",
+"Crie um projeto. O studio monta um projeto do Remotion em branco; depois, numa conversa ligada a ele, você pede o vídeo (ou envia gravações para editar) e acompanha na prévia.": "Create a project. The studio sets up a blank Remotion project; then, in a chat linked to it, you ask for the video (or upload recordings to edit) and follow along in the preview.",
+"Criando \"{0}\"...": "Creating \"{0}\"...",
+"Composição": "Composition",
+"Listando as composições...": "Listing the compositions...",
+"Voltar à prévia": "Back to the preview",
+"A prévia está fechada. Abra para ver o vídeo ao vivo enquanto o modelo edita, ou escolha um vídeo no painel ao lado para assistir.": "The preview is closed. Open it to watch the video live while the model edits, or pick a video in the side panel to watch.",
+"Nenhum vídeo renderizado ainda. Escolha a composição na barra e clique em Renderizar MP4.": "No rendered videos yet. Pick the composition in the bar and click Render MP4.",
+"Assistir no palco": "Watch on stage"
 };
