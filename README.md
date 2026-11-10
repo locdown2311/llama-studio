@@ -126,6 +126,10 @@ Ligue em Utilitários › Apps opcionais. Aparece **Vídeos** na barra lateral, 
 - **Conversa do projeto:** abre uma conversa ligada à pasta do vídeo, com a habilidade oficial do Remotion. O modelo é o que você escolher no seletor (local ou uma API, pelos perfis ☁️).
 - **Cenas em equipe (`video_scenes`):** o modelo da conversa escreve o roteiro (estilo comum e cenas com duração e descrição) e as APIs da equipe dos exploradores escrevem as cenas em paralelo, cada uma no seu arquivo (`src/scenes/<Nome>.tsx`). O studio monta a sequência (`src/scenes/Video.tsx`), registra a composição `Video` no `Root.tsx`, roda o `tsc` e devolve os erros a quem escreveu cada cena (até duas rodadas). Se uma API falhar, outra assume a cena.
 
+- **Mídia:** envie gravações, músicas, logos e fotos para `public/` pela página (arquivos grandes vão direto para o disco). As cenas usam esses arquivos (`<OffthreadVideo>`, `<Audio>`, `staticFile`).
+- **O modelo vê o vídeo (`video_look`):** o studio tira quadros espaçados com o ffmpeg do próprio Remotion e monta uma folha com o tempo de cada quadro, junto com a fala do trecho se houver legenda. Se o modelo da conversa não enxerga imagens, uma API da equipe marcada como "Aceita imagens" descreve os quadros.
+- **Legendas automáticas (`video_captions` ou o botão na mídia):** transcreve a fala com o Whisper no seu PC (whisper.cpp pelo Remotion) e grava `public/captions/<nome>.json` (palavras com tempo, para legendas animadas) e `.srt`. Na primeira vez baixa o Whisper e o modelo de fala escolhido (base 150 MB, small 470 MB, medium 1,5 GB ou large-v3-turbo 1,6 GB).
+
 Precisa do **Node.js** (18 ou mais novo) e do **Git**. O Remotion é grátis para pessoas e empresas pequenas; empresas maiores precisam de licença ([remotion.dev/license](https://remotion.dev/license)).
 
 ## Como ele economiza

@@ -2,7 +2,7 @@
 'use strict';
 
 /* ------------------------------------------------------------ estado e ativação */
-const VID = { data: null, sel: store.get('vidSel', null), comps: {}, compErr: {}, poll: 0, busy: false };
+const VID = { data: null, sel: store.get('vidSel', null), comps: {}, compErr: {}, media: {}, up: null, poll: 0, busy: false };
 const VIDEO_SKILL = 'remotion-best-practices';
 const VIDEO_NOTE = L('Este projeto é um vídeo do Remotion (React). As composições ficam em src/ (Root.tsx registra cada uma). Siga a habilidade remotion-best-practices. Para um vídeo novo ou com várias cenas, use a ferramenta video_scenes: você escreve o roteiro (estilo comum e cenas com duração e descrição detalhada) e a equipe escreve as cenas em paralelo; depois revise e ajuste com edit_file. Depois de editar, não precisa rodar nada: a prévia do Remotion Studio no studio atualiza sozinha. Para conferir erros de tipo, rode npx tsc --noEmit.');
 
@@ -49,7 +49,10 @@ function pollVideos() {
     const before = JSON.stringify(VID.data?.jobs || []);
     await loadVideos();
     // redesenha só quando algo mudou (o iframe da prévia não pisca)
-    if (JSON.stringify(VID.data?.jobs || []) !== before) drawVideos(true);
+    if (JSON.stringify(VID.data?.jobs || []) !== before) {
+      if ((VID.data?.jobs || []).some((j) => j.kind === 'captions' && j.done) && /"kind":"captions",[^}]*"done":false/.test(before)) delete VID.media[VID.sel];
+      drawVideos(true);
+    }
     pollVideos();
   }, busy ? 1200 : 6000);
 }
@@ -98,8 +101,8 @@ function drawVideos(keepPreview) {
 
 function projectPanel(p, d, oldFrame) {
   const live = d.studio?.project === p.id;
-  const jobs = (d.jobs || []).filter((j) => j.project === p.id && j.kind === 'render');
-  const rendering = jobs.find((j) => !j.done);
+  const jobs = (d.jobs || []).filter((j) => j.project === p.id && (j.kind === 'render' || j.kind === 'captions'));
+  const rendering = jobs.find((j) => j.kind === 'render' && !j.done);
   // composições: o CLI do Remotion lista (demora uns segundos na primeira vez)
   const comps = VID.comps[p.id];
   const sel = h('select.select', { disabled: !comps?.length }, (comps || []).map((c) => h('option', { value: c }, c)));
@@ -143,10 +146,14 @@ function projectPanel(p, d, oldFrame) {
   for (const j of jobs) {
     const pct = Math.round((j.progress || 0) * 100);
     panel.append(h('div.vid-job' + (j.done ? (j.ok ? '.ok' : '.err') : ''), null,
-      h('div.vid-job-head', null, h('b', null, j.done ? (j.ok ? L('Renderizado: {0}', j.out) : L('O render falhou')) : L('Renderizando {0}... {1}%', j.out, pct))),
+      h('div.vid-job-head', null, h('b', null, j.kind === 'captions'
+        ? (j.done ? (j.ok ? L('Legendas prontas: {0}', j.out) : L('As legendas falharam')) : L('Gerando legendas... {0}%', pct))
+        : (j.done ? (j.ok ? L('Renderizado: {0}', j.out) : L('O render falhou')) : L('Renderizando {0}... {1}%', j.out, pct)))),
       j.done ? null : h('div.vid-bar', null, h('i', { style: { width: pct + '%' } })),
-      !j.done || !j.ok ? h('pre.vid-log', null, j.tail) : null));
+      j.done && !j.ok && j.err ? h('div.small', null, j.err) : null,
+      !j.done || (!j.ok && !j.err) ? h('pre.vid-log', null, j.tail) : null));
   }
+  panel.append(mediaSection(p));
   if (p.renders.length) {
     panel.append(h('h3.sec-title', null, L('Vídeos')));
     panel.append(h('div.vid-renders', null, p.renders.slice(0, 12).map((r) => {
@@ -208,9 +215,10 @@ async function runSceneWriter(sc, plan, tctx, sm, apiId, owner) {
       + L('- Arquivo: {0}. Exporte exatamente: export const {1}: React.FC = () => {...}', path, sc.name) + '\n'
       + L('- A cena começa no frame 0 e dura {0} frames ({1}s a {2} fps). Tela {3}x{4}. A raiz é <AbsoluteFill>.', frames, sc.seconds, plan.fps, plan.width, plan.height) + '\n'
       + L('- Tudo deriva do frame: useCurrentFrame(), useVideoConfig(), interpolate (com extrapolateLeft/extrapolateRight: "clamp") e spring. Nada de animação CSS, setTimeout, fetch ou Math.random (use random("semente") do remotion).') + '\n'
-      + L('- Importe só de "react" e "remotion". Imagens e sons só de public/ com staticFile(); se não houver, desenhe com formas, gradientes e texto.') + '\n'
+      + L('- Importe de "react", "remotion" e dos pacotes @remotion/* que já estão no projeto (ex.: @remotion/captions). Imagens, vídeos e sons só de public/ com staticFile(); se não houver, desenhe com formas, gradientes e texto.') + '\n'
       + L('- Estilos inline (objetos style). Fonte: as do sistema (ex.: "Inter, system-ui, sans-serif") ou a que o estilo pedir, se for do sistema.') + '\n'
       + L('- Termine a cena de um jeito que emende na próxima (a descrição diz como).') + '\n\n'
+      + (plan.media?.length ? L('Mídia em public/ (use com staticFile, sem o "public/"; vídeo com <OffthreadVideo>, áudio com <Audio>, recorte com trimBefore/trimAfter em frames):') + '\n' + plan.media.map((f) => `- ${f.file}${f.duration ? ' (' + fmtDur(f.duration) + ')' : ''}${f.captions ? ' · ' + L('legenda: {0}', f.captions) : ''}`).join('\n') + '\n\n' : '')
       + L('Estilo comum a todas as cenas:') + '\n' + plan.style + '\n\n'
       + L('Roteiro completo (para continuidade; você escreve só a cena {0}):', sc.name) + '\n' + list + '\n\n'
       + L('Pode olhar o projeto antes (list_directory, read_file), mas seja breve. Quando o código estiver pronto, chame write_scene com o arquivo inteiro. Não escreva explicações.')
@@ -306,6 +314,7 @@ async function runVideoScenes(args, tctx, tmsg) {
   if (plan.scenes.length > 30) return { content: L('No máximo 30 cenas por vez.'), isError: true };
   if (bad.length) return { content: L('Nomes de cena inválidos: {0}. Use PascalCase só com letras e números (ex.: Abertura, Grafico2), sem "Video".', bad.map((s) => s.name || '""').join(', ')), isError: true };
   if (new Set(plan.scenes.map((s) => s.name)).size !== plan.scenes.length) return { content: L('Há nomes de cena repetidos.'), isError: true };
+  try { plan.media = (await api('/api/videos/media', { id: vid })).files.filter((f) => f.kind !== 'other'); } catch { plan.media = []; }
   const only = Array.isArray(args.only) && args.only.length ? plan.scenes.filter((s) => args.only.includes(s.name)) : plan.scenes;
   if (!only.length) return { content: L('Nenhuma cena de only está em scenes.'), isError: true };
 
@@ -368,4 +377,200 @@ async function runVideoScenes(args, tctx, tmsg) {
     + '\n' + L('A prévia do Remotion Studio atualiza sozinha (composição "Video"). Para ajustar uma cena, edite o arquivo dela ou chame video_scenes de novo com a lista completa e only com os nomes. Para gerar o MP4, o usuário usa Renderizar na página Vídeos.');
   const failed = only.filter((_, i) => !results[i]?.ok).length;
   return { content, isError: failed === only.length };
+}
+
+/* ------------------------------------------------------------ mídia do projeto (public/) */
+const WHISPER_LABEL = { base: 'base · 150 MB', small: 'small · 470 MB', medium: 'medium · 1,5 GB', 'large-v3-turbo': 'large-v3-turbo · 1,6 GB' };
+
+function fmtDur(sec) {
+  if (sec == null || !isFinite(sec)) return '';
+  const h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60, s = sec - Math.floor(sec / 60) * 60;
+  const ss = (s < 10 ? '0' : '') + s.toFixed(1).replace(/\.0$/, '');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+}
+
+function mediaUrl(id, file, dl) {
+  const f = String(file).replace(/^public\//, '');
+  return `/api/videos/file?id=${encodeURIComponent(id)}&in=public&f=${encodeURIComponent(f)}${dl ? '&dl=1' : ''}`;
+}
+
+/** Envia arquivos para public/ (direto para o disco, sem limite de tamanho), com progresso. */
+function uploadMedia(p, files) {
+  const list = [...files];
+  const one = (f) => new Promise((ok, fail) => {
+    const x = new XMLHttpRequest();
+    x.open('POST', `/api/videos/upload?id=${encodeURIComponent(p.id)}&name=${encodeURIComponent(f.name)}`);
+    x.setRequestHeader('X-Studio', '1');
+    x.upload.onprogress = (e) => { if (e.lengthComputable) { VID.up = { name: f.name, pct: Math.round(e.loaded / e.total * 100) }; drawUpload(); } };
+    x.onload = () => (x.status < 300 ? ok() : fail(new Error((() => { try { return JSON.parse(x.responseText).error; } catch { return 'HTTP ' + x.status; } })())));
+    x.onerror = () => fail(new Error(L('Falha ao enviar {0}', f.name)));
+    x.send(f);
+  });
+  (async () => {
+    for (const f of list) {
+      VID.up = { name: f.name, pct: 0 }; drawUpload();
+      try { await one(f); } catch (e) { toast(e.message, 'err'); }
+    }
+    VID.up = null; delete VID.media[p.id];
+    if (S.view === 'videos') drawVideos(true);
+  })();
+}
+function drawUpload() {
+  const el = $('#vid-up'); if (!el) return;
+  el.hidden = !VID.up;
+  if (VID.up) el.innerHTML = '', el.append(h('small.muted', null, L('Enviando {0}... {1}%', VID.up.name, VID.up.pct)), h('div.vid-bar', null, h('i', { style: { width: VID.up.pct + '%' } })));
+}
+
+function mediaSection(p) {
+  const box = h('div.vid-media');
+  const m = VID.media[p.id];
+  if (m === undefined && p.ready) {
+    VID.media[p.id] = null;
+    api('/api/videos/media', { id: p.id }).then((r) => { VID.media[p.id] = r; if (S.view === 'videos' && VID.sel === p.id) drawVideos(true); })
+      .catch(() => { VID.media[p.id] = { files: [] }; });
+  }
+  const input = h('input', { type: 'file', multiple: true, accept: 'video/*,audio/*,image/*', hidden: true, onchange: () => { if (input.files.length) uploadMedia(p, input.files); input.value = ''; } });
+  const model = h('select.select.sm', { title: L('Modelo de fala do Whisper') }, (m?.whisperModels || ['base', 'small', 'medium', 'large-v3-turbo']).map((x) => h('option', { value: x }, WHISPER_LABEL[x] + (m?.models?.includes(x) ? ' ✓' : ''))));
+  model.value = S.settings.whisperModel || 'small';
+  model.addEventListener('change', () => { S.settings.whisperModel = model.value; store.set('settings', S.settings); });
+  const lang = h('select.select.sm', { title: L('Idioma da fala') }, [['', L('detectar idioma')], ['pt', 'português'], ['en', 'english'], ['es', 'español']].map(([v, t]) => h('option', { value: v }, t)));
+  lang.value = S.settings.whisperLang ?? 'pt';
+  lang.addEventListener('change', () => { S.settings.whisperLang = lang.value; store.set('settings', S.settings); });
+  const busy = (VID.data?.jobs || []).some((j) => j.kind === 'captions' && !j.done);
+  box.append(h('div.vid-media-head', null, h('h3.sec-title', null, L('Mídia')),
+    h('small.muted', null, L('Vídeos, áudios e imagens em public/ para o vídeo usar. O modelo pode olhar os quadros e gerar legendas.')),
+    h('span.spacer'), h('button.btn.sm', { type: 'button', disabled: !p.ready, onclick: () => input.click() }, ic('plus'), L('Adicionar')), input));
+  box.append(h('div#vid-up', { hidden: !VID.up }));
+  setTimeout(drawUpload);
+  if (m?.files?.length) {
+    box.append(h('div.vid-media-opts', null, h('small.muted', null, L('Legendas:')), model, lang,
+      m.whisperInstalled ? null : h('small.muted', null, L('na primeira vez baixa o Whisper e o modelo escolhido'))));
+    box.append(h('div.vid-media-list', null, m.files.map((f) => {
+      const av = f.kind === 'video' || f.kind === 'audio';
+      const thumb = f.kind === 'image' ? h('img', { src: mediaUrl(p.id, f.file), alt: '', loading: 'lazy' })
+        : f.kind === 'video' ? h('video', { src: mediaUrl(p.id, f.file) + '#t=1', preload: 'metadata', muted: true })
+        : h('span.vm-ico', { html: svg(f.kind === 'audio' ? 'mic' : 'file') });
+      return h('div.vid-media-item', null, h('div.vm-thumb', null, thumb),
+        h('div.vm-main', null, h('b', { title: f.file }, f.file.replace(/^public\//, '')),
+          h('small.muted', null, [fmtBytes(f.size), f.duration ? fmtDur(f.duration) : ''].filter(Boolean).join(' · '))),
+        f.captions ? h('a.tag.ok', { href: mediaUrl(p.id, f.captions.replace(/\.json$/, '.srt'), true), title: L('Baixar as legendas (.srt)') }, L('legendas')) : null,
+        av ? h('button.btn.sm', { type: 'button', disabled: busy, title: L('Transcrever a fala com o Whisper (no seu PC)'), onclick: async () => {
+          try { await api('/api/videos/captions', { id: p.id, file: f.file, model: model.value, lang: lang.value }); await loadVideos(); drawVideos(true); pollVideos(); }
+          catch (e) { toast(e.message, 'err'); }
+        } }, ic('captions'), f.captions ? L('Refazer legendas') : L('Gerar legendas')) : null);
+    })));
+  } else if (m) box.append(h('div.muted.small', null, L('Nada em public/ ainda. Adicione gravações, músicas, logos ou fotos que o vídeo deve usar.')));
+  return box;
+}
+
+/* ------------------------------------------------------------ ferramentas: video_look e video_captions */
+
+/** Junta os quadros numa folha (4 colunas) com o tempo de cada um no canto: uma imagem só para o modelo. */
+async function contactSheet(frames, cols = 4) {
+  const imgs = await Promise.all(frames.map((f) => new Promise((ok) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => ok(null); i.src = f.data; })));
+  const ok = imgs.map((im, k) => im && { im, t: frames[k].t }).filter(Boolean);
+  if (!ok.length) return null;
+  const w = ok[0].im.naturalWidth, hh = ok[0].im.naturalHeight, gap = 4;
+  const rows = Math.ceil(ok.length / cols), c = Math.min(cols, ok.length);
+  const cv = document.createElement('canvas');
+  cv.width = c * w + (c - 1) * gap; cv.height = rows * hh + (rows - 1) * gap;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#000'; g.fillRect(0, 0, cv.width, cv.height);
+  const fs = Math.max(14, Math.round(w / 14));
+  g.font = `600 ${fs}px Inter, system-ui, sans-serif`; g.textBaseline = 'top';
+  ok.forEach(({ im, t }, k) => {
+    const x = (k % cols) * (w + gap), y = Math.floor(k / cols) * (hh + gap);
+    g.drawImage(im, x, y, w, hh);
+    const label = fmtDur(t), tw = g.measureText(label).width;
+    g.fillStyle = 'rgba(0,0,0,.72)'; g.fillRect(x + 6, y + 6, tw + 12, fs + 8);
+    g.fillStyle = '#ffd84d'; g.fillText(label, x + 12, y + 10);
+  });
+  return cv.toDataURL('image/jpeg', 0.82);
+}
+
+/** Linhas da legenda (Caption[] do Remotion) agrupadas como no .srt. */
+function captionLines(caps) {
+  const lines = []; let cur = null;
+  for (const c of caps || []) {
+    if (!cur || (cur.text + c.text).trim().length > 42 || c.endMs - cur.startMs > 3500) { if (cur) lines.push(cur); cur = { startMs: c.startMs, endMs: c.endMs, text: String(c.text).trimStart() }; }
+    else { cur.text += c.text; cur.endMs = c.endMs; }
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+async function videoProjectOf(tctx) {
+  const vid = projectOf(tctx.conv)?.video;
+  if (!vid) throw new Error(L('Esta ferramenta só funciona numa conversa de projeto de vídeo (abra pela página Vídeos › Conversa do projeto).'));
+  return vid;
+}
+
+async function runVideoLook(args, tctx, tmsg) {
+  let vid;
+  try { vid = await videoProjectOf(tctx); } catch (e) { return { content: e.message, isError: true }; }
+  const file = String(args.file || '').trim().replace(/^\.?\//, '');
+  const count = Math.max(1, Math.min(24, Number(args.count) || 12));
+  const from = Math.max(0, Number(args.from) || 0), to = Math.max(0, Number(args.to) || 0);
+  let r;
+  try { r = await api('/api/videos/frames', { id: vid, file, count, from, to, width: 360 }); }
+  catch (e) { return { content: e.message, isError: true }; }
+  const sheets = [];
+  for (let i = 0; i < r.frames.length; i += 12) sheets.push(await contactSheet(r.frames.slice(i, i + 12)));
+  const times = r.frames.map((f) => fmtDur(f.t));
+  let text = L('{0}: {1} de duração. {2} quadros em {3} folha(s), da esquerda para a direita e de cima para baixo, cada um com o tempo no canto: {4}.', file, fmtDur(r.duration) || '?', r.frames.length, sheets.length, times.join(', '));
+  // a fala do trecho, se o vídeo já tem legenda
+  const stem = file.split('/').pop().replace(/\.[^.]+$/, '');
+  try {
+    const res = await fetch(mediaUrl(vid, `captions/${stem}.json`));
+    if (res.ok) {
+      const end = to || r.duration || 1e9;
+      const lines = captionLines(await res.json()).filter((l) => l.endMs / 1000 >= from && l.startMs / 1000 <= end).slice(0, 80);
+      if (lines.length) text += '\n\n' + L('Fala nesse trecho (da legenda):') + '\n' + lines.map((l) => `[${fmtDur(l.startMs / 1000)}] ${l.text.trim()}`).join('\n');
+    }
+  } catch { /* sem legenda */ }
+  const imgs = sheets.filter(Boolean);
+  if (visionOn()) return { content: text, isError: false, images: imgs };
+  // o modelo da conversa não enxerga: uma API da equipe (ou outra pronta) que enxergue descreve os quadros
+  const seer = [...apiForAll('explorer'), ...(S.info.apis || []).filter((a) => a.ready).map((a) => a.id)].map(apiById).find((a) => a?.vision && !apiCooled(a.id));
+  if (!seer) return { content: text + '\n\n' + L('O modelo desta conversa não recebe imagens, e nenhuma API marcada como "Aceita imagens" está disponível para descrever os quadros. Os tempos e a fala acima ainda servem para planejar os cortes.'), isError: false };
+  tmsg.phase = L('{0} está descrevendo os quadros...', apiLabel(seer)); scheduleRender();
+  const m = { content: '', reasoning: '', tool_calls: [] };
+  try {
+    await streamApi([{ role: 'user', content: [{ type: 'text', text: L('Descreva o que aparece em cada quadro destas folhas, um por linha começando pelo tempo escrito no canto do quadro. Diga pessoas, textos na tela, ambiente, cortes de cena, telas pretas ou borradas. Seja objetivo.') }, ...imgs.map((url) => ({ type: 'image_url', image_url: { url } }))] }], [], m, tctx.signal, null, { _p: seer.id, _timeout: 120000 });
+  } catch (e) { tmsg.phase = ''; return { content: text + '\n\n' + L('Não consegui a descrição dos quadros ({0}).', e.message), isError: false }; }
+  tmsg.phase = '';
+  tmsg._images = imgs;
+  return { content: text + '\n\n' + L('O que aparece (descrito por {0}):', `${apiLabel(seer)} · ${seer.model}`) + '\n' + splitThink(m.content).text.trim(), isError: false };
+}
+
+async function runVideoCaptions(args, tctx, tmsg) {
+  let vid;
+  try { vid = await videoProjectOf(tctx); } catch (e) { return { content: e.message, isError: true }; }
+  const file = String(args.file || '').trim().replace(/^\.?\//, '');
+  const model = String(args.model || S.settings.whisperModel || 'small');
+  const lang = String(args.language ?? S.settings.whisperLang ?? 'pt');
+  let start;
+  try { start = await api('/api/videos/captions', { id: vid, file, model, lang }); } catch (e) { return { content: e.message, isError: true }; }
+  let j;
+  for (;;) {
+    if (tctx.signal.aborted) return { content: L('Cancelado. As legendas continuam sendo geradas na página Vídeos.'), isError: true };
+    await new Promise((r) => setTimeout(r, 1500));
+    try { j = await api('/api/videos/job?id=' + encodeURIComponent(start.job)); } catch { continue; }
+    const pct = Math.round((j.progress || 0) * 100);
+    const stage = (j.progress || 0) < 0.1 ? L('instalando o Whisper') : j.progress < 0.4 ? L('baixando o modelo {0}', model) : L('transcrevendo');
+    tmsg.phase = `${stage} · ${pct}%`; scheduleRender();
+    if (j.done || j.missing) break;
+  }
+  tmsg.phase = '';
+  if (!j.ok) return { content: j.err || L('As legendas falharam:\n{0}', String(j.log || '').split('\n').slice(-12).join('\n')), isError: true };
+  delete VID.media[vid];
+  const srtPath = start.out.replace(/\.json$/, '.srt');
+  let preview = '';
+  try { const res = await fetch(mediaUrl(vid, srtPath.replace(/^public\//, ''))); if (res.ok) preview = (await res.text()).split('\n\n').slice(0, 25).join('\n\n'); } catch { /* sem prévia */ }
+  return {
+    content: L('Legendas prontas: {0} (palavras com startMs/endMs, formato Caption do @remotion/captions) e {1}.', start.out, srtPath) + '\n\n'
+      + L('Para usar numa cena: carregue com fetch(staticFile("{0}")) dentro de delayRender/continueRender (ou useDelayRender) e mostre o trecho em que startMs <= tempo atual < endMs; para legendas no estilo TikTok, createTikTokStyleCaptions de "@remotion/captions" agrupa as palavras em páginas.', start.out.replace(/^public\//, '')) + '\n\n'
+      + (preview ? L('Começo do .srt:') + '\n```\n' + preview + '\n```' : ''),
+    isError: false,
+  };
 }

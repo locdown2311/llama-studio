@@ -299,6 +299,9 @@ function apiSection(put, field, saved) {
       field(L('Modelo'), h('div.row', null, model, dl, listBtn, test)),
       testOut, field(L('Modelo de fallback'), fallbackModel, L('Opcional. Se o modelo principal falhar (400, 404, 429, 500...) ou a API cair, tenta este modelo no mesmo servidor.')),
       field(L('Tentativas de reconexão'), retries, L('Tentativas de reenvio em caso de falha de conexão, timeout ou erro temporário do servidor (0 a 10, padrão: 1).')),
+      h('label.tcard.wrap', null, h('span.tc-main', null, h('span.tc-title', null, L('Aceita imagens')),
+        h('span.tc-desc', null, L('Marque se o modelo enxerga imagens (Gemini, GPT-4o, Llama 4, Qwen-VL...). Aí ele recebe fotos anexadas, capturas de tela e os quadros dos vídeos.'))),
+        h('span.switch', null, h('input', { type: 'checkbox', checked: a.vision === true, onchange: (e) => save({ apiProvider: { id: a.id, vision: e.target.checked } }) }), h('span'))),
       field(L('Contexto (tokens)'), ctxIn, L('Tamanho da janela do modelo. O medidor de contexto e a compactação automática usam este número quando a conversa roda nesta API.')),
       params,
       h('small.muted', null, L('Hoje: {0} pedidos, {1} tokens, {2} falhas (voltaram para o modelo local).', u.calls, u.tokens.toLocaleString(LOCALE), u.fails)));

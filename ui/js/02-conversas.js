@@ -3323,6 +3323,10 @@ function renderTool(tc, res, live) {
     );
   }
 
+  // ferramenta longa sem subagentes (legendas, quadros descritos por outra API): a etapa atual
+  if (res?.phase && !res?.subs?.length && status === "running")
+    bodyEl.append(h("div.tool-sec", null, h("div.tool-sec-label", null, h("span", { html: svg("loader", "spin") }), " ", res.phase)));
+
   if (res?.subs?.length) {
     const rows = h("div.substeps");
 

@@ -32,6 +32,8 @@ struct Job {
     /// 0..1 (render)
     progress: f64,
     out: String,
+    /// o motivo da falha, em uma linha (o log fica para quem quiser os detalhes)
+    err: String,
     started: u64,
 }
 
@@ -172,7 +174,7 @@ impl Videos {
             .unwrap()
             .iter()
             .filter(|(_, j)| !j.done || now() - j.started < 600)
-            .map(|(id, j)| json!({ "id": id, "kind": j.kind, "project": j.project, "done": j.done, "ok": j.ok, "progress": j.progress, "out": j.out, "tail": tail(&j.log, 6) }))
+            .map(|(id, j)| json!({ "id": id, "kind": j.kind, "project": j.project, "done": j.done, "ok": j.ok, "progress": j.progress, "out": j.out, "err": j.err, "tail": tail(&j.log, 6) }))
             .collect();
         json!({
             "root": r, "node": node_version().await, "skills": skills_installed(app),
@@ -182,14 +184,14 @@ impl Videos {
 
     pub fn job(&self, id: &str) -> Value {
         match self.jobs.lock().unwrap().get(id) {
-            Some(j) => json!({ "kind": j.kind, "project": j.project, "done": j.done, "ok": j.ok, "progress": j.progress, "out": j.out, "log": tail(&j.log, 80) }),
+            Some(j) => json!({ "kind": j.kind, "project": j.project, "done": j.done, "ok": j.ok, "progress": j.progress, "out": j.out, "err": j.err, "log": tail(&j.log, 80) }),
             None => json!({ "missing": true }),
         }
     }
 
     fn start_job(&self, kind: &'static str, project: &str) -> String {
         let id = format!("{kind}-{}-{}", project, now());
-        self.jobs.lock().unwrap().insert(id.clone(), Job { kind, project: project.into(), log: String::new(), done: false, ok: false, progress: 0.0, out: String::new(), started: now() });
+        self.jobs.lock().unwrap().insert(id.clone(), Job { kind, project: project.into(), log: String::new(), done: false, ok: false, progress: 0.0, out: String::new(), err: String::new(), started: now() });
         id
     }
 
@@ -528,6 +530,24 @@ mod t {
     }
 
     #[test]
+    fn nome_de_midia_seguro() {
+        let d = std::env::temp_dir().join("ls-free-name-test");
+        let _ = std::fs::create_dir_all(&d);
+        assert_eq!(super::free_name(&d, "Minha gravação (final).mp4"), "Minha-gravacao-final.mp4");
+        assert_eq!(super::free_name(&d, "../../fora.mp4"), "fora.mp4");
+        std::fs::write(d.join("x.mp4"), b"").unwrap();
+        assert_eq!(super::free_name(&d, "x.mp4"), "x-2.mp4");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn erro_das_legendas_resumido() {
+        let log = "PROGRESS install 1\nFAIL model ENOTFOUND huggingface.co fetch failed\n";
+        let e = super::captions_err(log, "small");
+        assert!(e.contains("small") && e.contains("huggingface.co"), "{e}");
+    }
+
+    #[test]
     fn nomes() {
         assert_eq!(super::slug("Meu Vídeo de Ação!"), "meu-video-de-acao");
         assert_eq!(super::slug("  --  "), "");
@@ -540,3 +560,385 @@ mod t {
 fn project_dir_ok(id: &str) -> bool {
     !(id.is_empty() || id.contains(['/', '\\', ':']) || id.starts_with('.'))
 }
+
+/* ------------------------------------------------------------ mídia do projeto (public/) */
+// Vídeos, áudios e imagens que o usuário põe em public/ para o vídeo usar (staticFile). O studio tira quadros
+// para o modelo ver (video_look) e gera legendas a partir do áudio com o Whisper (video_captions).
+
+const MEDIA_VIDEO: &[&str] = &["mp4", "mov", "webm", "mkv", "m4v", "avi"];
+const MEDIA_AUDIO: &[&str] = &["mp3", "wav", "m4a", "aac", "ogg", "flac", "opus"];
+const MEDIA_IMAGE: &[&str] = &["png", "jpg", "jpeg", "webp", "gif", "svg"];
+/// Versão do whisper.cpp que o Remotion baixa pronta no Windows.
+const WHISPER_VERSION: &str = "1.5.5";
+pub const WHISPER_MODELS: &[&str] = &["base", "small", "medium", "large-v3-turbo"];
+
+fn media_kind(name: &str) -> &'static str {
+    let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
+    if MEDIA_VIDEO.contains(&ext.as_str()) {
+        "video"
+    } else if MEDIA_AUDIO.contains(&ext.as_str()) {
+        "audio"
+    } else if MEDIA_IMAGE.contains(&ext.as_str()) {
+        "image"
+    } else {
+        "other"
+    }
+}
+
+/// Caminho relativo ao projeto, sem sair dele (public/x.mp4, out/y.mp4).
+fn inside(dir: &Path, rel: &str) -> Option<PathBuf> {
+    let rel = rel.trim().replace('\\', "/");
+    if rel.is_empty() || rel.starts_with('/') || rel.contains(':') || rel.split('/').any(|p| p == ".." || p.is_empty()) {
+        return None;
+    }
+    let p = dir.join(&rel);
+    p.is_file().then_some(p)
+}
+
+/// Pasta do ffmpeg que vem com o Remotion (node_modules/@remotion/compositor-<plataforma>). Pode haver mais de
+/// uma (no Linux, gnu e musl): fica a deste sistema e arquitetura, e no Linux a gnu.
+fn compositor(dir: &Path) -> Option<PathBuf> {
+    let exe = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
+    let os = match std::env::consts::OS { "windows" => "win32", "macos" => "darwin", o => o };
+    let arch = match std::env::consts::ARCH { "x86_64" => "x64", "aarch64" => "arm64", a => a };
+    let want = format!("compositor-{os}-{arch}");
+    let mut found: Vec<PathBuf> = std::fs::read_dir(dir.join("node_modules").join("@remotion"))
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(&want)) && p.join(exe).is_file())
+        .collect();
+    found.sort_by_key(|p| !p.to_string_lossy().ends_with("-gnu") as u8);
+    found.into_iter().next()
+}
+
+/// ffmpeg/ffprobe do Remotion, com as bibliotecas dele no caminho.
+fn ff(comp: &Path, bin: &str, args: &[&str], cwd: &Path) -> tokio::process::Command {
+    let exe = comp.join(if cfg!(windows) { format!("{bin}.exe") } else { bin.to_string() });
+    let mut c = command(&exe, args, cwd);
+    let lib = comp.to_string_lossy().to_string();
+    c.env("LD_LIBRARY_PATH", &lib).env("DYLD_LIBRARY_PATH", &lib);
+    c
+}
+
+/// Duração em segundos (ffprobe).
+async fn duration_of(comp: &Path, file: &Path, cwd: &Path) -> Option<f64> {
+    let f = file.to_string_lossy().to_string();
+    let mut c = ff(comp, "ffprobe", &["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", &f], cwd);
+    let out = tokio::time::timeout(Duration::from_secs(20), c.output()).await.ok()?.ok()?;
+    String::from_utf8_lossy(&out.stdout).trim().parse::<f64>().ok().filter(|d| d.is_finite() && *d > 0.0)
+}
+
+fn captions_path(dir: &Path, rel: &str) -> PathBuf {
+    let stem = Path::new(rel).file_stem().and_then(|s| s.to_str()).unwrap_or("audio");
+    dir.join("public").join("captions").join(format!("{stem}.json"))
+}
+
+/// Nome de arquivo seguro, sem sobrescrever o que já existe (nome-2.mp4...).
+fn free_name(dir: &Path, name: &str) -> String {
+    // sem acentos nem espaços: o caminho vai para staticFile() e para o modelo digitar
+    let fold = |c: char| match c {
+        'á' | 'à' | 'â' | 'ã' | 'ä' => 'a',
+        'Á' | 'À' | 'Â' | 'Ã' | 'Ä' => 'A',
+        'é' | 'ê' | 'è' | 'ë' => 'e',
+        'É' | 'Ê' | 'È' | 'Ë' => 'E',
+        'í' | 'ì' | 'î' | 'ï' => 'i',
+        'Í' | 'Ì' | 'Î' | 'Ï' => 'I',
+        'ó' | 'ô' | 'õ' | 'ò' | 'ö' => 'o',
+        'Ó' | 'Ô' | 'Õ' | 'Ò' | 'Ö' => 'O',
+        'ú' | 'ù' | 'û' | 'ü' => 'u',
+        'Ú' | 'Ù' | 'Û' | 'Ü' => 'U',
+        'ç' => 'c',
+        'Ç' => 'C',
+        c if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') => c,
+        _ => '-',
+    };
+    let mut base = String::new();
+    for c in name.rsplit(['/', '\\']).next().unwrap_or(name).chars().map(fold) {
+        if !(c == '-' && base.ends_with('-')) {
+            base.push(c);
+        }
+    }
+    let base = base.replace("-.", ".").trim_matches(['.', '-']).to_string();
+    let base = if base.is_empty() { "arquivo".to_string() } else { base };
+    if !dir.join(&base).exists() {
+        return base;
+    }
+    let (stem, ext) = base.rsplit_once('.').map(|(a, b)| (a.to_string(), format!(".{b}"))).unwrap_or((base.clone(), String::new()));
+    (2..1000).map(|i| format!("{stem}-{i}{ext}")).find(|n| !dir.join(n).exists()).unwrap_or(base)
+}
+
+impl Videos {
+    /// Arquivos de public/ (até 2 níveis), com duração dos vídeos e áudios e se já há legenda.
+    pub async fn media(&self, app: &App, id: &str) -> Result<Value, String> {
+        let dir = project_dir(app, id).ok_or_else(|| L!("Projeto não encontrado.", "Project not found.").to_string())?;
+        let comp = compositor(&dir);
+        let mut files = vec![];
+        let mut stack = vec![(dir.join("public"), 0)];
+        while let Some((d, depth)) = stack.pop() {
+            let Ok(rd) = std::fs::read_dir(&d) else { continue };
+            for e in rd.flatten() {
+                let p = e.path();
+                let name = e.file_name().to_string_lossy().to_string();
+                if name.starts_with('.') {
+                    continue;
+                }
+                if p.is_dir() {
+                    if depth < 1 && name != "captions" {
+                        stack.push((p, depth + 1));
+                    }
+                    continue;
+                }
+                let rel = p.strip_prefix(&dir).map(|r| r.to_string_lossy().replace('\\', "/")).unwrap_or_default();
+                files.push((rel, p));
+            }
+        }
+        files.sort();
+        let mut out = vec![];
+        for (rel, p) in files.into_iter().take(60) {
+            let kind = media_kind(&rel);
+            let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+            let dur = match (&comp, kind) {
+                (Some(c), "video" | "audio") => duration_of(c, &p, &dir).await,
+                _ => None,
+            };
+            let cap = captions_path(&dir, &rel);
+            out.push(json!({ "file": rel, "kind": kind, "size": size, "duration": dur,
+                "captions": cap.is_file().then(|| cap.strip_prefix(&dir).map(|r| r.to_string_lossy().replace('\\', "/")).unwrap_or_default()) }));
+        }
+        let whisper = app.root.join("whisper").join("whisper.cpp");
+        Ok(json!({ "files": out, "ffmpeg": comp.is_some(), "whisperModels": WHISPER_MODELS, "whisperInstalled": whisper.is_dir(),
+            "models": WHISPER_MODELS.iter().filter(|m| std::fs::metadata(whisper.join(format!("ggml-{m}.bin"))).is_ok_and(|md| md.len() > 10 * 1024 * 1024)).collect::<Vec<_>>() }))
+    }
+
+    /// Grava um arquivo enviado em public/ (sem sobrescrever). Devolve o caminho relativo.
+    pub async fn upload(&self, app: &App, id: &str, name: &str, body: axum::body::Body) -> Result<Value, String> {
+        use futures_util::StreamExt;
+        use tokio::io::AsyncWriteExt;
+        let dir = project_dir(app, id).ok_or_else(|| L!("Projeto não encontrado.", "Project not found.").to_string())?;
+        let public = dir.join("public");
+        std::fs::create_dir_all(&public).map_err(|e| e.to_string())?;
+        let fname = free_name(&public, name);
+        let path = public.join(&fname);
+        let tmp = public.join(format!(".{fname}.part"));
+        let mut f = tokio::fs::File::create(&tmp).await.map_err(|e| e.to_string())?;
+        let mut stream = body.into_data_stream();
+        let mut total = 0u64;
+        while let Some(chunk) = stream.next().await {
+            let chunk = match chunk {
+                Ok(c) => c,
+                Err(e) => {
+                    let _ = tokio::fs::remove_file(&tmp).await;
+                    return Err(e.to_string());
+                }
+            };
+            total += chunk.len() as u64;
+            if let Err(e) = f.write_all(&chunk).await {
+                let _ = tokio::fs::remove_file(&tmp).await;
+                return Err(e.to_string());
+            }
+        }
+        f.flush().await.map_err(|e| e.to_string())?;
+        drop(f);
+        tokio::fs::rename(&tmp, &path).await.map_err(|e| e.to_string())?;
+        Ok(json!({ "file": format!("public/{fname}"), "size": total }))
+    }
+
+    /// Quadros de um vídeo nos instantes pedidos (JPEG 480px, em data URL), para o modelo ver.
+    /// Sem `times`: `count` quadros espaçados entre `from` e `to` (segundos; `to` 0 = fim do vídeo).
+    pub async fn frames(&self, app: &App, id: &str, file: &str, times: &[f64], count: usize, from: f64, to: f64, width: u32) -> Result<Value, String> {
+        let dir = project_dir(app, id).ok_or_else(|| L!("Projeto não encontrado.", "Project not found.").to_string())?;
+        let path = inside(&dir, file).ok_or_else(|| LF!("Arquivo não encontrado no projeto: {file}", "File not found in the project: {file}"))?;
+        let comp = compositor(&dir).ok_or_else(|| L!("O ffmpeg do Remotion não está no projeto (rode npm install na pasta dele).", "Remotion's ffmpeg is not in the project (run npm install in its folder).").to_string())?;
+        let dur = duration_of(&comp, &path, &dir).await;
+        let spaced;
+        let times = if times.is_empty() {
+            let end = if to > 0.0 { to } else { dur.unwrap_or(10.0) };
+            let start = from.clamp(0.0, end);
+            let n = count.clamp(1, 36);
+            // o meio de cada fatia: não pega o quadro preto do começo nem o último
+            spaced = (0..n).map(|i| start + (end - start) * (i as f64 + 0.5) / n as f64).collect::<Vec<_>>();
+            &spaced[..]
+        } else {
+            times
+        };
+        let p = path.to_string_lossy().to_string();
+        let scale = format!("scale={}:-2", width.clamp(160, 1280));
+        let mut frames = vec![];
+        // 4 de cada vez: cada um é um ffmpeg curto (busca direto no instante, decodifica um quadro)
+        for chunk in times.chunks(4) {
+            let jobs = chunk.iter().map(|&t| {
+                let t = dur.map(|d| t.min((d - 0.05).max(0.0))).unwrap_or(t).max(0.0);
+                let ts = format!("{t:.3}");
+                let mut c = ff(&comp, "ffmpeg", &["-v", "error", "-ss", &ts, "-i", &p, "-frames:v", "1", "-vf", &scale, "-c:v", "mjpeg", "-q:v", "6", "-f", "image2pipe", "-"], &dir);
+                c.stdout(Stdio::piped());
+                async move { (t, tokio::time::timeout(Duration::from_secs(30), c.output()).await) }
+            });
+            for (t, r) in futures_util::future::join_all(jobs).await {
+                if let Ok(Ok(out)) = r {
+                    if out.status.success() && !out.stdout.is_empty() {
+                        use base64::Engine;
+                        frames.push(json!({ "t": t, "data": format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(&out.stdout)) }));
+                    }
+                }
+            }
+        }
+        if frames.is_empty() {
+            return Err(L!("Não consegui tirar quadros desse arquivo (é um vídeo?).", "Could not grab frames from that file (is it a video?).").into());
+        }
+        Ok(json!({ "duration": dur, "frames": frames }))
+    }
+
+    /// Legendas do áudio de um vídeo ou áudio do projeto, com o Whisper (whisper.cpp pelo Remotion). Gera
+    /// public/captions/<nome>.json (Caption[] do @remotion/captions) e .srt. Trabalho em segundo plano.
+    pub fn captions(self: &std::sync::Arc<Self>, app: std::sync::Arc<App>, id: &str, file: &str, model: &str, lang: &str) -> Result<Value, String> {
+        let dir = project_dir(&app, id).ok_or_else(|| L!("Projeto não encontrado.", "Project not found.").to_string())?;
+        let src = inside(&dir, file).ok_or_else(|| LF!("Arquivo não encontrado no projeto: {file}", "File not found in the project: {file}"))?;
+        if !matches!(media_kind(file), "video" | "audio") {
+            return Err(L!("Escolha um vídeo ou áudio.", "Choose a video or audio file.").into());
+        }
+        let comp = compositor(&dir).ok_or_else(|| L!("O ffmpeg do Remotion não está no projeto (rode npm install na pasta dele).", "Remotion's ffmpeg is not in the project (run npm install in its folder).").to_string())?;
+        let model = if WHISPER_MODELS.contains(&model) { model.to_string() } else { "small".to_string() };
+        let lang: String = lang.chars().filter(|c| c.is_ascii_alphabetic()).take(5).collect::<String>().to_lowercase();
+        if self.jobs.lock().unwrap().values().any(|j| j.kind == "captions" && !j.done) {
+            return Err(L!("Já há uma legenda sendo gerada; espere terminar.", "Captions are already being generated; wait for them to finish.").into());
+        }
+        let out_json = captions_path(&dir, file);
+        let rel_out = out_json.strip_prefix(&dir).map(|r| r.to_string_lossy().replace('\\', "/")).unwrap_or_default();
+        let job = self.start_job("captions", id);
+        self.with_job(&job, |j| j.out = rel_out.clone());
+        let me = self.clone();
+        let job2 = job.clone();
+        tokio::spawn(async move {
+            let ok = me.captions_run(&app, &job2, &dir, &comp, &src, &out_json, &model, &lang).await;
+            me.with_job(&job2, |j| {
+                j.done = true;
+                j.ok = ok;
+                if !ok && j.err.is_empty() {
+                    j.err = captions_err(&j.log, &model);
+                }
+                if ok {
+                    j.progress = 1.0;
+                }
+            });
+        });
+        Ok(json!({ "job": job, "out": rel_out }))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn captions_run(&self, app: &App, job: &str, dir: &Path, comp: &Path, src: &Path, out_json: &Path, model: &str, lang: &str) -> bool {
+        let say = |m: String| self.with_job(job, |j| j.log.push_str(&(m + "\n")));
+        // 1) o pacote do Remotion para o Whisper, na mesma versão do projeto
+        if !dir.join("node_modules").join("@remotion").join("install-whisper-cpp").is_dir() {
+            let ver = std::fs::read_to_string(dir.join("package.json"))
+                .ok()
+                .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                .and_then(|v| v["dependencies"]["remotion"].as_str().map(|s| s.trim_start_matches(['^', '~']).to_string()))
+                .unwrap_or_else(|| "latest".into());
+            say(LF!("Instalando @remotion/install-whisper-cpp@{}...", "Installing @remotion/install-whisper-cpp@{}...", ver));
+            let npm = crate::bins::which("npm").unwrap_or_else(|| PathBuf::from("npm"));
+            let pkg = format!("@remotion/install-whisper-cpp@{ver}");
+            let cap = format!("@remotion/captions@{ver}");
+            if !self.run(job, command(&npm, &["install", "--no-audit", "--no-fund", &pkg, &cap], dir), |_| None).await {
+                say(L!("Não consegui instalar o pacote do Whisper.", "Could not install the Whisper package.").into());
+                return false;
+            }
+        }
+        // 2) o áudio em WAV 16 kHz mono (o que o whisper.cpp lê)
+        let work = dir.join(".studio");
+        let _ = std::fs::create_dir_all(&work);
+        let wav = work.join("audio-16k.wav");
+        say(L!("Extraindo o áudio...", "Extracting the audio...").into());
+        self.with_job(job, |j| j.progress = 0.03);
+        let (s, w) = (src.to_string_lossy().to_string(), wav.to_string_lossy().to_string());
+        if !self.run(job, ff(comp, "ffmpeg", &["-v", "error", "-y", "-i", &s, "-vn", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", &w], dir), |_| None).await {
+            say(L!("Não consegui extrair o áudio (o arquivo tem som?).", "Could not extract the audio (does the file have sound?).").into());
+            return false;
+        }
+        // 3) whisper.cpp + modelo (compartilhados entre os projetos) e a transcrição, por um script no projeto
+        let wdir = app.root.join("whisper");
+        let _ = std::fs::create_dir_all(&wdir);
+        let script = work.join("legendas.mjs");
+        if std::fs::write(&script, CAPTIONS_SCRIPT).is_err() {
+            return false;
+        }
+        let node = crate::bins::which("node").unwrap_or_else(|| PathBuf::from("node"));
+        let srt = out_json.with_extension("srt");
+        let args = [script.to_string_lossy().to_string(), w, wdir.join("whisper.cpp").to_string_lossy().to_string(), model.to_string(), lang.to_string(), out_json.to_string_lossy().to_string(), srt.to_string_lossy().to_string(), WHISPER_VERSION.to_string()];
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        // etapas: instalar (até 10%), baixar o modelo (até 40%), transcrever (até 100%)
+        let ok = self
+            .run(job, command(&node, &args, dir), |l| {
+                let rest = l.strip_prefix("PROGRESS ")?;
+                let (stage, v) = rest.split_once(' ')?;
+                let v: f64 = v.trim().parse().ok()?;
+                Some(match stage {
+                    "model" => 0.1 + 0.3 * v.clamp(0.0, 1.0),
+                    "transcribe" => 0.4 + 0.6 * v.clamp(0.0, 1.0),
+                    _ => 0.05 + 0.05 * v.clamp(0.0, 1.0),
+                })
+            })
+            .await;
+        let _ = std::fs::remove_file(&wav);
+        ok && out_json.is_file()
+    }
+}
+
+/// Por que as legendas falharam, em uma linha.
+fn captions_err(log: &str, model: &str) -> String {
+    if let Some(l) = log.lines().rev().find(|l| l.starts_with("FAIL model")) {
+        let host = if l.contains("huggingface") { "huggingface.co" } else { "a internet" };
+        return LF!("Não consegui baixar o modelo de fala {} de {}: confira a internet (ou se a rede bloqueia o site) e tente de novo.", "Could not download the {} speech model from {}: check the internet connection (or whether the network blocks the site) and try again.", model, host);
+    }
+    if log.contains("remotion-ffmpeg-binaries") || log.contains("whisper-bin-x64") || log.contains("git clone") && log.contains("fatal") {
+        return L!("Não consegui baixar o Whisper: confira a internet e tente de novo.", "Could not download Whisper: check the internet connection and try again.").into();
+    }
+    if log.contains("Error while executing make") {
+        return L!("A compilação do Whisper falhou (precisa de make e de um compilador C++).", "Building Whisper failed (it needs make and a C++ compiler).").into();
+    }
+    short_err(log)
+}
+
+/// Roda dentro do projeto (o import acha o pacote no node_modules dele).
+/// Argumentos: wav, pasta do whisper.cpp, modelo, idioma (vazio = detectar), saída .json, saída .srt, versão.
+const CAPTIONS_SCRIPT: &str = r#"import { installWhisperCpp, downloadWhisperModel, transcribe, toCaptions } from '@remotion/install-whisper-cpp';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [wav, to, model, lang, outJson, outSrt, version] = process.argv.slice(2);
+console.log('PROGRESS install 0');
+try { await installWhisperCpp({ to, version, printOutput: true }); }
+catch (e) {
+  // instalação anterior pela metade (pasta sem o executável): apaga e instala de novo
+  if (!/exists but the executable/.test(String(e.message))) throw e;
+  fs.rmSync(to, { recursive: true, force: true });
+  await installWhisperCpp({ to, version, printOutput: true });
+}
+console.log('PROGRESS install 1');
+// modelo de um download interrompido: o pacote acharia que já está baixado
+const modelFile = path.join(to, `ggml-${model}.bin`);
+try { if (fs.statSync(modelFile).size < 10 * 1024 * 1024) fs.rmSync(modelFile); } catch { /* não existe */ }
+try {
+  await downloadWhisperModel({ model, folder: to, printOutput: false, onProgress: (d, t) => { if (t) console.log('PROGRESS model ' + (d / t).toFixed(3)); } });
+} catch (e) {
+  fs.rmSync(modelFile, { force: true });
+  console.log('FAIL model ' + (e.cause?.code || '') + ' ' + (e.cause?.hostname || '') + ' ' + e.message);
+  process.exit(3);
+}
+console.log('PROGRESS model 1');
+const out = await transcribe({ inputPath: wav, whisperPath: to, whisperCppVersion: version, model, tokenLevelTimestamps: true, language: lang || null, printOutput: false, splitOnWord: true, onProgress: (p) => console.log('PROGRESS transcribe ' + Number(p).toFixed(3)) });
+const { captions } = toCaptions({ whisperCppOutput: out });
+fs.mkdirSync(path.dirname(outJson), { recursive: true });
+fs.writeFileSync(outJson, JSON.stringify(captions, null, 1));
+// SRT: junta as palavras em linhas de até ~42 caracteres ou 3,5 s
+const ts = (ms) => { const h = Math.floor(ms / 3600000), m = Math.floor(ms / 60000) % 60, s = Math.floor(ms / 1000) % 60, r = Math.floor(ms % 1000); return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(r).padStart(3, '0')}`; };
+const lines = []; let cur = null;
+for (const c of captions) {
+  const text = c.text;
+  if (!cur || (cur.text + text).trim().length > 42 || c.endMs - cur.startMs > 3500) { if (cur) lines.push(cur); cur = { startMs: c.startMs, endMs: c.endMs, text: text.trimStart() }; }
+  else { cur.text += text; cur.endMs = c.endMs; }
+}
+if (cur) lines.push(cur);
+fs.writeFileSync(outSrt, lines.map((l, i) => `${i + 1}\n${ts(l.startMs)} --> ${ts(l.endMs)}\n${l.text.trim()}\n`).join('\n'));
+console.log('DONE ' + captions.length + ' ' + (out.result?.language || ''));
+"#;

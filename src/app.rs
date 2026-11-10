@@ -71,6 +71,9 @@ pub struct ApiProvider {
     /// Janela de contexto do modelo remoto, em tokens (0 = padrão de 131072): medidor e compactação usam.
     #[serde(default)]
     pub context: u32,
+    /// O modelo aceita imagens (quadros de vídeo, capturas de tela, fotos anexadas).
+    #[serde(default)]
+    pub vision: bool,
 
     #[serde(default)]
     pub params: HashMap<String, serde_json::Value>,

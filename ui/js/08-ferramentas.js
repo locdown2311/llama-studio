@@ -19,7 +19,13 @@ const TOOL_INFO = {
   explore: { sec: L('Subagentes'), title: L('Subagentes exploradores'), short: 'exploradores', desc: L('Investigação só de leitura com contexto próprio, vários em paralelo.') },
 };
 function enabledGroups() { return TOOL_GROUPS.filter((g) => S.settings.tools[g]); }
-function visionOn() { return S.settings.vision === 'on' || (S.settings.vision === 'auto' && S.vision); }
+function visionOn() {
+  if (S.settings.vision === 'on') return true;
+  if (S.settings.vision !== 'auto') return false;
+  // conversa numa API externa: vale a marca "Aceita imagens" do provedor
+  const ma = typeof mainApiForChat === 'function' ? mainApiForChat() : null;
+  return ma ? ma.vision === true : !!S.vision;
+}
 
 /** Executa uma ferramenta: as da interface aqui, as outras no servidor. */
 const FILE_MUT = new Set(['write_file', 'edit_file', 'create_directory']);
@@ -89,6 +95,8 @@ async function execTool(name, args, info, tctx, tmsg) {
     }
     if (name === 'execute_code') return await runCode(args?.code ?? '', tctx, tmsg);
     if (name === 'video_scenes') return await runVideoScenes(args || {}, tctx, tmsg);
+    if (name === 'video_look') return await runVideoLook(args || {}, tctx, tmsg);
+    if (name === 'video_captions') return await runVideoCaptions(args || {}, tctx, tmsg);
     if (name === 'recall_history') return recallHistory(args || {}, tctx.conv);
     if (name === 'update_todos') return await updateTodos(tctx.conv, args, tctx.signal);
     if (name === 'notebook') return await notebookTool(tctx.conv, args);

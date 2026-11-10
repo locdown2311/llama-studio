@@ -1656,3 +1656,22 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .vr-meta a { display: inline-flex; gap: 5px; align-items: center; margin-top: 3px; }
 .tc-title svg { width: 15px; height: 15px; vertical-align: -2px; margin-right: 6px; }
 @media (max-width: 860px) { .vid-layout { grid-template-columns: 1fr; } .vid-list { position: static; } .vid-render { margin-left: 0; } }
+/* mídia do projeto de vídeo */
+.vid-media { display: flex; flex-direction: column; gap: 10px; }
+.vid-media-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.vid-media-head .sec-title { margin: 0; }
+.vid-media-head small { flex: 1 1 260px; }
+.vid-media-opts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.select.sm { height: 30px; font-size: 12.5px; padding: 0 28px 0 8px; width: auto; }
+.vid-media-list { display: flex; flex-direction: column; gap: 6px; }
+.vid-media-item { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+.vm-thumb { width: 72px; height: 42px; border-radius: 6px; overflow: hidden; background: #111; flex: none; display: grid; place-items: center; }
+.vm-thumb img, .vm-thumb video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vm-thumb .vm-ico svg { width: 18px; height: 18px; color: #bbb; }
+.vm-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.vm-main b { font-weight: 550; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vid-media-item a.tag { text-decoration: none; }
+.vid-media-item .btn svg { width: 14px; height: 14px; }
+#vid-up { display: flex; flex-direction: column; gap: 4px; }
+#vid-up[hidden] { display: none; }
+@media (max-width: 640px) { .vid-media-item { flex-wrap: wrap; } .vm-main { flex-basis: calc(100% - 90px); } }

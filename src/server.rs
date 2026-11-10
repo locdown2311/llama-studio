@@ -135,6 +135,11 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/videos/delete", post(videos_delete))
         .route("/api/videos/skills", post(videos_skills))
         .route("/api/videos/check", post(videos_check))
+        .route("/api/videos/media", post(videos_media))
+        // vídeos grandes: sem o limite de 200 MB dos outros pedidos (o arquivo vai direto para o disco)
+        .route("/api/videos/upload", post(videos_upload).layer(DefaultBodyLimit::disable()))
+        .route("/api/videos/frames", post(videos_frames))
+        .route("/api/videos/captions", post(videos_captions))
         .route("/api/videos/wire", post(videos_wire))
         .route("/api/videos/file", get(videos_file))
         .route("/api/remote/warm", post(remote_warm))
@@ -255,8 +260,10 @@ async fn proxy(State(app): S, req: Request) -> Response {
         } else if path.ends_with("/models") {
             return (StatusCode::OK, Json(json!({"data": [{"id": current_model, "object": "model"}]}))).into_response();
         } else if path == "/props" {
-            let ctx = app.cfg().api_providers.iter().find(|p| p.id == provider_id).map(crate::remote::context_of).unwrap_or(crate::remote::DEFAULT_CONTEXT);
-            return (StatusCode::OK, Json(json!({"model_alias": current_model, "default_generation_settings": {"n_ctx": ctx}, "total_slots": 1, "ignored_by_remote": true}))).into_response();
+            let prov = app.cfg().api_providers.iter().find(|p| p.id == provider_id).cloned();
+            let ctx = prov.as_ref().map(crate::remote::context_of).unwrap_or(crate::remote::DEFAULT_CONTEXT);
+            let vision = prov.is_some_and(|p| p.vision);
+            return (StatusCode::OK, Json(json!({"model_alias": current_model, "default_generation_settings": {"n_ctx": ctx}, "total_slots": 1, "modalities": {"vision": vision}, "ignored_by_remote": true}))).into_response();
         } else {
             // Resposta vazia gentil para endpoints locais que não existem em APIs remotas (ex: /tokenize)
             return (StatusCode::OK, Json(json!({"status": "ok", "ignored_by_remote": true}))).into_response();
@@ -334,6 +341,26 @@ async fn videos_delete(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     app.videos.delete(&app, st(&v, "id")).map(|_| ok(json!({}))).map_err(bad)?
 }
+async fn videos_media(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    app.videos.media(&app, st(&v, "id")).await.map(ok).map_err(bad)?
+}
+async fn videos_upload(State(app): S, Query(qs): Q, req: Request) -> Res {
+    let (id, name) = (q(&qs, "id").to_string(), q(&qs, "name").to_string());
+    app.videos.upload(&app, &id, &name, req.into_body()).await.map(ok).map_err(bad)?
+}
+async fn videos_frames(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let times: Vec<f64> = v["times"].as_array().map(|a| a.iter().filter_map(Value::as_f64).take(36).collect()).unwrap_or_default();
+    let width = v["width"].as_u64().unwrap_or(480) as u32;
+    let count = v["count"].as_u64().unwrap_or(12) as usize;
+    let (from, to) = (v["from"].as_f64().unwrap_or(0.0), v["to"].as_f64().unwrap_or(0.0));
+    app.videos.frames(&app, st(&v, "id"), st(&v, "file"), &times, count, from, to, width).await.map(ok).map_err(bad)?
+}
+async fn videos_captions(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    app.videos.captions(app.clone(), st(&v, "id"), st(&v, "file"), st(&v, "model"), st(&v, "lang")).map(ok).map_err(bad)?
+}
 async fn videos_check(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     app.videos.check(&app, st(&v, "id")).await.map(ok).map_err(bad)?
@@ -348,38 +375,86 @@ async fn videos_skills(State(app): S) -> Res {
         Err(e) => Err(bad(e)),
     }
 }
-/// Vídeo renderizado, com Range (o player precisa para pular para um ponto).
+/// Arquivo do projeto de vídeo: os renderizados (out/) ou a mídia (in=public, até uma subpasta, ex.:
+/// captions/x.srt). Com Range, lido do disco só o trecho pedido (o player pula sem baixar o vídeo inteiro).
 async fn videos_file(State(app): S, Query(qs): Q, headers: axum::http::HeaderMap) -> Response {
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
     let (id, f) = (q(&qs, "id"), q(&qs, "f"));
-    if id.is_empty() || f.is_empty() || [id, f].iter().any(|x| x.contains(['/', '\\', ':']) || x.starts_with('.')) {
+    let base = if q(&qs, "in") == "public" { "public" } else { "out" };
+    let parts: Vec<&str> = f.split('/').collect();
+    let bad_part = |x: &str| x.is_empty() || x.contains(['\\', ':']) || x.starts_with('.');
+    if id.is_empty() || bad_part(id) || id.contains('/') || parts.len() > if base == "public" { 2 } else { 1 } || parts.iter().any(|p| bad_part(p)) {
         return StatusCode::BAD_REQUEST.into_response();
     }
-    let path = crate::videos::root(&app).join(id).join("out").join(f);
-    let Ok(data) = tokio::fs::read(&path).await else { return StatusCode::NOT_FOUND.into_response() };
+    let path = crate::videos::root(&app).join(id).join(base).join(f);
+    let Ok(mut file) = tokio::fs::File::open(&path).await else { return StatusCode::NOT_FOUND.into_response() };
+    let total = file.metadata().await.map(|m| m.len()).unwrap_or(0);
     let ct = match f.rsplit('.').next().unwrap_or("").to_lowercase().as_str() {
         "webm" => "video/webm",
         "gif" => "image/gif",
         "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
         "mov" => "video/quicktime",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "m4a" | "aac" => "audio/mp4",
+        "ogg" | "opus" => "audio/ogg",
+        "json" => "application/json",
+        "srt" => "text/plain; charset=utf-8",
         _ => "video/mp4",
     };
-    let total = data.len();
     let range = headers.get("range").and_then(|h| h.to_str().ok()).and_then(|r| r.strip_prefix("bytes=")).and_then(|r| {
         let (a, b) = r.split_once('-')?;
-        let a: usize = a.parse().ok()?;
-        let b: usize = if b.is_empty() { total.saturating_sub(1) } else { b.parse().ok()? };
+        let a: u64 = a.parse().ok()?;
+        // pedaço aberto ("bytes=N-"): no máximo 8 MB por resposta; o player pede o resto
+        let b: u64 = if b.is_empty() { (a + 8 * 1024 * 1024 - 1).min(total.saturating_sub(1)) } else { b.parse::<u64>().ok()?.min(total.saturating_sub(1)) };
         (a <= b && b < total).then_some((a, b))
     });
+    let download = q(&qs, "dl") == "1";
+    let disp = format!("attachment; filename=\"{}\"", f.rsplit('/').next().unwrap_or(f));
     match range {
-        Some((a, b)) => Response::builder()
-            .status(StatusCode::PARTIAL_CONTENT)
-            .header("Content-Type", ct)
-            .header("Accept-Ranges", "bytes")
-            .header("Content-Range", format!("bytes {a}-{b}/{total}"))
-            .body(axum::body::Body::from(data[a..=b].to_vec()))
-            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()),
-        None => Response::builder().header("Content-Type", ct).header("Accept-Ranges", "bytes").body(axum::body::Body::from(data)).unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()),
+        Some((a, b)) => {
+            let len = (b - a + 1) as usize;
+            let mut buf = vec![0u8; len];
+            if file.seek(std::io::SeekFrom::Start(a)).await.is_err() || file.read_exact(&mut buf).await.is_err() {
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+            Response::builder()
+                .status(StatusCode::PARTIAL_CONTENT)
+                .header("Content-Type", ct)
+                .header("Accept-Ranges", "bytes")
+                .header("Content-Range", format!("bytes {a}-{b}/{total}"))
+                .header("Content-Length", len)
+                .body(Body::from(buf))
+                .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+        }
+        None => {
+            let mut rb = Response::builder().header("Content-Type", ct).header("Accept-Ranges", "bytes").header("Content-Length", total);
+            if download {
+                rb = rb.header("Content-Disposition", disp);
+            }
+            rb.body(Body::from_stream(tokio_util_stream(file))).unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+        }
     }
+}
+
+/// O arquivo inteiro como stream, em blocos de 256 KB (sem carregar na memória).
+fn tokio_util_stream(file: tokio::fs::File) -> impl futures_util::Stream<Item = std::io::Result<Bytes>> {
+    use tokio::io::AsyncReadExt;
+    futures_util::stream::unfold(Some(file), |st| async move {
+        let mut file = st?;
+        let mut buf = vec![0u8; 256 * 1024];
+        match file.read(&mut buf).await {
+            Ok(0) => None,
+            Ok(n) => {
+                buf.truncate(n);
+                Some((Ok(Bytes::from(buf)), Some(file)))
+            }
+            Err(e) => Some((Err(e), None)),
+        }
+    })
 }
 
 async fn remote_warm(State(app): S, Query(qs): Q) -> Res {
@@ -467,6 +542,9 @@ async fn set_config(State(app): S, b: Bytes) -> Res {
                     if let Some(x) = p.get(k).and_then(Value::as_str) {
                         *f = x.trim().to_string();
                     }
+                }
+                if let Some(x) = p.get("vision").and_then(Value::as_bool) {
+                    e.vision = x;
                 }
                 if let Some(x) = p.get("context") {
                     e.context = x.as_u64().map(|n| n.min(4_000_000) as u32).unwrap_or(0);

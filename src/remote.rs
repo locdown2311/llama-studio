@@ -71,6 +71,7 @@ pub fn public(app: &App) -> Value {
         "retries": p.retries,
         "context": context_of(p),
         "contextSet": p.context >= 1024,
+        "vision": p.vision,
         "nim": is_nim(p),
 
         "params": p.params,
