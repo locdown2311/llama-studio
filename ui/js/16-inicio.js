@@ -77,6 +77,7 @@ async function init() {
   ed.addEventListener('drop', (e) => e.preventDefault());
 
   $('#send').addEventListener('click', send);
+  initDictation();
   $('#plus-btn').addEventListener('click', () => togglePop('#pop-plus', fillPlusPop));
   $('#pick-model').addEventListener('click', () => togglePop('#pop-model', fillModelPop));
   $('#pick-skills').addEventListener('click', () => togglePop('#pop-skills', fillSkillsPop));

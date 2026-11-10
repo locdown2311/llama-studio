@@ -40,6 +40,7 @@ function renderSettings() {
     group(L('Economia de tokens'),
       field(L('Raciocínio nas conversas novas'), (() => { const x = h('select.select', null, THINK_OPTS.map(([v, l]) => h('option', { value: v }, l))); x.value = thinkDefault(); x.addEventListener('change', () => { put({ thinkDefault: x.value }); updatePickers(); }); return x; })(), L('Econômico: o modelo pensa no começo de cada pedido e quando algo falha; nos passos seguintes (ler, editar, rodar) age direto. Cada conversa pode mudar pelo botão de raciocínio.')),
       sw(L('Respostas enxutas'), L('Pede ao modelo para ir direto ao ponto, sem repetir o pedido nem resumir no fim o que já está na conversa.'), st.concise !== false, (v) => put({ concise: v }))),
+    sw(L('Comparar respostas de vez em quando'), L('Com outra API pronta, 1 em cada ~15 respostas sem ferramentas também é gerada por ela e você escolhe a melhor (no máximo uma vez a cada 10 minutos). O placar fica no menu da conversa.'), st.abAuto !== false, (v) => put({ abAuto: v })),
     field(L('Enviar imagens ao modelo'), seg([['auto', L('Automático ({0})', S.vision ? L('tem visão') : L('sem visão'))], ['on', L('Sempre')], ['off', L('Nunca')]], st.vision, (v) => put({ vision: v })), L('Capturas de tela e imagens coladas na mensagem.')));
 
   section('tools', L('Ferramentas'), 'hammer', L('O que o modelo pode usar. Também dá para ligar e desligar pela barra do chat.'),
@@ -88,6 +89,10 @@ function renderSettings() {
 
   section('api', L('API externa'), 'globe', L('Provedores de IA na internet para tirar trabalho do modelo local, cada função no que você escolher. Auditor e exploradores pela API não ocupam slot do llama-server, então a conversa nunca perde o cache por causa deles. Se a API falhar (sem internet, limite do plano grátis), volta para o modelo local.'), apiSection(put, field, saved));
 
+  const bk = h('div.backup-box', null, h('div.muted', null, L('Carregando...')));
+  drawBackup(bk);
+  section('backup', L('Backup'), 'archive', L('Uma cópia das conversas, personalidades, projetos, prompts, configurações, habilidades e conectores numa pasta. Use a pasta do Google Drive para computador e ela vai para a nuvem sozinha.'), bk);
+
   section('share', L('Compartilhar'), 'share', L('Exporte suas configurações num arquivo para outra pessoa (ou outro PC) importar. Tokens e chaves dos conectores nunca saem: quem importa preenche os dele.'),
     h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
       h('button.btn', { type: 'button', onclick: exportDialog }, ic('download'), L('Exportar configurações')),
@@ -128,7 +133,7 @@ function renderSettings() {
 /* As configurações são um painel só: as subpáginas de ajuste e as páginas de recursos (servidor,
    conectores, habilidades...) ficam no mesmo menu. Os itens da barra lateral são atalhos para elas. */
 const SET_EMBED = [['server', L('Servidor'), 'server'], ['mcp', L('Conectores'), 'plug'], ['skills', L('Habilidades'), 'sparkles'], ['personas', L('Personalidades'), 'user'], ['tools', L('Utilitários'), 'wrench']];
-const SET_GROUPS = [[L('Geral'), ['set:model', 'set:tools', 'set:auto', 'set:context', 'set:api']], [L('Recursos'), ['v:server', 'v:mcp', 'v:skills', 'v:personas', 'v:tools']], [L('Segurança'), ['set:safety', 'set:auditor']], [L('Sistema'), ['set:look', 'set:window', 'set:share', 'set:updates', 'set:advanced', 'set:tests']]];
+const SET_GROUPS = [[L('Geral'), ['set:model', 'set:tools', 'set:auto', 'set:context', 'set:api']], [L('Recursos'), ['v:server', 'v:mcp', 'v:skills', 'v:personas', 'v:tools']], [L('Segurança'), ['set:safety', 'set:auditor']], [L('Sistema'), ['set:look', 'set:window', 'set:backup', 'set:share', 'set:updates', 'set:advanced', 'set:tests']]];
 let SET_PAGES = [];
 let setPage = null;
 function openSettings(page) { setPage = page; setView('settings'); }
@@ -436,4 +441,49 @@ function toastHistory() {
   };
   draw();
   return box;
+}
+/* ------------------------------------------------------------ backup */
+async function drawBackup(box) {
+  let r;
+  try { r = await api('/api/backup'); } catch (e) { box.innerHTML = ''; box.append(h('div.err', null, e.message)); return; }
+  const s = r.settings;
+  box.innerHTML = '';
+  const set = async (patch) => { try { r = await api('/api/backup/settings', patch); drawBackup(box); } catch (e) { toast(e.message, 'err'); } };
+  const folder = h('input.input.mono', { value: s.folder, placeholder: r.detected[0] || L('Escolha uma pasta') });
+  folder.addEventListener('change', () => set({ folder: folder.value.trim() }));
+  const pick = h('button.btn', { type: 'button', onclick: async () => { const p = await pickPath({ title: L('Pasta do backup'), mode: 'dir', start: s.folder || S.info.home }); if (p) set({ folder: p }); } }, L('Procurar'));
+  const drive = r.detected.length && r.detected[0] !== s.folder
+    ? h('button.btn.sm', { type: 'button', onclick: () => set({ folder: r.detected[0] }) }, ic('cloud'), L('Usar o Google Drive ({0})', r.detected[0])) : null;
+  const every = h('select.select', null, [[0, L('Só quando eu pedir')], [6, L('A cada 6 horas')], [12, L('A cada 12 horas')], [24, L('Uma vez por dia')], [168, L('Uma vez por semana')]].map(([v, l]) => h('option', { value: v }, l)));
+  every.value = String(s.everyHours);
+  every.addEventListener('change', () => set({ everyHours: Number(every.value) }));
+  const keep = h('input.input', { value: s.keep, inputmode: 'numeric', style: { maxWidth: '90px' } });
+  keep.addEventListener('change', () => set({ keep: Number(keep.value) || 10 }));
+  const keys = h('input', { type: 'checkbox', checked: s.includeKeys });
+  keys.addEventListener('change', () => set({ includeKeys: keys.checked }));
+  const now = h('button.btn.primary', { type: 'button', disabled: !s.folder, onclick: async () => {
+    now.disabled = true; now.textContent = L('Fazendo o backup...');
+    try { const x = await api('/api/backup/now', {}); toast(L('Backup feito: {0} ({1} arquivos)', x.file, x.files)); } catch (e) { toast(e.message, 'err'); }
+    drawBackup(box);
+  } }, ic('archive'), L('Fazer backup agora'));
+  const last = s.last ? new Date(s.last * 1000).toLocaleString(LOCALE, { dateStyle: 'short', timeStyle: 'short' }) : L('nunca');
+  box.append(
+    h('div.field', null, h('label', null, L('Pasta')), h('div', { style: { display: 'flex', gap: '8px' } }, folder, pick),
+      h('small', null, L('Se o Google Drive para computador está instalado, use uma pasta dentro de "Meu Drive" (ex.: G:\\Meu Drive\\Llama Studio).')), drive),
+    h('div.row', null, h('div.field', null, h('label', null, L('Automático')), every), h('div.field', null, h('label', null, L('Manter os últimos')), keep)),
+    h('label.tcard', null, h('span.tc-main', null, h('span.tc-title', null, L('Incluir as chaves das APIs e os segredos dos conectores')), h('span.tc-desc', null, L('Desligado, o backup sai sem chaves (mais seguro na nuvem); ao restaurar, as chaves atuais continuam.'))), h('span.switch', null, keys, h('span'))),
+    h('div.backup-now', null, now, h('small.muted', null, L('Último backup: {0}', last)), s.lastError ? h('small.err', null, s.lastError) : null));
+  if (r.backups.length) {
+    box.append(h('div.set-group-title', null, L('Backups na pasta')), h('div.backup-list', null, r.backups.map((b) => h('div.backup-row', null,
+      ic('archive'), h('div.br-main', null, h('b', null, b.file), h('small.muted', null, `${fmtSize(b.size)} · ${new Date(b.mtime * 1000).toLocaleString(LOCALE, { dateStyle: 'short', timeStyle: 'short' })}`)),
+      h('button.btn.sm', { type: 'button', onclick: async () => {
+        if (!(await confirmBox(L('Restaurar {0}? As conversas, personalidades, prompts e configurações voltam para como estavam nesse backup. Antes, o studio guarda uma cópia do estado atual em dados\\backups.', b.file), L('Restaurar'), true))) return;
+        try {
+          await uiFlush();
+          const x = await api('/api/backup/restore', { file: b.file });
+          toast(L('Restaurado ({0} arquivos). Recarregando...', x.restored));
+          setTimeout(() => location.reload(), 900);
+        } catch (e) { toast(e.message, 'err'); }
+      } }, L('Restaurar'))))));
+  }
 }

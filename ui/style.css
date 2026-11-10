@@ -1719,3 +1719,48 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .cap-time { font-size: 12px; color: var(--muted); padding-top: 8px; }
 .cap-text { resize: vertical; min-height: 34px; font-size: 13.5px; line-height: 1.4; }
 .cap-text.changed { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+
+/* prompts salvos */
+.mention .kind.prompt { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); font-family: var(--mono, monospace); }
+.prompt-list { display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto; }
+.prompt-row { display: flex; gap: 8px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.prompt-row .pr-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.prompt-row .pr-main code { font-size: 12px; color: var(--accent); }
+.prompt-row .pr-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ditado por voz */
+.mic-btn { width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--line); background: transparent; color: var(--text-2); display: grid; place-items: center; cursor: pointer; flex-shrink: 0; }
+.mic-btn svg { width: 17px; height: 17px; }
+.mic-btn:hover { background: var(--hover, color-mix(in srgb, var(--text) 6%, transparent)); color: var(--text); }
+.mic-btn.rec { background: #d14343; border-color: #d14343; color: #fff; animation: micpulse 1.2s ease-in-out infinite; }
+.mic-btn.busy { opacity: .6; cursor: progress; }
+@keyframes micpulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(209, 67, 67, .45); } 50% { box-shadow: 0 0 0 6px rgba(209, 67, 67, 0); } }
+
+/* comparar respostas (A/B) */
+.ab-panel { margin: 10px 0 4px; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; background: color-mix(in srgb, var(--accent) 3%, transparent); }
+.ab-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ab-head svg { width: 16px; height: 16px; color: var(--accent); }
+.ab-head small { margin-left: auto; }
+.ab-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.ab-col { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; max-height: 420px; overflow-y: auto; background: var(--card); font-size: 14px; }
+.ab-tag { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; font-weight: 700; font-size: 12px; background: var(--line); margin-bottom: 6px; }
+.ab-tag.b { background: var(--accent); color: #fff; }
+.ab-b { max-height: 320px; overflow-y: auto; font-size: 14px; }
+.ab-acts { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ab-acts .spacer { flex: 1; }
+.ab-done { display: flex; align-items: center; gap: 8px; margin: 6px 0 2px; }
+.ab-done svg { width: 14px; height: 14px; color: var(--muted); }
+.ab-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.ab-table th, .ab-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.ab-table td:not(:first-child), .ab-table th:not(:first-child) { text-align: right; width: 70px; }
+.ab-auto { display: flex; gap: 8px; align-items: center; margin-top: 14px; font-size: 14px; }
+@media (max-width: 760px) { .ab-cols { grid-template-columns: 1fr; } }
+
+/* backup */
+.backup-box { display: flex; flex-direction: column; gap: 16px; }
+.backup-now { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.backup-list { display: flex; flex-direction: column; gap: 6px; }
+.backup-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.backup-row > svg { width: 16px; height: 16px; color: var(--muted); }
+.backup-row .br-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.backup-row .br-main b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

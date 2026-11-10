@@ -118,7 +118,15 @@ O programa baixa e mantém na pasta dele, sem mexer no sistema: **RTK**, **ripgr
 - **Ponytail** ([DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail), MIT): a menor mudança que resolve, reaproveitando o que já existe e dizendo no fim o que pulou. Níveis Leve, Completo e Ultra; cerca de 700 tokens. Traz `ponytail-review`, `ponytail-audit` e `ponytail-debt`.
 - **Caveman** ([JuliusBrussee/caveman](https://github.com/JuliusBrussee/caveman), Apache-2.0): respostas telegráficas, com a resposta primeiro e código, caminhos e erros exatos. Gerar texto é a parte lenta de um modelo local. Níveis Normal e Ultra; cerca de 900 e 500 tokens. Ligado, substitui a instrução de respostas enxutas. Traz `caveman-review` e `caveman-commit`.
 
-### Vídeos (opcional)
+### Conversas: prompts, ramos, ditado e comparação
+
+- **Prompts salvos:** digite `/` no começo da mensagem para escolher um prompt guardado. Campos `{{assim}}` ou `{{duração=45 a 60}}` viram um formulário. Salve qualquer mensagem enviada com "Salvar como prompt".
+- **Ramificar:** o botão "Ramificar" de uma resposta (ou o menu da conversa) abre uma conversa nova com tudo até ali; a original não muda e o ramo mostra de onde veio.
+- **Ditado por voz:** o microfone ao lado do enviar grava e o Whisper transcreve no próprio PC. Na primeira vez (Windows) baixa o programa e o modelo base (~150 MB); usa a mesma instalação das legendas de vídeo.
+- **Comparar respostas (A/B):** "Comparar" gera a mesma resposta com outra API (só texto, sem ferramentas) e mostra as duas lado a lado; a escolhida fica. De vez em quando (1 em ~15 respostas sem ferramentas, no máximo uma a cada 10 min) o studio pergunta sozinho; dá para desligar em Configurações › Modelo. O placar por modelo fica no menu da conversa.
+- **Backup:** Configurações › Backup grava um .zip numa pasta (a do Google Drive para computador sobe sozinha para a nuvem), à mão ou de tempos em tempos, mantendo os últimos N. Sem as chaves das APIs e os segredos dos conectores, a não ser que você peça. Restaurar guarda antes uma cópia do estado atual em `dados\backups`.
+
+## Vídeos (opcional)
 Ligue em Utilitários › Apps opcionais. Aparece **Vídeos** na barra lateral, com projetos do [Remotion](https://github.com/remotion-dev/remotion): vídeos escritos em React pelo modelo.
 - **Projetos:** criar (`create-video`, modelo em branco), listar, apagar. Na criação o studio já baixa o navegador que o Remotion usa (~100 MB, uma vez).
 - **Prévia ao vivo:** o Remotion Studio do projeto embutido na página; atualiza sozinho quando o modelo edita os arquivos.

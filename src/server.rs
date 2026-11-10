@@ -142,6 +142,13 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/videos/media", post(videos_media))
         // vídeos grandes: sem o limite de 200 MB dos outros pedidos (o arquivo vai direto para o disco)
         .route("/api/videos/upload", post(videos_upload).layer(DefaultBodyLimit::disable()))
+        .route("/api/dictate", post(dictate).layer(DefaultBodyLimit::max(64 * 1024 * 1024)))
+        .route("/api/dictate/status", get(dictate_status))
+        .route("/api/backup", get(backup_status))
+        .route("/api/backup/settings", post(backup_settings))
+        .route("/api/backup/now", post(backup_now))
+        .route("/api/backup/restore", post(backup_restore))
+        .route("/api/dictate/setup", post(dictate_setup))
         .route("/api/videos/frames", post(videos_frames))
         .route("/api/videos/captions", post(videos_captions))
         .route("/api/videos/peaks", post(videos_peaks))
@@ -377,6 +384,36 @@ async fn videos_captions_save(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     let edits: Vec<(f64, f64, String)> = v["edits"].as_array().map(|a| a.iter().filter_map(|e| Some((e["from"].as_f64()?, e["to"].as_f64()?, e["text"].as_str()?.to_string()))).collect()).unwrap_or_default();
     app.videos.captions_save(&app, st(&v, "id"), st(&v, "file"), &edits).map(ok).map_err(bad)?
+}
+async fn dictate(State(app): S, Query(q): Query<HashMap<String, String>>, b: Bytes) -> Res {
+    let g = |k: &str| q.get(k).map(String::as_str).unwrap_or("");
+    crate::dictate::transcribe(&app, &b, g("lang"), g("model")).await.map(ok).map_err(bad)?
+}
+async fn backup_status(State(app): S) -> Res {
+    ok(crate::backup::status(&app))
+}
+async fn backup_settings(State(app): S, b: Bytes) -> Res {
+    ok(crate::backup::set(&app, &body(&b)))
+}
+async fn backup_now(State(app): S) -> Res {
+    let a = app.clone();
+    let r = tokio::task::spawn_blocking(move || crate::backup::run(&a)).await.map_err(|e| bad(e.to_string()))?;
+    r.map(|mut v| {
+        v["status"] = crate::backup::status(&app);
+        ok(v)
+    })
+    .map_err(bad)?
+}
+async fn backup_restore(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    crate::backup::restore(&app, st(&v, "file")).await.map(ok).map_err(bad)?
+}
+async fn dictate_status(State(app): S) -> Res {
+    ok(crate::dictate::status(&app))
+}
+async fn dictate_setup(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    crate::dictate::setup(&app, st(&v, "model")).await.map(ok).map_err(bad)?
 }
 async fn videos_peaks(State(app): S, b: Bytes) -> Res {
     let v = body(&b);

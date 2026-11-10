@@ -380,6 +380,7 @@ async function runAgent(conv) {
       ctx.text,
       catalogSys,
     ].filter(Boolean).join('\n\n');
+    conv._sys = system; // a comparação A/B usa o mesmo prompt de sistema
     conv.ctxParts = ctxBreakdown(system, ctx.text, catalogSys, tools, meta);
     const g = stepGuard(Math.max(1, Number(S.settings.maxSteps) || 40));
     const lastAsk = [...conv.messages].reverse().find((m) => m.role === 'user' && !m.hidden);
@@ -574,6 +575,7 @@ async function runAgent(conv) {
     else if (!conv.queue?.length && !conv.messages.some((m) => m.role === 'error' && m === conv.messages[conv.messages.length - 1])) toast(L('"{0}" terminou de responder', conv.title));
     const last2 = conv.messages[conv.messages.length - 1];
     nextInQueue(conv, ac.signal.aborted || last2?.role === 'error');
+    if (!ac.signal.aborted && last2?.role === 'assistant' && !conv.queue?.length) maybeAskAB(conv);
   }
 }
 

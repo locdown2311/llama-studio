@@ -17,6 +17,8 @@ mod computer;
 mod shell;
 #[cfg(feature = "desktop")]
 mod desktop;
+mod dictate;
+mod backup;
 mod llama;
 mod locate;
 mod engines;
@@ -168,6 +170,7 @@ fn main() {
                 let l = tokio::net::TcpListener::from_std(listener).expect("listener");
                 tokio::spawn(llama::Llama::monitor(app2.clone()));
                 tokio::spawn(arrumar::watch(app2.clone()));
+                tokio::spawn(backup::scheduler(app2.clone()));
                 let a = app2.clone();
                 tokio::spawn(async move { a.mcp.sync(&a.http, &a.mcp_file()).await });
                 if start_server || app2.llama.cfg().auto_start {

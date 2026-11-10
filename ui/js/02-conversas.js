@@ -1486,6 +1486,20 @@ function renderChatTitle() {
       )
     );
 
+  // ramo: de onde veio (clicar abre a original, se ainda existir)
+  if (c?.forkOf) {
+    const orig = S.convs.find((x) => x.id === c.forkOf.id);
+    sub.append(
+      chip(
+        ".hc-fork",
+        orig ? L("Abrir a conversa original") : L("A conversa original foi apagada"),
+        () => orig && selectConv(orig.id),
+        ic("branch"),
+        h("span.t", null, L("ramo de {0}", orig ? orig.title : c.forkOf.title || "?"))
+      )
+    );
+  }
+
   // personalidade, modelo, habilidades e conectores ficam só na barra de baixo
 
   if (c?.compactions)
@@ -1546,6 +1560,30 @@ function fillConvMenu() {
       },
       ic("download"),
       L("Exportar como Markdown")
+    ),
+
+    h(
+      "button.menu-item",
+      {
+        onclick: () => {
+          closePops();
+          forkConv(c, c.messages.length - 1);
+        },
+      },
+      ic("branch"),
+      L("Ramificar conversa")
+    ),
+
+    h(
+      "button.menu-item",
+      {
+        onclick: () => {
+          closePops();
+          showAbStats();
+        },
+      },
+      ic("scale"),
+      L("Placar das comparações")
     ),
 
     h(
@@ -2414,6 +2452,16 @@ function renderUser(m, idx, conv) {
         L("Editar")
       ),
 
+      h(
+        "button.chip",
+        {
+          title: L("Guarda este texto para usar de novo com / no começo da mensagem"),
+          onclick: () => editPrompt({ id: "", title: "", text: m.content || "" }),
+        },
+        ic("bookmark"),
+        L("Salvar como prompt")
+      ),
+
       conv.messages
         .slice(idx + 1)
         .some((x) => x.role === "tool" && x.cps?.length && !x.undone)
@@ -2841,6 +2889,8 @@ function renderAI(b, conv, isLast) {
 
     card,
 
+    !live ? abPanel(conv, b) : null,
+
     !live
       ? h(
           "div.chips",
@@ -2857,6 +2907,33 @@ function renderAI(b, conv, isLast) {
             ic("copy"),
             L("Copiar")
           ),
+
+          h(
+            "button.chip",
+            {
+              title: L(
+                "Abre uma conversa nova com tudo até aqui, para seguir por outro caminho sem perder esta"
+              ),
+              onclick: () =>
+                forkConv(conv, conv.messages.indexOf(b.msgs[b.msgs.length - 1])),
+            },
+            ic("branch"),
+            L("Ramificar")
+          ),
+
+          !last?.ab && finalText.trim()
+            ? h(
+                "button.chip",
+                {
+                  title: L(
+                    "Gera esta resposta com outra API e mostra as duas lado a lado"
+                  ),
+                  onclick: () => abCompare(conv, b, false),
+                },
+                ic("scale"),
+                L("Comparar")
+              )
+            : null,
 
           isLast && planPending(conv, b)
             ? h(
@@ -3746,4 +3823,30 @@ function renderTool(tc, res, live) {
   el.append(h("div.tool-card", null, head, bodyEl));
 
   return el;
+}
+
+/* ------------------------------------------------------------ ramificar (fork) */
+// Uma conversa nova com as mensagens até `idx` (inclusive) e as mesmas escolhas (projeto, personalidade,
+// modelo, ferramentas). A original fica como estava; o ramo lembra de onde veio.
+function forkConv(conv, idx) {
+  if (!conv) return;
+  const upto = Math.max(-1, Math.min(idx, conv.messages.length - 1));
+  const strip = (m) => Object.fromEntries(Object.entries(m).filter(([k]) => !k.startsWith('_')));
+  const copy = JSON.parse(JSON.stringify(conv.messages.slice(0, upto + 1).map(strip)));
+  const base = Object.fromEntries(Object.entries(conv).filter(([k]) => !k.startsWith('_') && k !== 'messages'));
+  const n = S.convs.filter((c) => c.forkOf?.id === conv.id).length + 1;
+  const c = {
+    ...JSON.parse(JSON.stringify(base)),
+    id: uid(),
+    title: L('{0} (ramo {1})', String(conv.title || L('Conversa')).replace(/ \((ramo|branch) \d+\)$/, ''), n),
+    messages: copy,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    forkOf: { id: conv.id, at: upto, title: conv.title },
+  };
+  delete c.pinned;
+  S.convs.unshift(c);
+  saveConvs();
+  selectConv(c.id);
+  toast(L('Ramo criado: siga por outro caminho. A conversa original não muda.'));
 }

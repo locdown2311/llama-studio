@@ -131,6 +131,13 @@ function checkMention() {
   const node = s.anchorNode;
   if (node?.nodeType !== 3 || !editor().contains(node)) return closeMention();
   const before = node.textContent.slice(0, s.anchorOffset);
+  // "/" no começo da mensagem: prompts salvos
+  const sm = before.match(/^\s*\/([^\s/]{0,40})$/);
+  if (sm && editor().textContent.trim() === before.trim()) {
+    mention = { items: promptItems(sm[1]), index: 0, node, start: s.anchorOffset - sm[1].length - 1, end: s.anchorOffset, slash: true };
+    drawMention();
+    return;
+  }
   const m = before.match(/(?:^|[\s ])@([^\s@ ]{0,40})$/);
   if (!m) return closeMention();
   const items = mentionItems(m[1]);
@@ -142,12 +149,17 @@ function drawMention() {
   const pop = $('#pop-mention');
   pop.innerHTML = '';
   pop.classList.add('open');
-  if (!mention.items.length) { pop.append(h('div.pop-empty', null, L('Nada encontrado. Crie habilidades e conectores no menu à esquerda.'))); return; }
-  pop.append(h('div.pop-head', null, h('span', null, L('Inserir na mensagem'))));
+  if (mention.slash) {
+    pop.append(h('div.pop-head', null, h('span', null, L('Prompts salvos')), h('button.btn.sm', { onmousedown: (e) => { e.preventDefault(); closeMention(); managePrompts(); } }, L('Gerenciar'))));
+    if (!mention.items.length) { pop.append(h('div.pop-empty', null, L('Nenhum prompt com esse nome. Salve um pela mensagem enviada (Salvar como prompt) ou em Gerenciar.'))); return; }
+  } else {
+    if (!mention.items.length) { pop.append(h('div.pop-empty', null, L('Nada encontrado. Crie habilidades e conectores no menu à esquerda.'))); return; }
+    pop.append(h('div.pop-head', null, h('span', null, L('Inserir na mensagem'))));
+  }
   mention.items.forEach((it, i) => {
-    const kindLbl = { skill: L('habilidade'), mcp: L('conector'), file: L('arquivo') }[it.kind];
+    const kindLbl = { skill: L('habilidade'), mcp: L('conector'), file: L('arquivo'), prompt: '/' + it.id }[it.kind];
     pop.append(h('button.menu-item' + (i === mention.index ? '.hl' : ''), { onmousedown: (e) => { e.preventDefault(); chooseMention(i); } },
-      ic(it.kind === 'skill' ? 'sparkles' : it.kind === 'mcp' ? 'plug' : it.dir ? 'folder' : ftype(it.name).icon),
+      ic(it.kind === 'prompt' ? 'bookmark' : it.kind === 'skill' ? 'sparkles' : it.kind === 'mcp' ? 'plug' : it.dir ? 'folder' : ftype(it.name).icon),
       h('span.mi-main', null, h('b', null, it.name), it.desc ? h('span.mi-sub', null, it.desc) : null),
       h('span.kind.' + it.kind, null, kindLbl)));
   });
@@ -164,6 +176,7 @@ function chooseMention(i) {
   r.deleteContents();
   savedRange = r;
   closeMention();
+  if (it.kind === 'prompt') { usePrompt(it.prompt); return; }
   if (it.kind === 'file') {
     const ref = { id: uid(), name: it.name, path: it.path, dir: it.dir, status: 'ok' };
     S.refs.push(ref);
@@ -437,6 +450,7 @@ function fillPlusPop() {
       if (p) { const st = await api('/api/stat', { path: p, ws: S.ws.path }); addRef({ name: basename(p), path: st.path, dir: st.dir }); }
     } }, ic('pin'), h('span.mi-main', null, L('Arquivo ou pasta do computador'), h('span.mi-sub', null, L('Entra o caminho completo, sem enviar o arquivo')))),
     h('button.menu-item', { onclick: () => { closePops(); focusEditor(); document.execCommand('insertText', false, '@'); checkMention(); } }, ic('sparkles'), h('span.mi-main', null, L('Habilidade ou conector'), h('span.mi-sub', null, L('O mesmo que digitar @')))),
+    h('button.menu-item', { onclick: () => { closePops(); if (editor().textContent.trim()) { managePrompts(); return; } focusEditor(); document.execCommand('insertText', false, '/'); checkMention(); } }, ic('bookmark'), h('span.mi-main', null, L('Prompt salvo'), h('span.mi-sub', null, L('O mesmo que digitar / no começo da mensagem')))),
     h('div.menu-sep'),
     h('button.menu-item', { onclick: () => { closePops(); setView('skills'); } }, ic('download'), L('Importar habilidades')),
     h('button.menu-item', { onclick: () => { closePops(); setView('mcp'); } }, ic('plus'), L('Adicionar conector MCP')));
@@ -668,4 +682,221 @@ function setupDrop() {
   });
   window.addEventListener('dragover', (e) => e.preventDefault());
   window.addEventListener('drop', (e) => e.preventDefault());
+}
+
+/* ------------------------------------------------------------ prompts salvos (/atalho) */
+// Textos prontos com campos {{nome}} ou {{nome=padrão}}: ao usar, um formulário pede os campos e o texto
+// entra na mensagem. Ficam no armazenamento da interface (que tem cópia no servidor).
+const PROMPT_VAR = /\{\{\s*([^{}=]+?)\s*(?:=([^{}]*))?\}\}/g;
+
+function seedPrompts() {
+  return [
+    { id: 'corte-live', title: L('Corte de live'), text: L('Faça um corte de live de {{arquivo}} para {{destino=Shorts, Reels e TikTok}}: o melhor momento, contado do começo ao fim, entre {{duração=40 e 120}} segundos, vertical 9:16. Siga a skill editor-de-video (receita de corte de live). Me mostre o roteiro e já monte.') },
+    { id: 'melhores-momentos', title: L('Melhores momentos de gameplay'), text: L('Short vertical 9:16 de {{duração=45 a 60}} segundos com os melhores momentos de {{tipo=ação}} do meu gameplay de {{jogo}} em {{arquivo}}. Siga a skill editor-de-video. Gancho forte nos 2 primeiros segundos, sem cutSilences e "PARTE 2?" no final.') },
+    { id: 'miniatura', title: L('Miniatura'), text: L('Faça a miniatura do corte {{corte}}: o quadro mais expressivo, texto de até 4 palavras e formato {{formato=9:16}}.') },
+  ];
+}
+let PROMPTS = (() => { const v = store.get('prompts', null); if (Array.isArray(v)) return v; const s = seedPrompts(); store.set('prompts', s); return s; })();
+function savePrompts() { store.set('prompts', PROMPTS); }
+const promptSlug = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
+
+function promptItems(q) {
+  const f = promptSlug(q);
+  return PROMPTS.filter((p) => !f || p.id.includes(f) || promptSlug(p.title).includes(f))
+    .slice(0, 12).map((p) => ({ kind: 'prompt', id: p.id, name: p.title, desc: p.text.replace(/\s+/g, ' ').slice(0, 90), prompt: p }));
+}
+
+function promptVars(text) {
+  const out = [];
+  for (const m of String(text).matchAll(PROMPT_VAR)) if (!out.some((v) => v.name === m[1].trim())) out.push({ name: m[1].trim(), def: (m[2] || '').trim() });
+  return out;
+}
+
+async function usePrompt(p) {
+  const vars = promptVars(p.text);
+  let text = p.text;
+  if (vars.length) {
+    const vals = await new Promise((resolve) => {
+      let done = false;
+      const inputs = vars.map((v) => h('input.input', { value: v.def, placeholder: v.def || v.name }));
+      const ok = () => { done = true; m.close(); resolve(inputs.map((i) => i.value.trim())); };
+      inputs.forEach((i, k) => i.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); if (k + 1 < inputs.length) inputs[k + 1].focus(); else ok(); } }));
+      const m = modal({
+        title: p.title,
+        body: h('div.form', null, vars.map((v, k) => h('div.field', null, h('label', null, v.name), inputs[k]))),
+        foot: [h('button.btn', { onclick: () => m.close() }, L('Cancelar')), h('button.btn.primary', { onclick: ok }, L('Usar'))],
+        onClose: () => { if (!done) resolve(null); },
+      });
+    });
+    if (!vals) return;
+    const by = Object.fromEntries(vars.map((v, k) => [v.name, vals[k] || v.def]));
+    text = text.replace(PROMPT_VAR, (_, n) => by[n.trim()] ?? '');
+  }
+  if (!editor().textContent.trim()) setEditorText(text);
+  else { focusEditor(true); document.execCommand('insertText', false, text); }
+  updateSendBtn();
+}
+
+function editPrompt(p, onDone) {
+  const isNew = !p || !p.id;
+  p = p ? { ...p } : { id: '', title: '', text: '' };
+  const title = h('input.input', { value: p.title, placeholder: L('Ex.: Corte de live') });
+  const slug = h('input.input.mono', { value: p.id, placeholder: 'corte-live' });
+  const text = h('textarea.input', { rows: 12, value: p.text, placeholder: L('O texto do prompt. Campos a preencher: {{arquivo}} ou {{duração=45 a 60}} (com valor padrão).') });
+  title.addEventListener('input', () => { if (!slug.dataset.touched && isNew) slug.value = promptSlug(title.value); });
+  slug.addEventListener('input', () => { slug.dataset.touched = '1'; });
+  const m = modal({
+    title: isNew ? L('Novo prompt') : L('Editar prompt'), wide: true,
+    body: h('div.form', null,
+      h('div.field', null, h('label', null, L('Nome')), title),
+      h('div.field', null, h('label', null, L('Atalho (digite / e o atalho no começo da mensagem)')), slug),
+      h('div.field', null, h('label', null, L('Texto')), text),
+      h('small.muted', null, L('Campos entre chaves duplas viram um formulário ao usar: {{jogo}}, {{arquivo}}, {{duração=45 a 60}}.'))),
+    foot: [h('button.btn', { onclick: () => m.close() }, L('Cancelar')), h('button.btn.primary', { onclick: () => {
+      const id = promptSlug(slug.value || title.value);
+      if (!id || !text.value.trim()) { toast(L('Dê um nome e escreva o texto.'), 'err'); return; }
+      if (PROMPTS.some((x) => x.id === id && x.id !== p.id)) { toast(L('Já existe um prompt com o atalho /{0}.', id), 'err'); return; }
+      const item = { id, title: title.value.trim() || id, text: text.value.trim() };
+      const i = isNew ? -1 : PROMPTS.findIndex((x) => x.id === p.id);
+      if (i >= 0) PROMPTS[i] = item; else PROMPTS.unshift(item);
+      savePrompts(); m.close(); toast(L('Prompt salvo: /{0}', id)); onDone?.();
+    } }, L('Salvar'))],
+  });
+}
+
+function managePrompts() {
+  const list = h('div.prompt-list');
+  const draw = () => {
+    list.innerHTML = '';
+    if (!PROMPTS.length) list.append(h('div.muted', null, L('Nenhum prompt salvo.')));
+    for (const p of PROMPTS) {
+      list.append(h('div.prompt-row', null,
+        h('div.pr-main', null, h('b', null, p.title), h('code', null, '/' + p.id), h('small.muted', null, p.text.replace(/\s+/g, ' ').slice(0, 140))),
+        h('button.btn.sm', { onclick: () => { m.close(); usePrompt(p); } }, L('Usar')),
+        h('button.icon-btn.sm', { title: L('Editar'), 'aria-label': L('Editar'), html: svg('edit'), onclick: () => editPrompt(p, draw) }),
+        h('button.icon-btn.sm', { title: L('Apagar'), 'aria-label': L('Apagar'), html: svg('trash'), onclick: async () => {
+          if (!(await confirmBox(L('Apagar o prompt "{0}"?', p.title), L('Apagar'), true))) return;
+          PROMPTS = PROMPTS.filter((x) => x !== p); savePrompts(); draw();
+        } })));
+    }
+  };
+  const m = modal({
+    title: L('Prompts salvos'), wide: true,
+    body: h('div', null, h('p.muted.small', null, L('Digite / no começo da mensagem para usar um prompt. Campos {{assim}} viram um formulário.')), list),
+    foot: [h('button.btn', { onclick: () => editPrompt(null, draw) }, ic('plus'), L('Novo prompt')), h('span.spacer'), h('button.btn', { onclick: () => m.close() }, L('Fechar'))],
+  });
+  draw();
+}
+
+/* ------------------------------------------------------------ ditado por voz */
+// Grava o microfone em PCM (Web Audio), converte para WAV 16 kHz mono e o studio transcreve com o
+// whisper.cpp no próprio PC. O texto entra onde está o cursor. Clique de novo (ou Esc) para parar.
+const VOICE = { on: false, busy: false, ctx: null, stream: null, node: null, chunks: [], rate: 48000, t0: 0, timer: 0 };
+
+function initDictation() {
+  const b = $('#mic');
+  if (!b) return;
+  b.innerHTML = svg('mic');
+  drawMic();
+  b.addEventListener('click', () => (VOICE.on ? stopDictation() : startDictation()));
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && VOICE.on) stopDictation(true); });
+}
+
+function drawMic() {
+  const b = $('#mic');
+  if (!b) return;
+  b.classList.toggle('rec', VOICE.on);
+  b.classList.toggle('busy', VOICE.busy);
+  b.disabled = VOICE.busy;
+  const secs = VOICE.on ? Math.round((Date.now() - VOICE.t0) / 1000) : 0;
+  b.title = VOICE.busy ? L('Transcrevendo...') : VOICE.on ? L('Gravando ({0}s): clique para parar e transcrever, Esc para cancelar', secs) : L('Ditar por voz (transcrito no seu PC com o Whisper)');
+  b.setAttribute('aria-label', b.title);
+}
+
+async function startDictation() {
+  if (VOICE.busy) return;
+  let st;
+  try { st = await (await fetch('/api/dictate/status', { headers: { 'x-studio': '1' } })).json(); } catch { st = null; }
+  if (st && (!st.installed || !st.models?.length)) { if (!(await setupDictation(st))) return; }
+  try {
+    VOICE.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+  } catch (e) { toast(L('Não consegui usar o microfone: {0}', e.message), 'err'); return; }
+  VOICE.ctx = new (window.AudioContext || window.webkitAudioContext)();
+  VOICE.rate = VOICE.ctx.sampleRate;
+  const src = VOICE.ctx.createMediaStreamSource(VOICE.stream);
+  VOICE.node = VOICE.ctx.createScriptProcessor(4096, 1, 1);
+  VOICE.chunks = [];
+  VOICE.node.onaudioprocess = (e) => { if (VOICE.on) VOICE.chunks.push(new Float32Array(e.inputBuffer.getChannelData(0))); };
+  src.connect(VOICE.node); VOICE.node.connect(VOICE.ctx.destination);
+  VOICE.on = true; VOICE.t0 = Date.now();
+  VOICE.timer = setInterval(() => { drawMic(); if (Date.now() - VOICE.t0 > 5 * 60 * 1000) stopDictation(); }, 1000);
+  drawMic();
+}
+
+async function stopDictation(cancel) {
+  if (!VOICE.on) return;
+  VOICE.on = false; clearInterval(VOICE.timer);
+  try { VOICE.node.disconnect(); } catch { /* já desligado */ }
+  VOICE.stream?.getTracks().forEach((t) => t.stop());
+  VOICE.ctx?.close().catch(() => {});
+  const chunks = VOICE.chunks; VOICE.chunks = [];
+  if (cancel) { drawMic(); return; }
+  const wav = encodeWav16k(chunks, VOICE.rate);
+  if (!wav) { drawMic(); toast(L('Nada gravado.')); return; }
+  VOICE.busy = true; drawMic();
+  try {
+    const lang = S.settings.whisperLang ?? (LANG === 'en' ? 'en' : 'pt');
+    const res = await fetch(`/api/dictate?lang=${encodeURIComponent(lang)}&model=${encodeURIComponent(S.settings.dictModel || '')}`, { method: 'POST', headers: { 'x-studio': '1', 'content-type': 'audio/wav' }, body: wav });
+    const r = await res.json();
+    if (!res.ok || r.error) throw new Error(r.error || res.statusText);
+    if (r.needSetup) { toast(L('O Whisper não está instalado.'), 'err'); return; }
+    const text = String(r.text || '').trim();
+    if (!text) { toast(L('Não entendi nada. Tente falar mais perto do microfone.')); return; }
+    focusEditor(true);
+    const before = editor().textContent;
+    document.execCommand('insertText', false, (before && !/\s$/.test(before) ? ' ' : '') + text);
+    updateSendBtn();
+  } catch (e) { toast(L('O ditado falhou: {0}', e.message), 'err'); }
+  finally { VOICE.busy = false; drawMic(); }
+}
+
+/** Float32 na taxa do microfone → WAV PCM 16 bits, 16 kHz, mono (média simples por janela). */
+function encodeWav16k(chunks, rate) {
+  const total = chunks.reduce((n, c) => n + c.length, 0);
+  if (total < rate * 0.3) return null;
+  const ratio = rate / 16000;
+  const n = Math.floor(total / ratio);
+  const out = new Int16Array(n);
+  let ci = 0, off = 0, acc = 0, cnt = 0, oi = 0, pos = 0, next = ratio;
+  while (ci < chunks.length && oi < n) {
+    const c = chunks[ci];
+    acc += c[off]; cnt++; pos++;
+    if (pos >= next) { const v = Math.max(-1, Math.min(1, acc / cnt)); out[oi++] = v < 0 ? v * 0x8000 : v * 0x7fff; acc = 0; cnt = 0; next += ratio; }
+    if (++off >= c.length) { off = 0; ci++; }
+  }
+  const buf = new ArrayBuffer(44 + oi * 2);
+  const dv = new DataView(buf);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); dv.setUint32(4, 36 + oi * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+  dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true); dv.setUint32(24, 16000, true);
+  dv.setUint32(28, 32000, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true); w(36, 'data'); dv.setUint32(40, oi * 2, true);
+  new Int16Array(buf, 44, oi).set(out.subarray(0, oi));
+  return buf;
+}
+
+/** Primeira vez: baixa o Whisper e um modelo (no Windows); em outro sistema, explica como instalar. */
+async function setupDictation(st) {
+  if (!st.canSetup && !st.installed) { toast(L('O Whisper ainda não está instalado: gere uma legenda uma vez na página Vídeos e o ditado passa a funcionar.'), 'err'); return false; }
+  const model = 'base';
+  if (!(await confirmBox(L('O ditado usa o Whisper no seu PC. Na primeira vez ele baixa o programa e o modelo de fala "{0}" (cerca de 150 MB). Baixar agora?', model), L('Baixar')))) return false;
+  VOICE.busy = true; drawMic();
+  toast(L('Baixando o Whisper... (alguns minutos)'));
+  try {
+    const r = await fetch('/api/dictate/setup', { method: 'POST', headers: { 'x-studio': '1', 'content-type': 'application/json' }, body: JSON.stringify({ model }) });
+    const j = await r.json();
+    if (!r.ok || j.error) throw new Error(j.error || r.statusText);
+    toast(L('Whisper pronto. Clique no microfone para ditar.'));
+    return false;
+  } catch (e) { toast(L('Não consegui baixar o Whisper: {0}', e.message), 'err'); return false; }
+  finally { VOICE.busy = false; drawMic(); }
 }

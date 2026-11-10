@@ -848,7 +848,7 @@ fn tail(s: &str, n: usize) -> String {
     lines[lines.len().saturating_sub(n)..].join("\n")
 }
 
-fn chrono_stamp() -> String {
+pub(crate) fn chrono_stamp() -> String {
     // aaaammdd-hhmmss em UTC, sem depender de crate de data
     let s = now();
     let (d, t) = (s / 86400, s % 86400);
