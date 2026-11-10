@@ -123,6 +123,7 @@ async function init() {
   // ping periódico das APIs remotas (a cada 30s)
   setInterval(pingApis, 30000);
   setTimeout(() => pingApis(), 2000);
+  setTimeout(uiMigrate, 2500);
   setTimeout(() => checkUpdates(), 4000);
   setInterval(() => checkUpdates(), 6 * 3600 * 1000);
   focusEditor(true);

@@ -64,6 +64,7 @@ fn ws_of(app: &App, p: &str) -> PathBuf {
 pub fn router(app: Arc<App>) -> Router {
     Router::new()
         .route("/api/state", get(state))
+        .route("/api/ui", get(ui_all).post(ui_put))
         .route("/api/config", post(set_config))
         .route("/api/bins", get(bins_list))
         .route("/api/bins/install", post(bins_install))
@@ -495,6 +496,14 @@ async fn remote_ping(State(app): S, Query(qs): Q) -> Res {
 
 // ---------------------------------------------------------------- estado e config
 
+async fn ui_all(State(app): S) -> Res {
+    ok(crate::uistate::all(&app))
+}
+async fn ui_put(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let t = v["t"].as_u64().unwrap_or(0);
+    crate::uistate::put(&app, st(&v, "key"), t, &v["v"]).map(|saved| ok(json!({ "saved": saved }))).map_err(bad)?
+}
 async fn state(State(app): S) -> Res {
     let c = app.cfg();
     ok(json!({

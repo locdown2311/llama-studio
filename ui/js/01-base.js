@@ -136,9 +136,71 @@ function fmtSize(n) {
 function fmtMs(ms) { return ms < 1000 ? `${Math.round(ms)} ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)} s` : L('{0} min {1} s', Math.floor(ms / 60000), Math.round((ms % 60000) / 1000)); }
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
+/* O que a interface guarda vai para o localStorage E para o servidor (dados\ui\<chave>.json). O localStorage do
+   WebView2 grava no disco com atraso (fechar o app logo depois perde a mudança), tem limite de uns 10 MB (as
+   conversas passam disso e a gravação falha) e é separado por porta e por navegador. Ao abrir, vale a cópia mais
+   nova; se o navegador não conseguiu gravar uma chave, vale a do servidor. */
+const UI = { srv: {}, t: {}, timers: new Map(), loaded: false };
+try { UI.t = JSON.parse(localStorage.getItem('studio.__t') || '{}') || {}; } catch { UI.t = {}; }
+try {
+  // síncrono de propósito: o estado (S) é montado logo abaixo a partir do que está guardado
+  const x = new XMLHttpRequest();
+  x.open('GET', '/api/ui', false);
+  x.setRequestHeader('X-Studio', '1');
+  x.send();
+  if (x.status === 200) { UI.srv = JSON.parse(x.responseText).items || {}; UI.loaded = true; }
+} catch { /* servidor fora: só o navegador */ }
+function uiSaveT() { try { localStorage.setItem('studio.__t', JSON.stringify(UI.t)); } catch { /* cheio */ } }
+function uiSend(k, keepalive) {
+  const it = UI.srv[k]; if (!it) return Promise.resolve();
+  const body = JSON.stringify({ key: k, t: it.t, v: it.v });
+  return fetch('/api/ui', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Studio': '1' }, body, keepalive: keepalive && body.length < 60000 })
+    .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); })
+    .catch(() => { if (!UI.timers.has(k)) UI.timers.set(k, setTimeout(() => { UI.timers.delete(k); uiSend(k); }, 5000)); });
+}
+function uiPush(k) {
+  clearTimeout(UI.timers.get(k));
+  // conversas mudam a cada pedaço de resposta: espera um pouco mais para juntar
+  UI.timers.set(k, setTimeout(() => { UI.timers.delete(k); uiSend(k); }, k === 'convs' ? 1200 : 150));
+}
+/** Manda já o que está pendente (o app chama antes de fechar a janela). */
+function uiFlush() {
+  const keys = [...UI.timers.keys()];
+  for (const k of keys) { clearTimeout(UI.timers.get(k)); UI.timers.delete(k); }
+  return Promise.all(keys.map((k) => uiSend(k, true)));
+}
+window.uiFlush = uiFlush;
+/** Primeira vez com a cópia no servidor: manda o que só existe no navegador. */
+function uiMigrate() {
+  if (!UI.loaded) return;
+  for (let i = 0; i < localStorage.length; i++) {
+    const full = localStorage.key(i);
+    if (!full || !full.startsWith('studio.') || full === 'studio.__t') continue;
+    const k = full.slice(7);
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(k) || UI.srv[k]) continue;
+    try { UI.srv[k] = { t: UI.t[k] || Date.now(), v: JSON.parse(localStorage.getItem(full)) }; uiSend(k); } catch { /* valor estranho: fica só no navegador */ }
+  }
+}
+addEventListener('pagehide', () => { uiFlush(); });
+
 const store = {
-  get(k, d) { try { const v = localStorage.getItem('studio.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
-  set(k, v) { try { localStorage.setItem('studio.' + k, JSON.stringify(v)); } catch (e) { console.warn('localStorage', e); } },
+  get(k, d) {
+    let lv = null;
+    try { lv = localStorage.getItem('studio.' + k); } catch { /* sem acesso */ }
+    const sv = UI.srv[k];
+    if (sv && (lv == null || (sv.t || 0) > (UI.t[k] || 0))) return sv.v ?? d;
+    if (lv == null) return d;
+    try { return JSON.parse(lv); } catch { return sv ? sv.v ?? d : d; }
+  },
+  set(k, v) {
+    const t = Math.max(Date.now(), (UI.srv[k]?.t || 0) + 1);
+    let ok = true;
+    try { localStorage.setItem('studio.' + k, JSON.stringify(v)); } catch (e) { ok = false; console.warn('localStorage', k, e); }
+    // gravou no navegador: vale a mesma hora do servidor; não gravou (cheio): na próxima abertura vale o servidor
+    UI.t[k] = ok ? t : 0; uiSaveT();
+    UI.srv[k] = { t, v };
+    uiPush(k);
+  },
 };
 
 async function api(path, body, { raw } = {}) {

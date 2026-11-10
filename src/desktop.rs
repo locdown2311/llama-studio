@@ -195,6 +195,15 @@ pub fn run(app: Arc<App>, url: String, start_hidden: bool) {
                         drop(u.webview);
                         drop(u.window);
                     }
+                } else if let Some(u) = &ui {
+                    // a página manda para o servidor o que ainda não salvou; fecha um instante depois
+                    let _ = u.webview.evaluate_script("window.uiFlush && uiFlush()");
+                    let _ = u.window.set_visible(false);
+                    let a2 = app.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(900));
+                        a2.ui(UiMsg::Quit);
+                    });
                 } else {
                     app.shutdown();
                     *control_flow = ControlFlow::Exit;
@@ -210,9 +219,18 @@ pub fn run(app: Arc<App>, url: String, start_hidden: bool) {
                     } else if id == id_stop.0 {
                         app.llama.stop();
                     } else if id == id_quit.0 {
-                        ui = None;
-                        app.shutdown();
-                        *control_flow = ControlFlow::Exit;
+                        if let Some(u) = &ui {
+                            let _ = u.webview.evaluate_script("window.uiFlush && uiFlush()");
+                            let _ = u.window.set_visible(false);
+                            let a2 = app.clone();
+                            std::thread::spawn(move || {
+                                std::thread::sleep(std::time::Duration::from_millis(900));
+                                a2.ui(UiMsg::Quit);
+                            });
+                        } else {
+                            app.shutdown();
+                            *control_flow = ControlFlow::Exit;
+                        }
                     }
                 } else if let Some(u) = &ui {
                     let _ = u.webview.evaluate_script(&js);

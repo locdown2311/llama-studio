@@ -34,6 +34,7 @@ mod server;
 mod skills;
 mod tools;
 mod tools_en;
+mod uistate;
 mod update;
 mod videos;
 mod videos_edl;
