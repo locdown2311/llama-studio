@@ -48,8 +48,14 @@ function pollVideos() {
     if (S.view !== 'videos') return;
     const before = JSON.stringify(VID.data?.jobs || []);
     await loadVideos();
-    // redesenha só quando algo mudou (o iframe da prévia não pisca)
-    if (JSON.stringify(VID.data?.jobs || []) !== before) {
+    // redesenha só quando algo mudou; se só andou o progresso, troca só os cartões dos trabalhos
+    // (redesenhar tudo recarregava a prévia e as miniaturas a cada 1,2 s: a tela piscava em branco)
+    const shape = (js) => JSON.stringify((js || []).map((j) => [j.kind, j.project, j.out, j.started, j.done]));
+    const jobsBox = $('#vid-body .vid-jobs');
+    const p = vidProject(VID.sel);
+    if (jobsBox && p && shape(JSON.parse(before)) === shape(VID.data?.jobs)) {
+      if (JSON.stringify(VID.data?.jobs || []) !== before) jobsBox.replaceChildren(...jobCards(p, VID.data));
+    } else if (JSON.stringify(VID.data?.jobs || []) !== before) {
       if ((VID.data?.jobs || []).some((j) => j.kind === 'captions' && j.done) && /"kind":"captions",[^}]*"done":false/.test(before)) delete VID.media[VID.sel];
       drawVideos(true);
     }
@@ -64,9 +70,13 @@ function vidProject(id) { return (VID.data?.projects || []).find((p) => p.id ===
 function drawVideos(keepPreview) {
   const box = $('#vid-body');
   const d = VID.data || {};
-  const oldFrame = keepPreview ? $('#vid-frame') : null;
+  // o palco (prévia do Remotion Studio ou vídeo assistido) fica no lugar se vai mostrar a mesma coisa:
+  // tirar um iframe ou um <video> do documento e pôr de volta recarrega (e pisca em branco)
+  const oldWork = box.querySelector(':scope > .vid-work');
+  const oldStage = oldWork?.querySelector(':scope > .vid-stage');
   const sideTop = $('.vid-side')?.scrollTop || 0;
-  box.innerHTML = '';
+  for (const n of [...box.childNodes]) if (n !== oldWork) n.remove();
+  const add = (el) => (oldWork ? box.insertBefore(el, oldWork) : box.append(el));
   const creating = (d.jobs || []).filter((j) => j.kind === 'create' && !j.done);
   const failed = (d.jobs || []).filter((j) => j.kind === 'create' && j.done && !j.ok);
   const p = vidProject(VID.sel) || (d.projects || [])[0];
@@ -94,10 +104,10 @@ function drawVideos(keepPreview) {
     if (VID.newOpen) top.append(newForm);
   }
   if (p) top.append(...projectActions(p, d));
-  box.append(top);
+  add(top);
 
   // avisos em uma linha cada
-  const warn = (icon, ...kids) => box.append(h('div.vid-warn', null, ic(icon), ...kids));
+  const warn = (icon, ...kids) => add(h('div.vid-warn', null, ic(icon), ...kids));
   if (d.error) warn('alert', d.error);
   if (!d.node) warn('alert', h('span', null, L('O Node.js não foi encontrado neste PC. O Remotion precisa do Node 18 ou mais novo (nodejs.org) e do Git para criar projetos. Depois de instalar, reabra o studio.')));
   if (!d.skills?.length) warn('sparkles', h('span', null, L('As habilidades do Remotion não estão instaladas: sem elas o modelo escreve vídeos piores.')),
@@ -108,13 +118,23 @@ function drawVideos(keepPreview) {
   if (p && !p.ready) warn('alert', h('span', null, L('As dependências deste projeto não estão instaladas. Rode "npm install" na pasta dele (pela conversa do projeto, por exemplo).')));
 
   if (!p) {
+    oldWork?.remove();
     box.append(h('div.vid-empty', null, ic('film'),
       h('p', null, L('Crie um projeto. O studio monta um projeto do Remotion em branco; depois, numa conversa ligada a ele, você pede o vídeo (ou envia gravações para editar) e acompanha na prévia.')),
       creating.length ? h('div.muted', null, L('Criando "{0}"...', creating[0].project)) : newForm));
     return;
   }
-  const side = h('div.vid-side', null, ...jobCards(p, d), rendersSection(p), mediaSection(p));
-  box.append(h('div.vid-work', null, stage(p, d, oldFrame), side));
+  const side = h('div.vid-side', null, h('div.vid-jobs', null, ...jobCards(p, d)), rendersSection(p), mediaSection(p));
+  const key = stageKey(p, d);
+  if (oldStage && oldStage.dataset.key === key) {
+    for (const c of [...oldWork.children]) if (c !== oldStage) c.remove();
+    oldWork.append(side);
+  } else {
+    oldWork?.remove();
+    const st = stage(p, d);
+    st.dataset.key = key;
+    box.append(h('div.vid-work', null, st, side));
+  }
   side.scrollTop = sideTop;
 }
 
@@ -154,8 +174,17 @@ function projectActions(p, d) {
   return [chat, preview, h('span.spacer'), h('span.vid-render', null, sel, render), del];
 }
 
+/** O que o palco mostra; mesma chave = o palco atual fica como está. */
+function stageKey(p, d) {
+  const live = d.studio?.project === p.id;
+  const w = VID.watch?.project === p.id ? VID.watch : null;
+  if (w) return `watch:${p.id}:${w.from}:${w.file}:${live}`;
+  if (live) return `live:${p.id}:${d.studio.port}`;
+  return `idle:${p.id}:${!!p.ready}`;
+}
+
 /** O palco: o vídeo escolhido no painel, ou a prévia ao vivo do Remotion Studio, ou um convite para abri-la. */
-function stage(p, d, oldFrame) {
+function stage(p, d) {
   const live = d.studio?.project === p.id;
   const w = VID.watch?.project === p.id ? VID.watch : null;
   if (w) {
@@ -168,7 +197,7 @@ function stage(p, d, oldFrame) {
   }
   if (live) {
     const src = `http://127.0.0.1:${d.studio.port}/`;
-    const frame = oldFrame && oldFrame.dataset.src === src ? oldFrame : h('iframe#vid-frame', { src, dataset: { src }, allow: 'autoplay; fullscreen; clipboard-write', title: L('Prévia do Remotion Studio') });
+    const frame = h('iframe#vid-frame', { src, allow: 'autoplay; fullscreen; clipboard-write', title: L('Prévia do Remotion Studio') });
     return h('div.vid-stage', null, frame,
       h('div.vid-preview-foot', null, h('small.muted', null, L('Remotion Studio na porta {0}. Atualiza sozinho quando o agente edita os arquivos.', d.studio.port)),
         h('a.small', { href: src, target: '_blank', rel: 'noopener' }, ic('external'), L('Abrir no navegador'))));

@@ -1663,6 +1663,7 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .vid-preview-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 12px; background: var(--card); border-top: 1px solid var(--line); flex: none; }
 .vid-preview-foot a { display: inline-flex; gap: 5px; align-items: center; }
 .vid-preview-foot svg { width: 14px; height: 14px; }
+.vid-jobs { display: contents; }
 .vid-side { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding-right: 4px; }
 .vid-sec { display: flex; flex-direction: column; gap: 8px; }
 .vid-sec-head { display: flex; align-items: center; gap: 8px; }
