@@ -362,7 +362,7 @@ async function streamRaw(messages, tools, msg, signal, onDelta, extra = {}) {
         }
       }
       if (j.usage) msg.usage = j.usage;
-      if (j.timings) { msg.tps = j.timings.predicted_per_second; msg.tokens = j.timings.predicted_n; msg.ctxTokens = (j.timings.prompt_n || 0) + (j.timings.cache_n || 0) + (j.timings.predicted_n || 0); }
+      if (j.timings) { msg.tps = j.timings.predicted_per_second; msg.tokens = j.timings.predicted_n; msg.ctxTokens = (j.timings.prompt_n || 0) + (j.timings.cache_n || 0) + (j.timings.predicted_n || 0); msg.promptN = j.timings.prompt_n || 0; msg.cacheN = j.timings.cache_n || 0; }
       onDelta?.();
     }
   }

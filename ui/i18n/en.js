@@ -1889,4 +1889,8 @@ const I18N_EN = {
 "Perguntar de vez em quando (1 em cada ~{0} respostas sem ferramentas)": "Ask now and then (1 in ~{0} answers without tools)",
 "Zerar o placar?": "Reset the scoreboard?",
 "Zerar": "Reset",
+"Mostrar {0} anteriores": "Show {0} earlier",
+"todas ({0})": "all ({0})",
+"Contexto: {0} tokens reaproveitados do cache e {1} lidos de novo nesta resposta. Quanto mais perto de 100%, mais rápido cada passo começa.": "Context: {0} tokens reused from the cache and {1} read again in this answer. The closer to 100%, the faster each step starts.",
+"cache {0}%": "cache {0}%",
 };

@@ -23,6 +23,7 @@ function drawActivitySoon() {
 function jumpTo(start, toolId) {
   if (toolId) S.openTools.add(toolId);
   if (toolId && $$('.tl-more').length) S.openTools.add('tl-all-' + start);
+  revealBlock(cur(), start);
   renderMessages(false);
   const el = $(`#messages [data-start="${start}"]`);
   if (!el) return;

@@ -1764,3 +1764,9 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .backup-row > svg { width: 16px; height: 16px; color: var(--muted); }
 .backup-row .br-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .backup-row .br-main b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* conversa longa: só os últimos blocos no documento; os fora da tela nem são desenhados */
+.msg-more { display: flex; justify-content: center; align-items: center; gap: 12px; margin: 4px 0 18px; }
+#messages > [data-start] { content-visibility: auto; contain-intrinsic-size: auto 320px; }
+#messages > [data-start]:last-child { content-visibility: visible; }
+.cache-low { color: #c47a12 !important; }

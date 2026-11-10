@@ -563,6 +563,9 @@ async fn ui_all(State(app): S) -> Res {
 async fn ui_put(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     let t = v["t"].as_u64().unwrap_or(0);
+    if v["del"] == json!(true) {
+        return crate::uistate::remove(&app, st(&v, "key"), t).map(|saved| ok(json!({ "saved": saved }))).map_err(bad)?;
+    }
     crate::uistate::put(&app, st(&v, "key"), t, &v["v"]).map(|saved| ok(json!({ "saved": saved }))).map_err(bad)?
 }
 async fn state(State(app): S) -> Res {

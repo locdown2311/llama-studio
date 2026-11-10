@@ -1961,6 +1961,18 @@ function drawNimMeter() {
 
 /* ------------------------------------------------------------ chat */
 
+// Quantos blocos (pergunta + resposta) ficam no documento numa conversa longa; o botão no topo traz mais.
+const MSG_PAGE = 30;
+const MSG_WINDOW = new Map(); // id da conversa -> quantos blocos mostrar
+
+/** Garante que o bloco que começa em `start` está no documento (busca, atividade). */
+function revealBlock(conv, start) {
+  if (!conv) return;
+  const all = blocksOf(conv);
+  const i = all.findIndex((b) => b.start === start);
+  if (i >= 0) MSG_WINDOW.set(conv.id, Math.max(MSG_WINDOW.get(conv.id) || MSG_PAGE, all.length - i));
+}
+
 function renderMessages(onlyLast) {
   const box = $("#messages");
 
@@ -1979,7 +1991,11 @@ function renderMessages(onlyLast) {
     return;
   }
 
-  const blocks = blocksOf(conv);
+  const all = blocksOf(conv);
+  // conversa longa: só os últimos blocos ficam no documento (os de cima entram pelo botão "anteriores")
+  const shown = Math.min(all.length, MSG_WINDOW.get(conv.id) || MSG_PAGE);
+  const blocks = all.slice(all.length - shown);
+  const hidden = all.length - blocks.length;
 
   // o marcador de compactação não é bloco: conta só os blocos, senão tudo seria recriado a cada quadro
 
@@ -2012,6 +2028,41 @@ function renderMessages(onlyLast) {
     if (!stick) box.scrollTop = top;
   } else {
     box.innerHTML = "";
+
+    if (hidden)
+      box.append(
+        h(
+          "div.msg-more",
+          null,
+          h(
+            "button.btn.sm",
+            {
+              onclick: () => {
+                // mantém o que estava na tela no mesmo lugar depois de pôr os de cima
+                const before = box.scrollHeight - box.scrollTop;
+                MSG_WINDOW.set(conv.id, shown + MSG_PAGE);
+                renderMessages(false);
+                box.scrollTop = box.scrollHeight - before;
+              },
+            },
+            ic("up"),
+            L("Mostrar {0} anteriores", Math.min(hidden, MSG_PAGE))
+          ),
+          hidden > MSG_PAGE
+            ? h(
+                "button.link.small",
+                {
+                  onclick: () => {
+                    MSG_WINDOW.set(conv.id, all.length);
+                    renderMessages(false);
+                    box.scrollTop = 0;
+                  },
+                },
+                L("todas ({0})", hidden)
+              )
+            : null
+        )
+      );
 
     const cut = conv.compactCut || 0;
     let marked = false;
@@ -2609,7 +2660,8 @@ function renderAI(b, conv, isLast) {
         null,
         h("span", null, L("Duração")),
         h("b", null, fmtMs(t1 - t0)),
-        last?.tps ? h("span.muted", null, `${last.tps.toFixed(1)} tok/s`) : null
+        last?.tps ? h("span.muted", null, `${last.tps.toFixed(1)} tok/s`) : null,
+        cacheInfo(b)
       )
     );
   }
@@ -3849,4 +3901,16 @@ function forkConv(conv, idx) {
   saveConvs();
   selectConv(c.id);
   toast(L('Ramo criado: siga por outro caminho. A conversa original não muda.'));
+}
+
+/** Quanto do contexto o llama-server reaproveitou do cache nesta resposta (o resto ele releu). Abaixo de ~80%
+ *  em conversa longa, algo mudou no começo do prompt (prompt de sistema, ferramentas) e cada passo fica lento. */
+function cacheInfo(b) {
+  let p = 0, c = 0;
+  for (const m of b.msgs) if (m.role === 'assistant' && m.promptN != null) { p += m.promptN; c += m.cacheN || 0; }
+  if (p + c < 2000) return null;
+  const pct = Math.round((c / (p + c)) * 100);
+  return h('span.muted' + (pct < 80 ? '.cache-low' : ''), {
+    title: L('Contexto: {0} tokens reaproveitados do cache e {1} lidos de novo nesta resposta. Quanto mais perto de 100%, mais rápido cada passo começa.', c.toLocaleString(LOCALE), p.toLocaleString(LOCALE)),
+  }, L('cache {0}%', pct));
 }

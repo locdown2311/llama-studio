@@ -53,6 +53,19 @@ pub fn put(app: &App, key: &str, t: u64, v: &Value) -> Result<bool, String> {
     Ok(true)
 }
 
+/// Apaga uma chave (conversa apagada), se o pedido não for mais velho que a cópia guardada.
+pub fn remove(app: &App, key: &str, t: u64) -> Result<bool, String> {
+    if !valid_key(key) {
+        return Err("chave inválida".into());
+    }
+    let path = dir(app).join(format!("{key}.json"));
+    let old_t = std::fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str::<Value>(&s).ok()).and_then(|o| o["t"].as_u64()).unwrap_or(0);
+    if t < old_t {
+        return Ok(false);
+    }
+    Ok(std::fs::remove_file(&path).is_ok())
+}
+
 #[cfg(test)]
 mod t {
     #[test]

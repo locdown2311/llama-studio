@@ -158,7 +158,7 @@ try {
 function uiSaveT() { try { localStorage.setItem('studio.__t', JSON.stringify(UI.t)); } catch { /* cheio */ } }
 function uiSend(k, keepalive) {
   const it = UI.srv[k]; if (!it) return Promise.resolve();
-  const body = JSON.stringify({ key: k, t: it.t, v: it.v });
+  const body = JSON.stringify(it.del ? { key: k, t: it.t, del: true } : { key: k, t: it.t, v: it.v });
   return fetch('/api/ui', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Studio': '1' }, body, keepalive: keepalive && body.length < 60000 })
     .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); })
     .catch(() => { if (!UI.timers.has(k)) UI.timers.set(k, setTimeout(() => { UI.timers.delete(k); uiSend(k); }, 5000)); });
@@ -166,10 +166,11 @@ function uiSend(k, keepalive) {
 function uiPush(k) {
   clearTimeout(UI.timers.get(k));
   // conversas mudam a cada pedaço de resposta: espera um pouco mais para juntar
-  UI.timers.set(k, setTimeout(() => { UI.timers.delete(k); uiSend(k); }, k === 'convs' ? 1200 : 150));
+  UI.timers.set(k, setTimeout(() => { UI.timers.delete(k); uiSend(k); }, k === 'convs' || k.startsWith('c-') ? 1200 : 150));
 }
 /** Manda já o que está pendente (o app chama antes de fechar a janela). */
 function uiFlush() {
+  try { saveConvsNow(true); } catch { /* ainda carregando */ }
   const keys = [...UI.timers.keys()];
   for (const k of keys) { clearTimeout(UI.timers.get(k)); UI.timers.delete(k); }
   return Promise.all(keys.map((k) => uiSend(k, true)));
@@ -193,6 +194,7 @@ const store = {
     let lv = null;
     try { lv = localStorage.getItem('studio.' + k); } catch { /* sem acesso */ }
     const sv = UI.srv[k];
+    if (sv?.del) return d;
     if (sv && (lv == null || (sv.t || 0) > (UI.t[k] || 0))) return sv.v ?? d;
     if (lv == null) return d;
     try { return JSON.parse(lv); } catch { return sv ? sv.v ?? d : d; }
@@ -204,6 +206,13 @@ const store = {
     // gravou no navegador: vale a mesma hora do servidor; não gravou (cheio): na próxima abertura vale o servidor
     UI.t[k] = ok ? t : 0; uiSaveT();
     UI.srv[k] = { t, v };
+    uiPush(k);
+  },
+  del(k) {
+    const t = Math.max(Date.now(), (UI.srv[k]?.t || 0) + 1);
+    try { localStorage.removeItem('studio.' + k); } catch { /* sem acesso */ }
+    delete UI.t[k]; uiSaveT();
+    UI.srv[k] = { t, del: true };
     uiPush(k);
   },
 };
@@ -392,10 +401,11 @@ document.addEventListener('click', (e) => {
 
 /* ============================================================ estado */
 const TOOL_GROUPS = ['read', 'write', 'edit', 'shell', 'code', 'browser', 'computer', 'history', 'toolsearch', 'explore', 'todo', 'notebook', 'interface', 'video'];
+const CONV_SAVED = new Map(); // id -> JSON da última versão gravada
 const DEFAULT_SETTINGS = { systemPrompt: '', temperature: '', topP: '', maxTokens: '', maxSteps: 40, approval: 'writes', auditor: false, auditMax: 'baixo', auditMcp: false, auditPolicy: '', theme: 'light', showThinking: true, vision: 'auto', explorerSteps: 20, maxConcurrentExplorers: 0, autoCompact: true, compactAt: 75, compactMode: 'meio', lazyLoad: true, autoRoute: true, autoLevel: 'equilibrado', projMap: false, projSummary: false, tools: Object.fromEntries(TOOL_GROUPS.map((g) => [g, g !== 'interface'])) };
 const S = {
   view: 'chat',
-  convs: store.get('convs', []),
+  convs: loadConvs(),
   curId: store.get('cur', null),
   sel: { skills: [], mcp: [], builtin: true, ...store.get('sel', {}) },
   settings: (() => { const s = { ...DEFAULT_SETTINGS, ...store.get('settings', {}) }; s.tools = { ...DEFAULT_SETTINGS.tools, ...(s.tools || {}) }; return s; })(),
@@ -423,13 +433,43 @@ const S = {
 
 function running(c) { return !!c && S.runs.has(c.id); }
 function cur() { return S.convs.find((c) => c.id === S.curId) || null; }
-const saveConvs = debounce(() => {
+/* Cada conversa é uma chave (c-<id> → dados\ui\c-<id>.json) e a ordem fica em convOrder. Salvar grava só as
+   conversas que mudaram, em vez de todas juntas a cada pedaço de resposta. Enquanto uma resposta chega, só as
+   conversas em andamento e a aberta são comparadas; as outras entram na próxima passada completa. */
+function convKeyOk(id) { return /^[A-Za-z0-9_-]{1,60}$/.test(String(id || '')); }
+function loadConvs() {
+  const order = store.get('convOrder', null);
+  let list;
+  if (Array.isArray(order)) {
+    list = order.map((id) => store.get('c-' + id, null)).filter((c) => c && Array.isArray(c.messages));
+    for (const c of list) CONV_SAVED.set(c.id, JSON.stringify(c));
+  } else {
+    // formato antigo (todas numa chave só): passa para uma por conversa no primeiro salvamento
+    list = store.get('convs', []);
+    if (list.length) setTimeout(() => { saveConvsNow(true); try { localStorage.removeItem('studio.convs'); } catch { /* sem acesso */ } }, 1500);
+  }
+  for (const c of list) if (!convKeyOk(c.id)) c.id = uid();
+  return list;
+}
+function saveConvsNow(full) {
   // campos que começam com _ (imagens, progresso, estado da sessão) não vão para o disco,
   // nem nas mensagens nem na conversa (um Map salvo vira {} e quebra ao recarregar)
   const strip = (m) => Object.fromEntries(Object.entries(m).filter(([k]) => !k.startsWith('_')));
-  store.set('convs', S.convs.map((c) => ({ ...strip(c), messages: c.messages.map(strip) })));
-  store.set('cur', S.curId);
-}, 400);
+  const quick = !full && S.runs.size > 0;
+  const ids = [];
+  for (const c of S.convs) {
+    ids.push(c.id);
+    if (quick && !S.runs.has(c.id) && c.id !== S.curId && CONV_SAVED.has(c.id)) continue;
+    const obj = { ...strip(c), messages: c.messages.map(strip) };
+    const js = JSON.stringify(obj);
+    if (CONV_SAVED.get(c.id) !== js) { CONV_SAVED.set(c.id, js); store.set('c-' + c.id, obj); }
+  }
+  const keep = new Set(ids);
+  for (const id of [...CONV_SAVED.keys()]) if (!keep.has(id)) { CONV_SAVED.delete(id); store.del('c-' + id); }
+  if (JSON.stringify(ids) !== JSON.stringify(store.get('convOrder', null))) store.set('convOrder', ids);
+  if (store.get('cur', null) !== S.curId) store.set('cur', S.curId);
+}
+const saveConvs = debounce(() => saveConvsNow(false), 400);
 function saveSel() { store.set('sel', S.sel); saveKit(); }
 
 /* ------------------------------------------------------------ seleção salva por modelo */

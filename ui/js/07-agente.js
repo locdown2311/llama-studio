@@ -373,7 +373,8 @@ async function runAgent(conv) {
       // o Caveman já cobre (e aperta mais) a instrução de respostas enxutas
       S.settings.concise !== false && !['on', 'ultra'].includes(packLevels().caveman) ? CONCISE_NOTE : '',
       // exploradores numa API: não gastam o modelo local nem o contexto desta conversa, então vale delegar mais
-      groups.includes('explore') && apiFor('explorer') && S.settings.exploreMore !== false ? EXPLORE_MORE_NOTE + exploreTeamNote() : '',
+      // a nota da equipe fica congelada na conversa: uma API que cai ou volta mudaria o prompt de sistema (e o cache)
+      groups.includes('explore') && apiFor('explorer') && S.settings.exploreMore !== false ? EXPLORE_MORE_NOTE + (started && typeof conv.teamNote === 'string' ? conv.teamNote : (conv.teamNote = exploreTeamNote())) : '',
       groups.includes('explore') && preferMulti(conv) ? MULTI_NOTE : '',
       persona?.prompt?.trim() ? L('# Personalidade: {0}\n{1}', persona.name, persona.prompt.trim()) : '',
       proj?.instructions?.trim() ? L('# Instruções do projeto "{0}"\n{1}', proj.name, proj.instructions.trim()) : '',
