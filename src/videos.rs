@@ -20,6 +20,21 @@ const SKILLS_REPO: &str = "remotion-dev/skills";
 pub struct Videos {
     jobs: Mutex<HashMap<String, Job>>,
     studio: Mutex<Option<Studio>>,
+    /// Um empacotamento por projeto de cada vez: listar composições e renderizar usam o mesmo cache do
+    /// rspack/webpack em node_modules/.cache, e dois processos ao mesmo tempo dão "State lock mismatch".
+    bundling: Mutex<HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
+}
+
+/// Os ids da saída de "remotion compositions --quiet": a última linha com texto (antes dela pode vir um aviso,
+/// como "Cached bundle. Subsequent renders will be faster." na primeira vez).
+fn comp_ids(text: &str) -> Vec<String> {
+    let line = text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("");
+    line.split_whitespace().filter(|w| w.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')).map(str::to_string).collect()
+}
+
+/// O cache do empacotador ficou preso por outro processo (ou por um que morreu no meio).
+fn cache_race(s: &str) -> bool {
+    s.contains("State lock mismatch") || s.contains("This indicates a race condition")
 }
 
 #[derive(Clone)]
@@ -290,19 +305,26 @@ impl Videos {
         self.with_job(&job, |j| j.out = file.trim_start_matches("out/").to_string());
         let me = self.clone();
         let (job2, comp2) = (job.clone(), comp.trim().to_string());
+        let lock = self.bundle_lock(id);
         tokio::spawn(async move {
-            let ok = me
-                .run(&job2, command(&npx(), &["--yes", "remotion", "render", &comp2, &file], &dir), |line| {
-                    // "Rendering frames ━━━━ 34/300" e "Encoding ... 34/300": a última fração da linha
-                    let frac = line.split_whitespace().rev().find_map(|w| {
-                        let (a, b) = w.split_once('/')?;
-                        let (a, b) = (a.parse::<f64>().ok()?, b.parse::<f64>().ok()?);
-                        (b > 0.0 && a <= b).then_some(a / b)
-                    })?;
-                    let stage = if line.contains("ncod") || line.contains("titch") { 0.85 + frac * 0.15 } else { frac * 0.85 };
-                    Some(stage.min(1.0))
-                })
-                .await;
+            // espera a listagem de composições (ou outro render) do mesmo projeto terminar
+            let _g = lock.lock().await;
+            let progress = |line: &str| {
+                // "Rendering frames ━━━━ 34/300" e "Encoding ... 34/300": a última fração da linha
+                let frac = line.split_whitespace().rev().find_map(|w| {
+                    let (a, b) = w.split_once('/')?;
+                    let (a, b) = (a.parse::<f64>().ok()?, b.parse::<f64>().ok()?);
+                    (b > 0.0 && a <= b).then_some(a / b)
+                })?;
+                let stage = if line.contains("ncod") || line.contains("titch") { 0.85 + frac * 0.15 } else { frac * 0.85 };
+                Some(stage.min(1.0))
+            };
+            let mut ok = me.run(&job2, command(&npx(), &["--yes", "remotion", "render", &comp2, &file], &dir), progress).await;
+            let raced = !ok && me.jobs.lock().unwrap().get(&job2).is_some_and(|j| cache_race(&j.log));
+            if raced {
+                me.with_job(&job2, |j| j.log.push_str(&L!("O cache do empacotador estava preso; renderizando de novo sem ele...\n", "The bundler cache was locked; rendering again without it...\n")));
+                ok = me.run(&job2, command(&npx(), &["--yes", "remotion", "render", &comp2, &file, "--bundle-cache=false"], &dir), progress).await;
+            }
             me.with_job(&job2, |j| {
                 j.done = true;
                 j.ok = ok;
@@ -314,22 +336,41 @@ impl Videos {
         Ok(json!({ "job": job }))
     }
 
+    fn bundle_lock(&self, id: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+        self.bundling.lock().unwrap().entry(id.to_string()).or_default().clone()
+    }
+
     /// Lista as composições do projeto (ids), pelo CLI do Remotion.
     pub async fn compositions(&self, app: &App, id: &str) -> Result<Vec<String>, String> {
         let dir = project_dir(app, id).ok_or_else(|| L!("Projeto não encontrado.", "Project not found.").to_string())?;
-        let mut c = command(&npx(), &["--yes", "remotion", "compositions", "--quiet"], &dir);
-        c.stdout(Stdio::piped());
-        let out = tokio::time::timeout(Duration::from_secs(180), c.output())
-            .await
-            .map_err(|_| L!("O Remotion demorou demais para listar as composições.", "Remotion took too long to list the compositions.").to_string())?
-            .map_err(|e| e.to_string())?;
-        let text = String::from_utf8_lossy(&out.stdout).to_string();
+        let lock = self.bundle_lock(id);
+        let _g = lock.lock().await;
+        let list = |no_cache: bool| {
+            let mut args = vec!["--yes", "remotion", "compositions", "--quiet"];
+            if no_cache {
+                args.push("--bundle-cache=false");
+            }
+            let mut c = command(&npx(), &args, &dir);
+            c.stdout(Stdio::piped());
+            async move {
+                tokio::time::timeout(Duration::from_secs(180), c.output())
+                    .await
+                    .map_err(|_| L!("O Remotion demorou demais para listar as composições.", "Remotion took too long to list the compositions.").to_string())?
+                    .map_err(|e| e.to_string())
+            }
+        };
+        let mut out = list(false).await?;
+        let mut text = String::from_utf8_lossy(&out.stdout).to_string();
+        // cache preso (um processo que morreu no meio deixa o lock): de novo, sem o cache
+        if !out.status.success() && cache_race(&format!("{text}{}", String::from_utf8_lossy(&out.stderr))) {
+            out = list(true).await?;
+            text = String::from_utf8_lossy(&out.stdout).to_string();
+        }
         if !out.status.success() {
             let err = String::from_utf8_lossy(&out.stderr);
             return Err(short_err(&format!("{text}\n{err}")));
         }
-        // com --quiet sai só os ids, separados por espaço
-        Ok(text.split_whitespace().filter(|w| w.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')).map(str::to_string).collect())
+        Ok(comp_ids(&text))
     }
 
     /// Confere os tipos do projeto (tsc --noEmit). Devolve se passou e a saída (erros no formato arquivo(l,c)).
@@ -545,6 +586,18 @@ mod t {
         let log = "PROGRESS install 1\nFAIL model ENOTFOUND huggingface.co fetch failed\n";
         let e = super::captions_err(log, "small");
         assert!(e.contains("small") && e.contains("huggingface.co"), "{e}");
+    }
+
+    #[test]
+    fn cache_preso() {
+        assert!(super::cache_race("State lock mismatch in 'C:\\x\\.temp': expected current process (pid=28984), found 12468:node.exe. This indicates a race condition."));
+        assert!(!super::cache_race("Error: Composition MyComp not found"));
+    }
+
+    #[test]
+    fn ids_das_composicoes() {
+        assert_eq!(super::comp_ids("⚡️ Cached bundle. Subsequent renders will be faster.\nMyComp Video\n"), ["MyComp", "Video"]);
+        assert_eq!(super::comp_ids("MyComp Video\n\n"), ["MyComp", "Video"]);
     }
 
     #[test]

@@ -107,7 +107,8 @@ function projectPanel(p, d, oldFrame) {
   const comps = VID.comps[p.id];
   const sel = h('select.select', { disabled: !comps?.length }, (comps || []).map((c) => h('option', { value: c }, c)));
   if (comps?.includes('Video')) sel.value = 'Video';
-  if (!comps && p.ready) {
+  // undefined = ainda não pediu; null = pedindo (não pede de novo a cada atualização da página)
+  if (comps === undefined && p.ready) {
     VID.comps[p.id] = null;
     api('/api/videos/compositions?id=' + encodeURIComponent(p.id)).then((r) => { VID.comps[p.id] = r.compositions; if (S.view === 'videos' && VID.sel === p.id) drawVideos(true); })
       .catch((e) => { VID.comps[p.id] = []; VID.compErr[p.id] = e.message; if (S.view === 'videos' && VID.sel === p.id) drawVideos(true); });
