@@ -42,12 +42,26 @@ fn de_time_opt<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D:
     parse_time(&v).map(Some).ok_or_else(|| serde::de::Error::custom(format!("tempo inválido {v}: use segundos (175.5) ou \"2:55.5\"")))
 }
 
+/// Região do quadro de origem, em frações (0..1): x e y do canto de cima à esquerda, largura e altura.
+#[derive(Deserialize, Serialize, Clone, Copy, Debug, PartialEq)]
+pub struct Crop {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
 #[derive(Deserialize, Serialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Cam {
+    /// vazio = o mesmo arquivo do trecho (facecam embutida na gravação, com crop)
+    #[serde(default)]
     pub src: String,
-    #[serde(default, deserialize_with = "de_time")]
-    pub from: f64,
+    /// vazio = em sincronia com o trecho quando é o mesmo arquivo (senão 0)
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "de_time_opt")]
+    pub from: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crop: Option<Crop>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub volume: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -82,6 +96,43 @@ pub struct Punch {
     pub dur: Option<f64>,
 }
 
+/// Algo por cima do vídeo num instante: emoji, imagem (meme, logo), seta ou círculo de destaque.
+#[derive(Deserialize, Serialize, Clone, Default)]
+pub struct Overlay {
+    /// emoji, image, arrow ou circle
+    #[serde(default)]
+    pub kind: String,
+    /// emoji: o emoji (ou texto curto); image: arquivo em public/
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub text: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub src: String,
+    /// segundos desde o início do trecho
+    #[serde(default, deserialize_with = "de_time")]
+    pub at: f64,
+    #[serde(default = "two", deserialize_with = "de_time")]
+    pub dur: f64,
+    /// centro na tela final, 0..1
+    #[serde(default = "half")]
+    pub x: f64,
+    #[serde(default = "half")]
+    pub y: f64,
+    /// fração da largura da tela (padrão 0.25)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<f64>,
+    /// seta: direção para onde aponta, em graus (0 = direita, 90 = baixo)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub angle: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// pop (padrão), shake ou none
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anim: Option<String>,
+}
+fn half() -> f64 {
+    0.5
+}
+
 #[derive(Deserialize, Serialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Clip {
@@ -98,10 +149,17 @@ pub struct Clip {
     pub split: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub corner: Option<String>,
+    /// número 0..1, ou "auto" na entrada (segue a ação: vira track)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub focus_x: Option<f64>,
+    pub focus_x: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub focus_y: Option<f64>,
+    /// recorte do trecho principal (ex.: só a área do jogo, sem a facecam)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crop: Option<Crop>,
+    /// focusX ao longo do trecho: [segundos desde o início no arquivo, x]; calculado pelo studio quando focusX = "auto"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub track: Option<Vec<[f64; 2]>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub speed: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -120,9 +178,14 @@ pub struct Clip {
     pub transition_dur: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub texts: Option<Vec<Text>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overlays: Option<Vec<Overlay>>,
     /// só na entrada: corta os silêncios deste trecho pela legenda (não vai para o arquivo)
     #[serde(default, skip_serializing)]
     pub cut_silences: bool,
+    /// focusX = "auto": o studio calcula o track depois de conferir a lista
+    #[serde(default, skip_serializing)]
+    pub follow: bool,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -173,6 +236,9 @@ pub struct Edl {
     /// só na entrada: menor pausa que conta como silêncio (s)
     #[serde(default, skip_serializing)]
     pub min_silence: f64,
+    /// largura e altura de cada arquivo (ffprobe), para recortar com precisão (crop, focusX)
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub sizes: std::collections::BTreeMap<String, [u32; 2]>,
 }
 fn fps30() -> u32 {
     30
@@ -274,7 +340,7 @@ fn cut_clip(c: &Clip, words: &[Word], gap: f64) -> (Vec<Clip>, f64) {
         }
         // a câmera anda junto: mesmo deslocamento desde o começo do trecho
         if let (Some(cam), Some(orig)) = (p.cam.as_mut(), c.cam.as_ref()) {
-            cam.from = orig.from + (p.from - c.from);
+            cam.from = Some(orig.from.unwrap_or(0.0) + (p.from - c.from));
         }
         if i > 0 {
             p.transition = None;
@@ -282,6 +348,7 @@ fn cut_clip(c: &Clip, words: &[Word], gap: f64) -> (Vec<Clip>, f64) {
         }
         p.texts = None;
         p.punch = None;
+        p.overlays = None;
         parts.push(p);
     }
     // textos e ênfases: o instante no arquivo decide o pedaço
@@ -293,6 +360,11 @@ fn cut_clip(c: &Clip, words: &[Word], gap: f64) -> (Vec<Clip>, f64) {
     for t in c.texts.iter().flatten() {
         if let Some((i, at)) = place(t.at) {
             parts[i].texts.get_or_insert_with(Vec::new).push(Text { at, ..t.clone() });
+        }
+    }
+    for o in c.overlays.iter().flatten() {
+        if let Some((i, at)) = place(o.at) {
+            parts[i].overlays.get_or_insert_with(Vec::new).push(Overlay { at, ..o.clone() });
         }
     }
     for p in c.punch.iter().flatten() {
@@ -307,6 +379,20 @@ fn cut_clip(c: &Clip, words: &[Word], gap: f64) -> (Vec<Clip>, f64) {
 const LAYOUTS: &[&str] = &["full", "fit", "react", "pip", "side"];
 const TRANSITIONS: &[&str] = &["cut", "fade", "slide", "wipe", "zoom"];
 const FILTERS: &[&str] = &["none", "bw", "warm", "cold", "vivid", "dark"];
+const OVERLAYS: &[&str] = &["emoji", "image", "arrow", "circle"];
+
+fn bad_crop(r: &Crop) -> Option<String> {
+    let ok = [r.x, r.y, r.w, r.h].iter().all(|v| v.is_finite()) && r.x >= 0.0 && r.y >= 0.0 && r.w >= 0.03 && r.h >= 0.03 && r.x + r.w <= 1.001 && r.y + r.h <= 1.001;
+    (!ok).then(|| format!("{{x:{}, y:{}, w:{}, h:{}}}: são frações do quadro (0 a 1), com x+w e y+h até 1", r.x, r.y, r.w, r.h))
+}
+
+fn media_ext(src: &str) -> &'static str {
+    let e = Path::new(src).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    match e.as_str() {
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" => "image",
+        _ => "other",
+    }
+}
 
 /// Confere e completa a lista. `dur(src)` = duração do arquivo em public/ (None = não existe).
 /// Devolve a lista pronta e os segundos de silêncio cortados, ou os problemas encontrados.
@@ -389,12 +475,59 @@ pub fn prepare(mut e: Edl, dir: &Path, dur: &dyn Fn(&str) -> Option<Option<f64>>
         }
         if let Some(cam) = c.cam.as_mut() {
             cam.src = norm_src(&cam.src);
+            if cam.src.is_empty() {
+                cam.src = c.src.clone();
+            }
+            if cam.from.is_none() {
+                cam.from = Some(if cam.src == c.src { c.from } else { 0.0 });
+            }
+            if let Some(r) = cam.crop {
+                if let Some(m) = bad_crop(&r) {
+                    errs.push(format!("trecho {n}: cam.crop {m}"));
+                }
+            } else if cam.src == c.src {
+                errs.push(format!("trecho {n}: a cam é o mesmo arquivo do trecho; passe cam.crop com a região da facecam (x, y, w, h em frações do quadro, ex.: {{\"x\":0.75,\"y\":0.7,\"w\":0.25,\"h\":0.3}})"));
+            }
             if let Some(cd) = check_file(&cam.src, &format!("trecho {n} (cam)"), &mut errs) {
-                let need = cam.from + (c.to - c.from);
+                let need = cam.from.unwrap_or(0.0) + (c.to - c.from);
                 if need > cd + 0.05 {
                     errs.push(format!("trecho {n}: a cam (public/{}) termina em {cd:.2}s, mas o trecho pede até {need:.2}s; ajuste cam.from ou o trecho", cam.src));
                 }
             }
+        }
+        if let Some(r) = c.crop {
+            if let Some(m) = bad_crop(&r) {
+                errs.push(format!("trecho {n}: crop {m}"));
+            }
+        }
+        match c.focus_x.take() {
+            None => {}
+            Some(Value::String(t)) if matches!(fold(t.trim()).as_str(), "auto" | "seguir" | "follow") => c.follow = true,
+            Some(v) => match parse_time(&v) {
+                Some(x) => c.focus_x = Some(json!(x.clamp(0.0, 1.0))),
+                None => errs.push(format!("trecho {n}: focusX {v} (use um número de 0 a 1 ou \"auto\")")),
+            },
+        }
+        for o in c.overlays.iter_mut().flatten() {
+            o.kind = o.kind.trim().to_lowercase();
+            if !OVERLAYS.contains(&o.kind.as_str()) {
+                errs.push(format!("trecho {n}: overlay kind \"{}\" (use {})", o.kind, OVERLAYS.join(", ")));
+            }
+            if o.kind == "image" {
+                o.src = norm_src(&o.src);
+                let what = format!("trecho {n} (overlay)");
+                if media_ext(&o.src) != "image" {
+                    errs.push(format!("{what}: src precisa ser uma imagem em public/ (png, jpg, gif, webp)"));
+                } else if !safe_rel(&o.src) || !dir.join("public").join(&o.src).is_file() {
+                    errs.push(format!("{what}: public/{} não existe", o.src));
+                }
+            }
+            if o.kind == "emoji" && o.text.trim().is_empty() {
+                errs.push(format!("trecho {n}: overlay emoji sem text"));
+            }
+            o.x = o.x.clamp(0.0, 1.0);
+            o.y = o.y.clamp(0.0, 1.0);
+            o.size = o.size.map(|z| z.clamp(0.03, 1.0));
         }
         if let Some(t) = &c.transition {
             if !TRANSITIONS.contains(&t.as_str()) {
@@ -439,6 +572,58 @@ pub fn prepare(mut e: Edl, dir: &Path, dur: &dyn Fn(&str) -> Option<Option<f64>>
     } else {
         Err(errs)
     }
+}
+
+/// Troca o texto das frases editadas na legenda (Caption[] cru, para manter os outros campos). Cada edição é
+/// (de, até, texto novo) em segundos: as palavras desse intervalo viram as palavras do texto novo, com o tempo
+/// dividido pelo tamanho de cada uma. Devolve quantas frases mudaram.
+pub fn edit_captions(list: &mut Vec<Value>, edits: &[(f64, f64, String)]) -> usize {
+    let ms = |w: &Value, k: &str| w[k].as_f64().unwrap_or(0.0);
+    let mut changed = 0;
+    for (from, to, text) in edits {
+        let (a, b) = (from * 1000.0 - 1.0, to * 1000.0 + 1.0);
+        let idx: Vec<usize> = (0..list.len()).filter(|&i| ms(&list[i], "startMs") >= a && ms(&list[i], "endMs") <= b && !list[i]["text"].as_str().unwrap_or("").trim().is_empty()).collect();
+        let (Some(&first), Some(&last)) = (idx.first(), idx.last()) else { continue };
+        let (start, end) = (ms(&list[first], "startMs"), ms(&list[last], "endMs"));
+        let words: Vec<&str> = text.split_whitespace().collect();
+        let total: usize = words.iter().map(|w| w.chars().count() + 1).sum();
+        let mut new = vec![];
+        let mut at = start;
+        for w in &words {
+            let len = (end - start) * (w.chars().count() + 1) as f64 / total.max(1) as f64;
+            let mut item = list[first].clone();
+            item["text"] = json!(format!(" {w}"));
+            item["startMs"] = json!(at.round());
+            item["endMs"] = json!((at + len).round());
+            item["timestampMs"] = json!((at + len / 2.0).round());
+            item["confidence"] = json!(1.0);
+            new.push(item);
+            at += len;
+        }
+        // tira as palavras antigas (de trás para a frente) e põe as novas no lugar
+        for &i in idx.iter().rev() {
+            list.remove(i);
+        }
+        for (k, item) in new.into_iter().enumerate() {
+            list.insert(first + k, item);
+        }
+        changed += 1;
+    }
+    changed
+}
+
+/// .srt a partir das frases da legenda.
+pub fn srt(words: &[Word]) -> String {
+    let t = |s: f64| {
+        let ms = (s * 1000.0).round() as u64;
+        format!("{:02}:{:02}:{:02},{:03}", ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60, ms % 1000)
+    };
+    phrases(words, 0.0, f64::MAX, 0.6)
+        .iter()
+        .enumerate()
+        .map(|(i, (a, b, x))| format!("{}\n{} --> {}\n{}\n", i + 1, t(*a), t(*b), x.trim()))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Duração em quadros (a mesma conta do EditVideo.tsx).
@@ -498,6 +683,20 @@ mod t {
 
     fn w(t: &str, a: f64, b: f64) -> Word {
         Word { text: t.into(), start_ms: a * 1000.0, end_ms: b * 1000.0 }
+    }
+
+    #[test]
+    fn edita_frase_da_legenda() {
+        let mut l: Vec<Value> = vec![json!({"text":" Oi","startMs":1000.0,"endMs":1400.0}), json!({"text":" pesoal","startMs":1500.0,"endMs":2000.0}), json!({"text":" tchau","startMs":5000.0,"endMs":5400.0})];
+        let n = edit_captions(&mut l, &[(1.0, 2.0, "Oi pessoal tudo bem".into())]);
+        assert_eq!(n, 1);
+        assert_eq!(l.len(), 5);
+        assert_eq!(l[1]["text"], " pessoal");
+        assert_eq!(l[0]["startMs"], 1000.0);
+        assert_eq!(l[3]["endMs"], 2000.0);
+        assert_eq!(l[4]["text"], " tchau");
+        let w: Vec<Word> = serde_json::from_value(json!(l)).unwrap();
+        assert!(srt(&w).starts_with("1\n00:00:01,000 --> 00:00:02,000\nOi pessoal tudo bem\n"));
     }
 
     #[test]

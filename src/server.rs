@@ -144,6 +144,10 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/videos/upload", post(videos_upload).layer(DefaultBodyLimit::disable()))
         .route("/api/videos/frames", post(videos_frames))
         .route("/api/videos/captions", post(videos_captions))
+        .route("/api/videos/peaks", post(videos_peaks))
+        .route("/api/videos/captions-save", post(videos_captions_save))
+        .route("/api/videos/render-all", post(videos_render_all))
+        .route("/api/videos/thumbnail", post(videos_thumbnail))
         .route("/api/videos/wire", post(videos_wire))
         .route("/api/videos/file", get(videos_file))
         .route("/api/remote/warm", post(remote_warm))
@@ -360,6 +364,26 @@ async fn videos_frames(State(app): S, b: Bytes) -> Res {
     let count = v["count"].as_u64().unwrap_or(12) as usize;
     let (from, to) = (v["from"].as_f64().unwrap_or(0.0), v["to"].as_f64().unwrap_or(0.0));
     app.videos.frames(&app, st(&v, "id"), st(&v, "file"), &times, count, from, to, width).await.map(ok).map_err(bad)?
+}
+async fn videos_thumbnail(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    app.videos.thumbnail(&app, st(&v, "id"), st(&v, "name"), &v).await.map(ok).map_err(bad)?
+}
+async fn videos_render_all(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    app.videos.render_all(&app, st(&v, "id"), &strs(&v, "comps")).map(ok).map_err(bad)?
+}
+async fn videos_captions_save(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let edits: Vec<(f64, f64, String)> = v["edits"].as_array().map(|a| a.iter().filter_map(|e| Some((e["from"].as_f64()?, e["to"].as_f64()?, e["text"].as_str()?.to_string()))).collect()).unwrap_or_default();
+    app.videos.captions_save(&app, st(&v, "id"), st(&v, "file"), &edits).map(ok).map_err(bad)?
+}
+async fn videos_peaks(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let (from, to) = (v["from"].as_f64().unwrap_or(0.0), v["to"].as_f64().unwrap_or(0.0));
+    let min = v["min"].as_f64().unwrap_or(8.0);
+    let top = v["top"].as_u64().unwrap_or(15) as usize;
+    app.videos.peaks(&app, st(&v, "id"), st(&v, "file"), from, to, min, top).await.map(ok).map_err(bad)?
 }
 async fn videos_captions(State(app): S, b: Bytes) -> Res {
     let v = body(&b);

@@ -17,6 +17,8 @@ use crate::app::App;
 const SKILLS_REPO: &str = "remotion-dev/skills";
 /// A skill com o método de edição (receitas por situação), que vem com o studio.
 pub const EDITOR_SKILL: &str = "editor-de-video";
+/// Primeira linha da lista de edição de uma miniatura (video_thumbnail).
+const THUMB_MARK: &str = "// miniatura (video_thumbnail)";
 const EDITOR_SKILL_PT: &str = include_str!("videos_skill.md");
 const EDITOR_SKILL_EN: &str = include_str!("videos_skill_en.md");
 
@@ -381,6 +383,23 @@ impl Videos {
         Ok(json!({ "job": job }))
     }
 
+    /// Renderiza várias composições em fila (o bundle_lock do projeto põe uma depois da outra). As miniaturas
+    /// (video_thumbnail) ficam de fora.
+    pub fn render_all(self: &std::sync::Arc<Self>, app: &App, id: &str, comps: &[String]) -> Result<Value, String> {
+        let dir = project_dir(app, id).ok_or_else(|| L!("Projeto não encontrado.", "Project not found.").to_string())?;
+        let mut jobs = vec![];
+        for c in comps {
+            let thumb = std::fs::read_to_string(dir.join("src").join("edit").join(format!("{c}.ts"))).is_ok_and(|t| t.starts_with(THUMB_MARK));
+            if !thumb {
+                jobs.push(self.render(app, id, c)?["job"].clone());
+            }
+        }
+        if jobs.is_empty() {
+            return Err(L!("Nenhuma composição para renderizar.", "No composition to render.").into());
+        }
+        Ok(json!({ "jobs": jobs }))
+    }
+
     fn bundle_lock(&self, id: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
         self.bundling.lock().unwrap().entry(id.to_string()).or_default().clone()
     }
@@ -505,20 +524,44 @@ impl Videos {
         srcs.sort();
         srcs.dedup();
         let mut durs: HashMap<String, Option<f64>> = HashMap::new();
+        let mut sizes = std::collections::BTreeMap::new();
         for s in srcs {
             let p = dir.join("public").join(&s);
             if ed::safe_rel(&s) && p.is_file() {
                 let d = match &comp {
-                    Some(c) => duration_of(c, &p, &dir).await,
+                    Some(c) => {
+                        if let Some(wh) = size_of(c, &p, &dir).await {
+                            sizes.insert(s.clone(), wh);
+                        }
+                        duration_of(c, &p, &dir).await
+                    }
                     None => None,
                 };
                 durs.insert(s, d);
             }
         }
-        let (e, cut) = match ed::prepare(e, &dir, &|s: &str| durs.get(s).copied()) {
+        let (mut e, cut) = match ed::prepare(e, &dir, &|s: &str| durs.get(s).copied()) {
             Ok(x) => x,
             Err(errors) => return Ok(json!({ "ok": false, "errors": errors })),
         };
+        e.sizes = sizes;
+        // focusX "auto": o recorte segue o movimento (quadros pequenos analisados aqui)
+        let mut follow_err = vec![];
+        if let Some(c) = &comp {
+            for i in 0..e.clips.len() {
+                if !e.clips[i].follow {
+                    continue;
+                }
+                match follow_track(c, &dir, &e, i).await {
+                    Ok(t) if !t.is_empty() => e.clips[i].track = Some(t),
+                    Ok(_) => e.clips[i].focus_x = Some(json!(0.5)),
+                    Err(m) => {
+                        e.clips[i].focus_x = Some(json!(0.5));
+                        follow_err.push(LF!("trecho {}: não consegui seguir a ação ({m}); ficou no meio", "clip {}: could not follow the action ({m}); centered", i + 1));
+                    }
+                }
+            }
+        }
         let edit_dir = dir.join("src").join("edit");
         std::fs::create_dir_all(&edit_dir).map_err(|e| e.to_string())?;
         std::fs::write(edit_dir.join("EditVideo.tsx"), ed::TEMPLATE).map_err(|e| e.to_string())?;
@@ -539,7 +582,91 @@ impl Videos {
         v["file"] = json!(format!("src/edit/{name}.ts"));
         v["wired"] = json!(wired);
         v["edl"] = serde_json::to_value(&e).unwrap_or_default();
+        v["followed"] = json!(e.clips.iter().filter(|c| c.track.is_some()).count());
+        if !follow_err.is_empty() {
+            v["warnings"] = json!(follow_err);
+        }
         Ok(v)
+    }
+
+    /// Miniatura: um quadro do vídeo com texto grande por cima (composição <name> de 1 s, pelo mesmo modelo do
+    /// video_edit) exportada em out/<name>.png com o remotion still.
+    pub async fn thumbnail(&self, app: &App, id: &str, name: &str, args: &Value) -> Result<Value, String> {
+        let dir = project_dir(app, id).ok_or_else(|| L!("Projeto não encontrado.", "Project not found.").to_string())?;
+        let at = crate::videos_edl::parse_time(&args["at"]).unwrap_or(0.0).max(0.0);
+        let mut texts = vec![];
+        if let Some(t) = args["text"].as_str().filter(|t| !t.trim().is_empty()) {
+            texts.push(json!({ "text": t.trim(), "at": 0, "dur": 1, "pos": args["pos"].as_str().unwrap_or("top"), "style": "thumb" }));
+        }
+        if let Some(t) = args["sub"].as_str().filter(|t| !t.trim().is_empty()) {
+            let pos = if args["pos"].as_str() == Some("bottom") { "top" } else { "bottom" };
+            texts.push(json!({ "text": t.trim(), "at": 0, "dur": 1, "pos": pos, "style": "label" }));
+        }
+        let mut clip = json!({ "src": args["src"], "from": at, "to": at + 1.0, "layout": args["layout"].as_str().unwrap_or("full"), "texts": texts });
+        for k in ["focusX", "focusY", "crop", "overlays", "filter", "zoom"] {
+            if !args[k].is_null() {
+                clip[k] = args[k].clone();
+            }
+        }
+        if let Some(o) = clip["overlays"].as_array_mut() {
+            for x in o {
+                x["at"] = json!(0);
+                x["dur"] = json!(1);
+                x["anim"] = json!("none");
+            }
+        }
+        let edl = json!({ "format": args["format"].as_str().unwrap_or("9:16"), "clips": [clip] });
+        let r = self.edit(app, id, name, edl).await?;
+        if r["ok"] != json!(true) {
+            return Ok(r);
+        }
+        let name = name.trim().to_string();
+        // marca: "renderizar todos" não faz um MP4 de 1 s da miniatura
+        let edl_path = dir.join("src").join("edit").join(format!("{name}.ts"));
+        if let Ok(t) = std::fs::read_to_string(&edl_path) {
+            let _ = std::fs::write(&edl_path, format!("{THUMB_MARK}\n{t}"));
+        }
+        let file = format!("out/{name}.png");
+        let lock = self.bundle_lock(id);
+        let _g = lock.lock().await;
+        let still = |no_cache: bool| {
+            let mut a = vec!["--yes", "remotion", "still", name.as_str(), file.as_str(), "--frame=15", "--overwrite"];
+            if no_cache {
+                a.push("--bundle-cache=false");
+            }
+            let mut c = command(&npx(), &a, &dir);
+            c.stdout(Stdio::piped()).stderr(Stdio::piped());
+            async move { tokio::time::timeout(Duration::from_secs(300), c.output()).await.map_err(|_| L!("O Remotion demorou demais para gerar a miniatura.", "Remotion took too long to make the thumbnail.").to_string())?.map_err(|e| e.to_string()) }
+        };
+        let mut out = still(false).await?;
+        let log = |o: &std::process::Output| format!("{}\n{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+        if !out.status.success() && cache_race(&log(&out)) {
+            out = still(true).await?;
+        }
+        if !out.status.success() {
+            return Err(short_err(&log(&out)));
+        }
+        Ok(json!({ "ok": true, "file": file, "name": name }))
+    }
+
+    /// Salva as frases corrigidas à mão na legenda de um arquivo (json e .srt).
+    pub fn captions_save(&self, app: &App, id: &str, file: &str, edits: &[(f64, f64, String)]) -> Result<Value, String> {
+        use crate::videos_edl as ed;
+        let dir = project_dir(app, id).ok_or_else(|| L!("Projeto não encontrado.", "Project not found.").to_string())?;
+        let rel = match find_media(&dir, file) {
+            Ok((_, rel)) => rel,
+            Err(_) => file.to_string(),
+        };
+        let path = captions_path(&dir, &rel);
+        let text = std::fs::read_to_string(&path).map_err(|_| L!("Este arquivo ainda não tem legenda.", "This file has no captions yet.").to_string())?;
+        let mut list: Vec<Value> = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+        let n = ed::edit_captions(&mut list, edits);
+        let out = serde_json::to_string_pretty(&list).map_err(|e| e.to_string())?;
+        std::fs::write(&path, out).map_err(|e| e.to_string())?;
+        if let Ok(words) = serde_json::from_value::<Vec<ed::Word>>(json!(list)) {
+            let _ = std::fs::write(path.with_extension("srt"), ed::srt(&words));
+        }
+        Ok(json!({ "changed": n }))
     }
 
     /// Trechos falados e silêncios de um arquivo, pela legenda (public/captions/<nome>.json).
@@ -931,6 +1058,85 @@ fn ff(comp: &Path, bin: &str, args: &[&str], cwd: &Path) -> tokio::process::Comm
     c
 }
 
+/// Os dados de um WAV (depois do bloco "data"); num pipe o tamanho do bloco vem errado, então vai até o fim.
+fn wav_data(b: &[u8]) -> &[u8] {
+    let mut i = 12;
+    while i + 8 <= b.len() {
+        let id = &b[i..i + 4];
+        let len = u32::from_le_bytes([b[i + 4], b[i + 5], b[i + 6], b[i + 7]]) as usize;
+        if id == b"data" {
+            return &b[i + 8..];
+        }
+        i += 8 + len + (len & 1);
+    }
+    &[]
+}
+
+/// Largura e altura do primeiro vídeo (ffprobe).
+async fn size_of(comp: &Path, file: &Path, cwd: &Path) -> Option<[u32; 2]> {
+    let f = file.to_string_lossy().to_string();
+    let mut c = ff(comp, "ffprobe", &["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", &f], cwd);
+    let out = tokio::time::timeout(Duration::from_secs(20), c.output()).await.ok()?.ok()?;
+    let t = String::from_utf8_lossy(&out.stdout);
+    let mut it = t.trim().split(',').filter_map(|x| x.trim().parse::<u32>().ok());
+    let (w, h) = (it.next()?, it.next()?);
+    (w > 0 && h > 0).then_some([w, h])
+}
+
+/// O focusX ao longo do trecho i (focusX = "auto"): quadros pequenos em cinza do trecho, recortados no crop do
+/// trecho, com a facecam (cam do mesmo arquivo) mascarada.
+async fn follow_track(comp: &Path, dir: &Path, e: &crate::videos_edl::Edl, i: usize) -> Result<Vec<[f64; 2]>, String> {
+    use crate::videos_motion as mo;
+    let c = &e.clips[i];
+    let Some(&[sw, sh]) = e.sizes.get(&c.src) else { return Err(L!("medidas do vídeo desconhecidas", "unknown video size").into()) };
+    let full = crate::videos_edl::Crop { x: 0.0, y: 0.0, w: 1.0, h: 1.0 };
+    let region = c.crop.unwrap_or(full);
+    // largura do pedaço do trecho principal na tela, pela disposição
+    let (ow, oh) = (e.width as f64, e.height as f64);
+    let split = c.split.unwrap_or(0.5).clamp(0.2, 0.8);
+    let (bw, bh) = match c.layout.as_deref().unwrap_or("full") {
+        "react" => (ow, oh * (1.0 - split)),
+        "side" => (ow / 2.0, oh),
+        "fit" => return Err(L!("o layout fit mostra o quadro inteiro (não há o que seguir)", "the fit layout shows the whole frame (nothing to follow)").into()),
+        _ => (ow, oh),
+    };
+    let (rw, rh) = (region.w * sw as f64, region.h * sh as f64);
+    let vw = ((bw / bh) / (rw / rh)).min(1.0);
+    if vw >= 0.98 {
+        return Ok(vec![]); // o recorte já mostra a largura toda
+    }
+    let p = dir.join("public").join(&c.src).to_string_lossy().to_string();
+    let (ss, len) = (format!("{:.3}", c.from), format!("{:.3}", (c.to - c.from).min(600.0)));
+    let (vf, r) = (format!("scale={}:-2", mo::W), format!("{}", mo::FPS));
+    let mut cmd = ff(comp, "ffmpeg", &["-v", "error", "-ss", &ss, "-t", &len, "-i", &p, "-an", "-vf", &vf, "-r", &r, "-pix_fmt", "gray", "-c:v", "png", "-f", "image2pipe", "-"], dir);
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let out = tokio::time::timeout(Duration::from_secs(180), cmd.output()).await.map_err(|_| "ffmpeg demorou demais".to_string())?.map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("ffmpeg").to_string());
+    }
+    let frames: Vec<(usize, usize, Vec<u8>)> = mo::decode_pngs(&out.stdout)
+        .into_iter()
+        .map(|(w, h, px)| {
+            // só a região do crop do trecho
+            let (x0, y0) = ((region.x * w as f64) as usize, (region.y * h as f64) as usize);
+            let (cw, ch) = (((region.w * w as f64) as usize).clamp(1, w - x0), ((region.h * h as f64) as usize).clamp(1, h - y0));
+            let mut v = Vec::with_capacity(cw * ch);
+            for y in y0..y0 + ch {
+                v.extend_from_slice(&px[y * w + x0..y * w + x0 + cw]);
+            }
+            (cw, ch, v)
+        })
+        .collect();
+    // a facecam embutida (cam do mesmo arquivo) mexe o tempo todo: fica de fora
+    let mask = c.cam.as_ref().filter(|m| m.src == c.src).and_then(|m| m.crop).map(|m| crate::videos_edl::Crop {
+        x: (m.x - region.x) / region.w,
+        y: (m.y - region.y) / region.h,
+        w: m.w / region.w,
+        h: m.h / region.h,
+    });
+    Ok(mo::track(&frames, vw, mask))
+}
+
 /// Duração em segundos (ffprobe).
 async fn duration_of(comp: &Path, file: &Path, cwd: &Path) -> Option<f64> {
     let f = file.to_string_lossy().to_string();
@@ -1098,6 +1304,46 @@ impl Videos {
             return Err(L!("Não consegui tirar quadros desse arquivo (é um vídeo?).", "Could not grab frames from that file (is it a video?).").into());
         }
         Ok(json!({ "file": file, "duration": dur, "frames": frames }))
+    }
+
+    /// Picos de volume do áudio (tiros, explosões, gritos): o ffmpeg do Remotion entrega o áudio cru e
+    /// videos_audio mede. from/to em segundos (to 0 = até o fim).
+    pub async fn peaks(&self, app: &App, id: &str, file: &str, from: f64, to: f64, min_db: f64, top: usize) -> Result<Value, String> {
+        const RATE: u32 = 4000;
+        let dir = project_dir(app, id).ok_or_else(|| L!("Projeto não encontrado.", "Project not found.").to_string())?;
+        let (path, file) = find_media(&dir, file)?;
+        if !matches!(media_kind(&file), "video" | "audio") {
+            return Err(L!("Escolha um vídeo ou áudio.", "Choose a video or audio file.").into());
+        }
+        let comp = compositor(&dir).ok_or_else(|| L!("O ffmpeg do Remotion não está no projeto (rode npm install na pasta dele).", "Remotion's ffmpeg is not in the project (run npm install in its folder).").to_string())?;
+        let from = from.max(0.0);
+        let p = path.to_string_lossy().to_string();
+        let ss = format!("{from:.3}");
+        let rate = RATE.to_string();
+        let mut args = vec!["-v", "error", "-ss", &ss, "-i", &p];
+        let len;
+        if to > from {
+            len = format!("{:.3}", to - from);
+            args.extend(["-t", len.as_str()]);
+        }
+        // o ffmpeg do Remotion não tem o formato cru (s16le): sai WAV e o cabeçalho é pulado
+        args.extend(["-vn", "-ac", "1", "-ar", &rate, "-f", "wav", "-c:a", "pcm_s16le", "-"]);
+        let mut c = ff(&comp, "ffmpeg", &args, &dir);
+        c.stdout(Stdio::piped()).stderr(Stdio::piped());
+        let out = tokio::time::timeout(Duration::from_secs(240), c.output())
+            .await
+            .map_err(|_| L!("O ffmpeg demorou demais para ler o áudio.", "ffmpeg took too long to read the audio.").to_string())?
+            .map_err(|e| e.to_string())?;
+        if !out.status.success() || out.stdout.len() < 2 {
+            let err = String::from_utf8_lossy(&out.stderr);
+            let line = err.lines().last().unwrap_or("").trim().to_string();
+            return Err(LF!("Não consegui ler o áudio de {file} (o vídeo tem som?). {line}", "Could not read the audio of {file} (does the video have sound?). {line}"));
+        }
+        let pcm = wav_data(&out.stdout);
+        let samples: Vec<i16> = pcm.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect();
+        let mut r = crate::videos_audio::report(&samples, RATE, from, min_db.clamp(3.0, 30.0), top.clamp(1, 40));
+        r["file"] = json!(file);
+        Ok(r)
     }
 
     /// Legendas do áudio de um vídeo ou áudio do projeto, com o Whisper (whisper.cpp pelo Remotion). Gera

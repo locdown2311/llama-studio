@@ -6,7 +6,7 @@ const VID = { data: null, sel: store.get('vidSel', null), comps: {}, compErr: {}
 const VIDEO_SKILL = 'remotion-best-practices';
 // método de edição por situação (receitas), gravado pelo studio na pasta de skills
 const EDITOR_SKILL = 'editor-de-video';
-const VIDEO_NOTE = L('Este projeto é um vídeo do Remotion (React). Para editar gravações que estão em public/ (cortes, tirar pausas, recorte vertical, react com facecam em cima, legendas, transições, zoom, música), use video_edit com uma lista de edição: o studio monta com um modelo pronto, sem você escrever React. Antes de escolher os tempos, veja o vídeo com video_look e a fala com video_find (gere a legenda com video_captions). Para animações criadas do zero, use video_scenes: você escreve o roteiro e a equipe escreve as cenas em paralelo. Depois de mudar código à mão, confira com video_check. A prévia do Remotion Studio atualiza sozinha.');
+const VIDEO_NOTE = L('Este projeto é um vídeo do Remotion (React). Para editar gravações que estão em public/ (cortes, tirar pausas, recorte vertical, react com facecam em cima, legendas, transições, zoom, música), use video_edit com uma lista de edição: o studio monta com um modelo pronto, sem você escrever React. Antes de escolher os tempos, veja o vídeo com video_look, a fala com video_find (gere a legenda com video_captions) e os momentos barulhentos (tiros, gritos, risadas) com video_peaks. Miniaturas: video_thumbnail. Para animações criadas do zero, use video_scenes: você escreve o roteiro e a equipe escreve as cenas em paralelo. Depois de mudar código à mão, confira com video_check. A prévia do Remotion Studio atualiza sozinha.');
 
 function videosOn() { return S.settings.videos === true; }
 function applyVideosNav() {
@@ -170,12 +170,16 @@ function projectActions(p, d) {
   const render = h('button.btn', { type: 'button', disabled: !p.ready || !comps?.length || rendering, title: comps === null ? L('Listando as composições...') : '', onclick: async () => {
     try { await api('/api/videos/render', { id: p.id, comp: sel.value }); await loadVideos(); drawVideos(true); pollVideos(); } catch (e) { toast(e.message, 'err'); }
   } }, ic('download'), L('Renderizar MP4'));
+  // vários cortes: todos em fila (um depois do outro); as miniaturas ficam de fora
+  const all = comps?.length > 1 ? h('button.btn', { type: 'button', disabled: !p.ready || rendering, title: L('Renderiza todas as composições, uma depois da outra (as miniaturas ficam de fora)'), onclick: async () => {
+    try { const r = await api('/api/videos/render-all', { id: p.id, comps }); toast(L('{0} vídeo(s) na fila', r.jobs.length)); await loadVideos(); drawVideos(true); pollVideos(); } catch (e) { toast(e.message, 'err'); }
+  } }, ic('layers'), L('Renderizar todos')) : null;
   const chat = h('button.btn', { type: 'button', onclick: () => videoChat(p) }, ic('chat'), L('Conversa do projeto'));
   const del = h('button.icon-btn', { type: 'button', title: L('Apagar projeto'), 'aria-label': L('Apagar projeto'), html: svg('trash'), onclick: async () => {
     if (!(await confirmBox(L('Apagar o projeto "{0}" e os vídeos dele? Não dá para desfazer.', p.id), L('Apagar'), true))) return;
     try { await api('/api/videos/delete', { id: p.id }); VID.sel = null; VID.watch = null; await loadVideos(); drawVideos(); } catch (e) { toast(e.message, 'err'); }
   } });
-  return [chat, preview, h('span.spacer'), h('span.vid-render', null, sel, render), del];
+  return [chat, preview, h('span.spacer'), h('span.vid-render', null, sel, render, all), del];
 }
 
 /** O que o palco mostra; mesma chave = o palco atual fica como está. */
@@ -217,7 +221,7 @@ function jobCards(p, d) {
     return h('div.vid-job' + (j.done ? (j.ok ? '.ok' : '.err') : ''), null,
       h('div.vid-job-head', null, h('b', null, j.kind === 'captions'
         ? (j.done ? (j.ok ? L('Legendas prontas: {0}', j.out) : L('As legendas falharam')) : L('Gerando legendas... {0}%', pct))
-        : (j.done ? (j.ok ? L('Renderizado: {0}', j.out) : L('O render falhou')) : L('Renderizando {0}... {1}%', j.out, pct)))),
+        : (j.done ? (j.ok ? L('Renderizado: {0}', j.out) : L('O render falhou')) : !j.progress && !String(j.tail || '').trim() ? L('Na fila: {0}', j.out) : L('Renderizando {0}... {1}%', j.out, pct)))),
       j.done ? null : h('div.vid-bar', null, h('i', { style: { width: pct + '%' } })),
       j.done && !j.ok && j.err ? h('div.small', null, j.err) : null,
       !j.done || (!j.ok && !j.err) ? h('pre.vid-log', null, j.tail) : null);
@@ -561,6 +565,7 @@ function mediaSection(p) {
           h('small.muted', null, [fmtBytes(f.size), f.duration ? fmtDur(f.duration) : ''].filter(Boolean).join(' · '))),
         h('div.vm-acts', null,
         f.captions ? h('a.tag.ok', { href: mediaUrl(p.id, f.captions.replace(/\.json$/, '.srt'), true), title: L('Baixar as legendas (.srt)') }, L('legendas')) : null,
+        f.captions ? h('button.icon-btn.sm', { type: 'button', title: L('Corrigir a legenda'), 'aria-label': L('Corrigir a legenda'), html: svg('edit'), onclick: () => editCaptions(p, f.file) }) : null,
         av ? h('button.btn.sm', { type: 'button', disabled: busy, title: L('Transcrever a fala com o Whisper (no seu PC)'), onclick: async () => {
           try { await api('/api/videos/captions', { id: p.id, file: f.file, model: model.value, lang: lang.value }); await loadVideos(); drawVideos(true); pollVideos(); }
           catch (e) { toast(e.message, 'err'); }
@@ -764,4 +769,89 @@ async function runVideoFind(args, tctx) {
       + '\n\n' + L('Para um corte, o trecho começa alguns segundos antes da fala que dá contexto e termina logo depois da reação.'),
     isError: false,
   };
+}
+
+/** video_peaks: trechos barulhentos do áudio (tiros, explosões, gritos), que a legenda não pega. */
+async function runVideoPeaks(args, tctx, tmsg) {
+  let vid;
+  try { vid = await videoProjectOf(tctx); } catch (e) { return { content: e.message, isError: true }; }
+  if (tmsg) tmsg.phase = L('Medindo o áudio...');
+  let r;
+  try { r = await api('/api/videos/peaks', { id: vid, file: String(args.file || ''), from: Number(args.from) || 0, to: Number(args.to) || 0, min: Number(args.min) || 0 || undefined, top: Number(args.top) || undefined }); }
+  catch (e) { if (tmsg) tmsg.phase = ''; return { content: e.message, isError: true }; }
+  if (tmsg) tmsg.phase = '';
+  const f = (x) => x.toFixed(1);
+  const segs = r.segments.map((s, i) => L('{0}. {1}–{2}s ({3}) · pico em {4}s, +{5} dB · {6} pico(s)', i + 1, f(s.start), f(s.end), fmtDur(s.start), f(s.peak), f(s.over), s.hits));
+  const loud = r.minutes.filter((m) => m.db >= 3).map((m) => `${fmtDur(m.t)} (+${f(m.db)} dB)`);
+  return {
+    content: L('public/{0}: {1} trecho(s) barulhento(s) em {2}; os {3} mais fortes (tempos em segundos do arquivo):', r.file, r.total, fmtDur(r.seconds), r.segments.length) + '\n'
+      + (segs.length ? segs.join('\n') : L('Nenhum pico. Tente min menor (ex.: 5) ou veja se o vídeo tem som.'))
+      + (loud.length ? '\n\n' + L('Minutos mais agitados que o normal: {0}', loud.join(', ')) : '')
+      + '\n\n' + L('Vários picos seguidos costumam ser tiroteio, explosões ou gritaria; um pico isolado, um susto ou uma batida. Confirme cada trecho com video_look (from alguns segundos antes do início, to depois do fim) antes de usar.'),
+    isError: false,
+  };
+}
+
+/** video_thumbnail: um quadro com texto grande por cima, exportado em out/<name>.png. */
+async function runVideoThumbnail(args, tctx, tmsg) {
+  let vid;
+  try { vid = await videoProjectOf(tctx); } catch (e) { return { content: e.message, isError: true }; }
+  const name = String(args.name || '').trim();
+  if (tmsg) { tmsg.phase = L('Gerando a miniatura...'); scheduleRender(); }
+  let r;
+  try { r = await api('/api/videos/thumbnail', { ...args, id: vid, name }); }
+  catch (e) { if (tmsg) tmsg.phase = ''; return { content: e.message, isError: true }; }
+  if (tmsg) tmsg.phase = '';
+  if (!r.ok) return { content: L('A miniatura tem problemas; corrija e chame de novo:') + '\n' + (r.errors || []).map((x) => '- ' + x).join('\n'), isError: true };
+  const text = L('Miniatura pronta: {0} (aparece na lista de vídeos da página Vídeos). A composição "{1}" fica no projeto: para ajustar, chame de novo com o mesmo name.', r.file, r.name);
+  let img = null;
+  try { const f = await api('/api/videos/frames', { id: vid, file: r.file, times: [0], width: 540 }); img = f.frames[0]?.data || null; } catch { /* sem prévia */ }
+  if (img && tmsg) tmsg._images = [img];
+  if (img && visionOn()) return { content: text + ' ' + L('Confira: texto legível, rosto ou ação visível, nada importante coberto.'), isError: false, images: [img] };
+  return { content: text, isError: false };
+}
+
+/* ------------------------------------------------------------ corrigir a legenda à mão */
+// Frase por frase (a mesma divisão do video_find): só as frases mudadas são gravadas; as palavras novas
+// dividem o tempo da frase antiga. O .srt é refeito junto.
+async function editCaptions(p, file) {
+  let r;
+  try { r = await api('/api/videos/speech', { id: p.id, file, gap: 0, from: 0, to: 0, query: '' }); }
+  catch (e) { toast(e.message, 'err'); return; }
+  const rows = r.segments.map((s) => ({ ...s, orig: s.text }));
+  const list = h('div.cap-list');
+  const filter = h('input.input', { placeholder: L('Filtrar frases...'), type: 'search' });
+  const count = h('small.muted');
+  const draw = () => {
+    const q = norm(filter.value.trim());
+    list.innerHTML = '';
+    const shown = rows.filter((x) => !q || norm(x.text).includes(q) || norm(x.orig).includes(q)).slice(0, 400);
+    for (const x of shown) {
+      const ta = h('textarea.input.cap-text' + (x.text !== x.orig ? '.changed' : ''), { rows: 1, value: x.text });
+      ta.addEventListener('input', () => { x.text = ta.value; ta.classList.toggle('changed', x.text.trim() !== x.orig.trim()); upd(); });
+      const play = h('button.icon-btn.sm', { type: 'button', title: L('Ouvir este trecho no palco'), 'aria-label': L('Ouvir'), html: svg('play'), onclick: () => {
+        VID.watch = { project: p.id, file, from: 'public' }; drawVideos(true);
+        setTimeout(() => { const v = $('.vid-stage-media video, .vid-stage-media audio'); if (v) { v.currentTime = x.from; v.play().catch(() => {}); } }, 150);
+      } });
+      list.append(h('div.cap-row', null, h('code.cap-time', null, fmtDur(x.from)), ta, play));
+    }
+    if (rows.length > shown.length && !q) list.append(h('small.muted', null, L('Mostrando 400 de {0} frases: use o filtro para achar as outras.', rows.length)));
+  };
+  const changed = () => rows.filter((x) => x.text.trim() !== x.orig.trim() && x.text.trim());
+  const upd = () => { const n = changed().length; count.textContent = n ? L('{0} frase(s) alterada(s)', n) : ''; save.disabled = !n; };
+  filter.addEventListener('input', draw);
+  const save = h('button.btn.primary', { type: 'button', disabled: true, onclick: async () => {
+    save.disabled = true;
+    try {
+      const res = await api('/api/videos/captions-save', { id: p.id, file, edits: changed().map((x) => ({ from: x.from, to: x.to, text: x.text.trim() })) });
+      toast(L('Legenda salva ({0} frase(s)). Os vídeos que usam esta legenda já mostram a correção.', res.changed));
+      m.close();
+    } catch (e) { toast(e.message, 'err'); save.disabled = false; }
+  } }, L('Salvar'));
+  const m = modal({
+    title: L('Legenda de {0}', file.replace(/^public\//, '')), wide: true,
+    body: h('div.cap-edit', null, h('p.muted.small', null, L('Corrija o que o Whisper errou (nomes, gírias, termos do jogo). Se mudar o número de palavras, o tempo da frase é dividido entre as palavras novas.')), filter, list),
+    foot: [count, h('span.spacer'), h('button.btn', { type: 'button', onclick: () => m.close() }, L('Cancelar')), save],
+  });
+  draw();
 }

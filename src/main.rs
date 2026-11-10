@@ -38,6 +38,8 @@ mod uistate;
 mod update;
 mod videos;
 mod videos_edl;
+mod videos_audio;
+mod videos_motion;
 
 use std::io::{Read, Write};
 use std::time::Duration;

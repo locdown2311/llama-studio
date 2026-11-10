@@ -1,7 +1,7 @@
 ---
 name: Video editor (cuts and editing)
-description: Method for editing the project's recordings with the video tools (video_captions, video_find, video_look, video_edit). Says how to find the moments and assemble the video for each situation: live-stream cut, gameplay highlights, gunfights or combat, funny moments, react, tutorial, conversation or podcast, montage to music and horizontal recap. Use whenever the request is to edit, cut or summarize a video that is in public/.
-version: 1
+description: Method for editing the project's recordings with the video tools (video_captions, video_find, video_peaks, video_look, video_edit, video_thumbnail). Says how to find the moments and assemble the video for each situation: live-stream cut, gameplay highlights, gunfights or combat, funny moments, react, tutorial, conversation or podcast, montage to music and horizontal recap. Use whenever the request is to edit, cut or summarize a video that is in public/.
+version: 2
 ---
 
 # Video editor
@@ -25,7 +25,7 @@ Follow the 7 stages in order. In stage 3 pick ONE recipe (or two, if the request
    - After assembling, check duration and size in the video_edit reply. If they do not match the request, fix and call again.
 4. **Never assume what is on screen from the speech.**
    - Confirm with video_look before choosing a clip.
-   - The tools do not hear sounds that are not speech (gunshots, explosions, music). Those moments are found only by looking at frames.
+   - Sounds that are not speech (gunshots, explosions, shouts, laughs) do not show in the captions. video_peaks finds where the sound rises, but does not say what it is: confirm each peak with video_look.
 5. **One moment per clip, cut in the right place:**
    - Start a little before the action (0.5 to 2 s) and end right after the reaction.
    - Do not cut in the middle of a sentence or of an exchange of fire.
@@ -50,7 +50,8 @@ Before anything, settle these, inferring from the request whenever possible:
 - video_captions (language of the video, model "small"). Skip if public/captions/<name>.json already exists.
   - Empty caption or only noise: the video has no speech; go by the frames only.
   - With speech: video_find without query, on a piece, shows the style; with query, it finds the reactions.
-- **Long video** (over 5 min) where the moment is visual: sweep it in 3-minute blocks (video_look from/to, 24 frames each, one frame every ~7 s). Skip blocks that are menus or a still screen.
+- video_peaks on the whole file (a few seconds): the loud stretches, how many peaks each has and the busiest minutes. A great starting point for action, scares and laughs.
+- **Long video** (over 5 min) where the moment is visual and silent (video_peaks does not help): sweep it in 3-minute blocks (video_look from/to, 24 frames each, one frame every ~7 s). Skip blocks that are menus or a still screen.
 
 ## 3. Choose the recipe
 
@@ -76,7 +77,7 @@ Before anything, settle these, inferring from the request whenever possible:
 
 ### B. Gameplay highlights
 - **Goal:** several short plays, in rising order of intensity. 30 to 60 s.
-- **Search:** inventory in blocks looking for chases, near deaths, records, falls, hard parts beaten. With speech, add recipe A's query.
+- **Search:** video_peaks (crashes, falls, shouts) and inventory in blocks looking for chases, near deaths, records, falls, hard parts beaten. With speech, add recipe A's query.
 - **For each clip, note:** second of impact and horizontal position of the action (becomes focusX).
 
 ### C. Gunfight and combat
@@ -88,7 +89,8 @@ Before anything, settle these, inferring from the request whenever possible:
   - ammo or reload;
   - hit or kill marker.
 - **Search:**
-  - Block sweep (mandatory: gunshots do not show in the captions).
+  - video_peaks first: stretches with several peaks in a row are usually firefights. Confirm each with video_look (from 3 s before, to 3 s after, 12 to 16 frames).
+  - If video_peaks finds little (quiet game, loud music), sweep in blocks with video_look.
   - Group signs less than 10 s apart into one clip.
   - With speech, video_find with a query like "shoot|shot|ammo|reload|killed|kill|dead|headshot|get him|watch out|behind|exploded|grenade" and confirm each hit with video_look.
 - **Priority:** multi-kills > near death with comeback > explosion > long firefight.
@@ -96,12 +98,16 @@ Before anything, settle these, inferring from the request whenever possible:
 
 ### D. Funny
 - **Goal:** short fails and reactions; the laugh comes from timing.
-- **Search:** query "lol|haha|no way|what was that|help|bug|i died|ouch". On screen: character falling, glitching, dying in a silly way.
+- **Search:** query "lol|haha|no way|what was that|help|bug|i died|ouch". On screen: character falling, glitching, dying in a silly way. video_peaks catches the laughs and shouts.
 - The clip runs to the end of the laugh, not one second more.
 
 ### E. React
 - **Needs two files:** the facecam (cam) and the content. The cam starts in sync: cam.from = where the cam is when the clip starts.
-- **Limit:** if the facecam is baked into the same recording, it cannot be separated. Use layout "full" with focusX/focusY on the content, or tell the user.
+- **Facecam baked into the same recording (the usual case in live streams):**
+  - Look at a frame with video_look and estimate the facecam region as fractions of the frame (x, y of the top-left corner; w, h). E.g. bottom-right corner ≈ {"x":0.74,"y":0.64,"w":0.26,"h":0.36}.
+  - layout "react", cam without src and with crop. The studio uses the same file, in sync and without double audio.
+  - So the game below does not repeat the facecam, pass crop on the clip with the game area (e.g. {"x":0,"y":0,"w":0.72,"h":1}), or leave it if it does not get in the way.
+  - split 0.35 to 0.45 (the cam on top takes that fraction of the height).
 - **Search:** the person's reactions (recipe A on the cam file, with captions.source "cam").
 
 ### F. Tutorial
@@ -152,8 +158,10 @@ Default structure for short videos:
 ### Layout and crop (9:16 from a 16:9 recording)
 
 - **full:** fills the screen by cropping; only about 1/3 of the width shows.
-  - focusX = horizontal position of the action (0 left, 0.5 middle, 1 right). It is approximate: action very close to the edge sits at the crop's limit.
-  - If the action moves sides, split the clip into parts with different focusX.
+  - focusX = horizontal center of the crop (0 left, 0.5 middle, 1 right). Near the edge, the crop stops at the frame's limit.
+  - focusX "auto": the crop follows the motion through the clip (good for a character moving across the screen). Use it when the action changes sides; on a still scene or a moving camera it stays in the middle.
+  - Without "auto", if the action moves sides, split the clip into parts with different focusX.
+- **crop:** uses only one region of the recording (0..1 fractions), e.g. to remove the facecam or a UI bar.
 - **fit:** the whole recording in a band in the middle, with a blurred background. Use it when cropping would lose something essential (two characters on opposite sides, important UI).
 - Avoid switching between full and fit every clip: the image keeps jumping.
 
@@ -165,6 +173,7 @@ Default structure for short videos:
 - **punch:** scale 1.15 to 1.25, dur 0.4 to 0.6, at the instant of impact. At most 1 every 2 s.
 - **zoom:** slow push-in (1.05 to 1.15) for long still clips.
 - **speed:** 1.25 to 1.5 only on travel without action. Speeding up speech or a firefight ruins the sound.
+- **overlays:** emoji (😂 on a fail, 💀 on a death, 😱 on a scare), image (meme or logo from public/), arrow (points at something: x/y where it sits, angle where it points) and circle (highlights a spot). x/y = center on the final screen (0..1). Use sparingly: 1 or 2 per clip, only at the right moment, dur 1 to 2 s.
 
 ### After calling video_edit
 
@@ -173,7 +182,7 @@ Default structure for short videos:
   - duration within the target;
   - the test note.
 - If it reports an error or a wrong duration, fix the list and call again with the same name. It replaces the previous one.
-- For several cuts, one name per cut (Cut1, Cut2...).
+- For several cuts, one name per cut (Cut1, Cut2...). The user renders them all at once with "Render all" on the Videos page.
 
 ## 7. Check and deliver
 
@@ -189,4 +198,5 @@ Default structure for short videos:
   - strong hook in the first second;
   - ending without dead time.
 - Suggest concrete fixes: which clip, which seconds, which parameter.
+- **Thumbnail, if asked:** video_thumbnail with the most expressive frame (a face reacting or the peak of the action, found with video_look), text of up to 4 words and, if it helps, an emoji or arrow. Same format as the cut (9:16 for Shorts, 16:9 for YouTube). Check the image that comes back.
 - **For posting, if asked:** title up to 60 characters (curiosity, no spoilers), a one-line description, 5 hashtags. Research the hashtags on the web if available; otherwise say they are suggestions.

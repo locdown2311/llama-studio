@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import {
   AbsoluteFill,
   Audio,
+  Img,
   OffthreadVideo,
   Sequence,
   continueRender,
@@ -18,11 +19,16 @@ export type Layout = "full" | "fit" | "react" | "pip" | "side";
 export type Transition = "cut" | "fade" | "slide" | "wipe" | "zoom";
 export type Filter = "none" | "bw" | "warm" | "cold" | "vivid" | "dark";
 
+/** Região do quadro de origem, em frações (0..1). */
+export type Crop = { x: number; y: number; w: number; h: number };
+
 export type Cam = {
-  /** arquivo em public/, ex.: "facecam.mp4" */
+  /** arquivo em public/, ex.: "facecam.mp4" (o mesmo do trecho quando a facecam está na gravação) */
   src: string;
   /** onde a câmera começa (segundos no arquivo dela), em sincronia com o início do trecho */
   from: number;
+  /** só esta região do quadro (a facecam dentro da gravação) */
+  crop?: Crop;
   volume?: number;
   /** 0..1: ponto do quadro que fica no centro ao recortar */
   focusX?: number;
@@ -35,7 +41,22 @@ export type Text = {
   at: number;
   dur: number;
   pos?: "top" | "center" | "bottom";
-  style?: "title" | "label";
+  style?: "title" | "label" | "thumb";
+};
+
+/** Por cima do vídeo: emoji, imagem de public/, seta ou círculo de destaque. x/y: centro na tela (0..1). */
+export type Overlay = {
+  kind: "emoji" | "image" | "arrow" | "circle";
+  text?: string;
+  src?: string;
+  at: number;
+  dur: number;
+  x: number;
+  y: number;
+  size?: number;
+  angle?: number;
+  color?: string;
+  anim?: "pop" | "shake" | "none";
 };
 
 export type Punch = { at: number; scale?: number; dur?: number };
@@ -52,6 +73,10 @@ export type Clip = {
   corner?: "tl" | "tr" | "bl" | "br";
   focusX?: number;
   focusY?: number;
+  /** só esta região do quadro (ex.: a área do jogo, sem a facecam) */
+  crop?: Crop;
+  /** focusX ao longo do trecho: [segundos desde o início no arquivo, x] (o studio calcula com focusX "auto") */
+  track?: [number, number][];
   speed?: number;
   volume?: number;
   mute?: boolean;
@@ -64,6 +89,7 @@ export type Clip = {
   transition?: Transition;
   transitionDur?: number;
   texts?: Text[];
+  overlays?: Overlay[];
 };
 
 export type Edl = {
@@ -81,6 +107,8 @@ export type Edl = {
     color?: string;
     highlight?: string;
   };
+  /** largura e altura de cada arquivo (o studio mede), para recortar com precisão */
+  sizes?: Record<string, [number, number]>;
 };
 
 type Word = { text: string; startMs: number; endMs: number };
@@ -122,7 +150,8 @@ export function edlFrames(edl: Edl): number {
 
 const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp" } as const;
 
-/** Um vídeo preenchendo a caixa, recortado no ponto de foco. */
+/** Um vídeo preenchendo a caixa (boxW x boxH), recortado no ponto de foco. Com as medidas do arquivo, o
+ *  focusX é exatamente o centro do recorte (0..1 dentro da região) e dá para usar só uma região (crop). */
 const Fill: React.FC<{
   src: string;
   from: number;
@@ -132,33 +161,107 @@ const Fill: React.FC<{
   muted: boolean;
   focusX?: number;
   focusY?: number;
+  track?: [number, number][];
+  crop?: Crop;
+  size?: [number, number];
+  boxW: number;
+  boxH: number;
   fit?: boolean;
   filter: string;
-}> = ({ src, from, fps, speed, volume, muted, focusX, focusY, fit, filter }) => {
-  const pos = `${Math.round((focusX ?? 0.5) * 100)}% ${Math.round((focusY ?? 0.5) * 100)}%`;
+}> = ({ src, from, fps, speed, volume, muted, focusX, focusY, track, crop, size, boxW, boxH, fit, filter }) => {
+  const frame = useCurrentFrame();
+  const t = (frame / fps) * speed;
+  const fx = track && track.length > 1 ? interpolate(t, track.map((p) => p[0]), track.map((p) => p[1]), clamp) : track && track.length ? track[0][1] : focusX ?? 0.5;
+  const fy = focusY ?? 0.5;
+  const video = (style: React.CSSProperties, mute: boolean) => (
+    <OffthreadVideo src={staticFile(src)} trimBefore={Math.round(from * fps)} playbackRate={speed} volume={mute ? 0 : volume} muted={mute || muted} style={style} />
+  );
+  const blurred = fit
+    ? video({ position: "absolute", width: "100%", height: "100%", objectFit: "cover", filter: "blur(40px) brightness(0.55)", transform: "scale(1.15)" }, true)
+    : null;
+  if (!size) {
+    // sem as medidas: o navegador recorta (aproximado)
+    const pos = `${Math.round(fx * 100)}% ${Math.round(fy * 100)}%`;
+    return (
+      <AbsoluteFill style={{ overflow: "hidden" }}>
+        {blurred}
+        {video({ position: "absolute", width: "100%", height: "100%", objectFit: fit ? "contain" : "cover", objectPosition: pos, filter }, false)}
+      </AbsoluteFill>
+    );
+  }
+  const [sw, sh] = size;
+  const r = crop || { x: 0, y: 0, w: 1, h: 1 };
+  const rw = r.w * sw;
+  const rh = r.h * sh;
+  const s = fit ? Math.min(boxW / rw, boxH / rh) : Math.max(boxW / rw, boxH / rh);
+  // a janela visível: a caixa inteira (preencher) ou a região inteira no meio (fit)
+  const winW = fit ? rw * s : boxW;
+  const winH = fit ? rh * s : boxH;
+  const offX = fit ? 0 : Math.min(Math.max(fx * rw * s - boxW / 2, 0), rw * s - boxW);
+  const offY = fit ? 0 : Math.min(Math.max(fy * rh * s - boxH / 2, 0), rh * s - boxH);
   return (
     <AbsoluteFill style={{ overflow: "hidden" }}>
-      {fit ? (
-        // proporção diferente: o próprio vídeo, desfocado, preenche as sobras
-        <OffthreadVideo
-          src={staticFile(src)}
-          trimBefore={Math.round(from * fps)}
-          playbackRate={speed}
-          muted
-          style={{ width: "100%", height: "100%", objectFit: "cover", filter: "blur(40px) brightness(0.55)", transform: "scale(1.15)" }}
-        />
-      ) : null}
-      <AbsoluteFill>
-        <OffthreadVideo
-          src={staticFile(src)}
-          trimBefore={Math.round(from * fps)}
-          playbackRate={speed}
-          volume={volume}
-          muted={muted}
-          style={{ width: "100%", height: "100%", objectFit: fit ? "contain" : "cover", objectPosition: pos, filter }}
-        />
-      </AbsoluteFill>
+      {blurred}
+      <div style={{ position: "absolute", left: (boxW - winW) / 2, top: (boxH - winH) / 2, width: winW, height: winH, overflow: "hidden" }}>
+        {video({ position: "absolute", left: -(r.x * sw * s + offX), top: -(r.y * sh * s + offY), width: sw * s, height: sh * s, maxWidth: "none", objectFit: "fill", filter }, false)}
+      </div>
     </AbsoluteFill>
+  );
+};
+
+/** Emojis, imagens, setas e círculos por cima, cada um no seu instante. */
+const OverlayLayer: React.FC<{ items: Overlay[]; fps: number; width: number; height: number }> = ({ items, fps, width, height }) => {
+  const frame = useCurrentFrame();
+  const t = frame / fps;
+  return (
+    <>
+      {items.map((o, i) => {
+        if (t < o.at || t > o.at + o.dur) return null;
+        const local = (t - o.at) * fps;
+        const end = o.dur * fps;
+        const anim = o.anim || "pop";
+        const pop = anim === "none" ? 1 : interpolate(local, [0, 5, 8], [0, 1.15, 1], clamp);
+        const out = interpolate(local, [end - 5, end], [1, 0], clamp);
+        const shake = anim === "shake" ? Math.sin(local * 1.7) * 6 : 0;
+        const size = (o.size || (o.kind === "circle" ? 0.3 : 0.25)) * width;
+        const color = o.color || (o.kind === "arrow" || o.kind === "circle" ? "#ff2d2d" : "#ffffff");
+        let el: React.ReactNode = null;
+        if (o.kind === "emoji") el = <div style={{ fontSize: size * 0.8, lineHeight: 1, textAlign: "center", filter: "drop-shadow(0 6px 12px rgba(0,0,0,0.5))" }}>{o.text}</div>;
+        if (o.kind === "image" && o.src) el = <Img src={staticFile(o.src)} style={{ width: size, height: "auto", display: "block", filter: "drop-shadow(0 6px 12px rgba(0,0,0,0.5))" }} />;
+        if (o.kind === "circle") {
+          // o círculo se desenha (traço animado)
+          const draw = interpolate(local, [0, 10], [0, 1], clamp);
+          const c = Math.PI * 92;
+          el = (
+            <svg width={size} height={size} viewBox="0 0 100 100" style={{ overflow: "visible" }}>
+              <circle cx="50" cy="50" r="46" fill="none" stroke={color} strokeWidth="6" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - draw)} />
+            </svg>
+          );
+        }
+        if (o.kind === "arrow") {
+          el = (
+            <svg width={size} height={size * 0.5} viewBox="0 0 100 50" style={{ overflow: "visible", transform: `rotate(${o.angle ?? 0}deg)` }}>
+              <path d="M2 25 H70" stroke={color} strokeWidth="9" strokeLinecap="round" />
+              <path d="M62 6 L96 25 L62 44 Z" fill={color} />
+            </svg>
+          );
+        }
+        return (
+          <div
+            key={i}
+            style={{
+              position: "absolute",
+              left: o.x * width,
+              top: o.y * height,
+              transform: `translate(-50%, -50%) translateX(${shake}px) scale(${pop})`,
+              opacity: out,
+            }}
+          >
+            {el}
+          </div>
+        );
+      })}
+    </>
   );
 };
 
@@ -171,7 +274,8 @@ const TextLayer: React.FC<{ texts: Text[]; fps: number; width: number }> = ({ te
         if (t < x.at || t > x.at + x.dur) return null;
         const local = (t - x.at) * fps;
         const inOut = interpolate(local, [0, 6, x.dur * fps - 6, x.dur * fps], [0, 1, 1, 0], clamp);
-        const title = (x.style || "title") === "title";
+        const thumb = x.style === "thumb";
+        const title = (x.style || "title") === "title" || thumb;
         const pos = x.pos || "top";
         return (
           <AbsoluteFill
@@ -187,15 +291,17 @@ const TextLayer: React.FC<{ texts: Text[]; fps: number; width: number }> = ({ te
                 opacity: inOut,
                 transform: `translateY(${(1 - inOut) * 20}px) scale(${0.96 + inOut * 0.04})`,
                 fontFamily: "Inter, system-ui, sans-serif",
-                fontWeight: 800,
-                fontSize: width * (title ? 0.07 : 0.045),
+                fontWeight: thumb ? 900 : 800,
+                fontSize: width * (thumb ? 0.11 : title ? 0.07 : 0.045),
+                textTransform: thumb ? "uppercase" : "none",
+                WebkitTextStroke: thumb ? `${Math.round(width * 0.006)}px #000000` : undefined,
                 lineHeight: 1.1,
-                color: title ? "#ffffff" : "#111111",
+                color: thumb ? "#ffe600" : title ? "#ffffff" : "#111111",
                 background: title ? "transparent" : "#ffd84d",
                 padding: title ? 0 : `${width * 0.01}px ${width * 0.025}px`,
                 borderRadius: width * 0.012,
                 textAlign: "center",
-                textShadow: title ? "0 4px 18px rgba(0,0,0,0.75)" : "none",
+                textShadow: thumb ? "0 8px 0 #000000, 0 10px 30px rgba(0,0,0,0.8)" : title ? "0 4px 18px rgba(0,0,0,0.75)" : "none",
                 maxWidth: "92%",
               }}
             >
@@ -290,7 +396,15 @@ const ClipView: React.FC<{ clip: Clip; edl: Edl; enter: number; exit: number; le
     return base * a * b;
   };
   const mainVol = clip.mute ? 0 : clip.volume ?? 1;
-  const camVol = clip.cam ? clip.cam.volume ?? 1 : 0;
+  // a facecam do mesmo arquivo já toca no vídeo principal: sem som em dobro
+  const camVol = clip.cam ? clip.cam.volume ?? (clip.cam.src === clip.src ? 0 : 1) : 0;
+  const sizes = edl.sizes || {};
+  const split = Math.min(0.8, Math.max(0.2, clip.split || 0.5));
+  const topH = Math.round(height * split);
+  const pipW = Math.round(width * Math.min(0.6, Math.max(0.15, clip.split || 0.3)));
+  const pipH = Math.round((pipW * 9) / 16) * (height > width ? 1.6 : 1);
+  const mainBox: [number, number] = layout === "react" && clip.cam ? [width, height - topH] : layout === "side" && clip.cam ? [width / 2, height] : [width, height];
+  const camBox: [number, number] = layout === "react" ? [width, topH] : layout === "side" ? [width / 2, height] : [pipW, pipH];
 
   // zoom lento + aproximações de ênfase
   let scale = interpolate(frame, [0, len], [1, clip.zoom || 1], clamp);
@@ -317,17 +431,36 @@ const ClipView: React.FC<{ clip: Clip; edl: Edl; enter: number; exit: number; le
       muted={mainVol === 0}
       focusX={clip.focusX}
       focusY={clip.focusY}
+      track={clip.track}
+      crop={clip.crop}
+      size={sizes[clip.src]}
+      boxW={mainBox[0]}
+      boxH={mainBox[1]}
       fit={layout === "fit"}
       filter={filter}
     />
   );
   const cam = clip.cam ? (
-    <Fill src={clip.cam.src} from={clip.cam.from} fps={fps} speed={speed} volume={vol(camVol)} muted={camVol === 0} focusX={clip.cam.focusX} focusY={clip.cam.focusY} filter={filter} />
+    <Fill
+      src={clip.cam.src}
+      from={clip.cam.from}
+      fps={fps}
+      speed={speed}
+      volume={vol(camVol)}
+      muted={camVol === 0}
+      focusX={clip.cam.focusX}
+      focusY={clip.cam.focusY}
+      crop={clip.cam.crop}
+      size={sizes[clip.cam.src]}
+      boxW={camBox[0]}
+      boxH={camBox[1]}
+      filter={filter}
+    />
   ) : null;
 
   let body: React.ReactNode = main;
   if (layout === "react" && cam) {
-    const top = Math.round(height * Math.min(0.8, Math.max(0.2, clip.split || 0.5)));
+    const top = topH;
     body = (
       <>
         <div style={{ position: "absolute", left: 0, top: 0, width, height: top, overflow: "hidden" }}>{cam}</div>
@@ -342,8 +475,8 @@ const ClipView: React.FC<{ clip: Clip; edl: Edl; enter: number; exit: number; le
       </>
     );
   } else if (layout === "pip" && cam) {
-    const w = Math.round(width * Math.min(0.6, Math.max(0.15, clip.split || 0.3)));
-    const h = Math.round((w * 9) / 16) * (height > width ? 1.6 : 1);
+    const w = pipW;
+    const h = pipH;
     const m = Math.round(width * 0.03);
     const c = clip.corner || "br";
     body = (
@@ -377,6 +510,7 @@ const ClipView: React.FC<{ clip: Clip; edl: Edl; enter: number; exit: number; le
     <AbsoluteFill style={enterStyle}>
       <AbsoluteFill style={{ transform: `scale(${scale})` }}>{body}</AbsoluteFill>
       {capWords ? <CaptionLayer words={capWords} from={capFrom} speed={speed} fps={fps} edl={edl} /> : null}
+      {clip.overlays && clip.overlays.length ? <OverlayLayer items={clip.overlays} fps={fps} width={width} height={height} /> : null}
       {clip.texts && clip.texts.length ? <TextLayer texts={clip.texts} fps={fps} width={width} /> : null}
     </AbsoluteFill>
   );

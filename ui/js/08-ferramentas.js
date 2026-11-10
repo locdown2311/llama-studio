@@ -99,6 +99,8 @@ async function execTool(name, args, info, tctx, tmsg) {
     if (name === 'video_check') return await runVideoCheck(args || {}, tctx, tmsg);
     if (name === 'video_edit') return await runVideoEdit(args || {}, tctx, tmsg);
     if (name === 'video_find') return await runVideoFind(args || {}, tctx, tmsg);
+    if (name === 'video_peaks') return await runVideoPeaks(args || {}, tctx, tmsg);
+    if (name === 'video_thumbnail') return await runVideoThumbnail(args || {}, tctx, tmsg);
     if (name === 'video_captions') return await runVideoCaptions(args || {}, tctx, tmsg);
     if (name === 'recall_history') return recallHistory(args || {}, tctx.conv);
     if (name === 'update_todos') return await updateTodos(tctx.conv, args, tctx.signal);

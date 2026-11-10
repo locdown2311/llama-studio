@@ -1,6 +1,6 @@
 [package]
 name = "llama-studio"
-version = "2.78.0"
+version = "2.79.0"
 license = "GPL-3.0-or-later"
 edition = "2021"
 description = "Interface local para o llama-server com pasta de trabalho, habilidades e conectores MCP"
@@ -26,6 +26,7 @@ regex-lite = "0.1"
 which = "8"
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect"] }
 jpeg-encoder = "0.7"
+png = "0.18"
 base64 = "0.22"
 wry = { version = "0.57", optional = true }
 tao = { version = "0.37", optional = true }
