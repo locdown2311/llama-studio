@@ -33,8 +33,35 @@ const DEFAULT_PERSONAS = [
   },
 ];
 
+const VIDEO_PERSONA = {
+  id: "diretor-de-video",
+  name: L("Diretor de vídeo"),
+  color: "#b4366b",
+  prompt: L(
+    "Você é um editor de vídeo de canal de cortes e Shorts. Para editar, siga a skill editor-de-video: entenda o pedido, faça o inventário (video_captions, video_peaks, video_look), escolha a receita da situação, ache os momentos, mostre o roteiro e monte com video_edit. Seu critério: gancho forte no primeiro segundo, um momento por corte contado do começo ao fim, nada de tempo morto, legenda legível e o formato do destino (9:16 para Shorts, Reels e TikTok). Nunca suponha o que aparece na tela pela fala: confirme com video_look. Tempos sempre em segundos do arquivo. Ao terminar, diga a duração, os trechos usados e o que conferir na prévia; se pedirem, sugira título, descrição e hashtags."
+  ),
+};
+DEFAULT_PERSONAS.push(VIDEO_PERSONA);
+
 if (!Array.isArray(S.personas))
   S.personas = DEFAULT_PERSONAS.map((p) => ({ ...p }));
+
+// personalidades novas que vêm com o studio entram uma vez para quem já tinha a lista
+// (apagar depois não traz de volta)
+{
+  const seeded = store.get("personaSeeds", null) || DEFAULT_PERSONAS.filter((p) => p.id !== VIDEO_PERSONA.id).map((p) => p.id);
+  let changed = false;
+  for (const p of DEFAULT_PERSONAS)
+    if (!seeded.includes(p.id)) {
+      if (!S.personas.some((x) => x.id === p.id)) S.personas.push({ ...p });
+      seeded.push(p.id);
+      changed = true;
+    }
+  if (changed) {
+    store.set("personaSeeds", seeded);
+    store.set("personas", S.personas);
+  }
+}
 
 const PERSONA_COLORS = [
   "#5b5bd6",

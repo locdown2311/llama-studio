@@ -260,12 +260,15 @@ function videoChat(p) {
   if (last) {
     // conversas de antes: o método de edição entra junto
     if (editor && last.auto?.skills && !last.auto.skills.includes(EDITOR_SKILL)) { last.auto.skills.push(EDITOR_SKILL); saveConvs(); }
+    if (!last.personaId && S.personas.some((x) => x.id === 'diretor-de-video')) { last.personaId = 'diretor-de-video'; saveConvs(); }
     selectConv(last.id); setView('chat'); return;
   }
   const conv = newConv(proj.id);
   const sk = S.skills.some((s) => s.id === VIDEO_SKILL) ? [VIDEO_SKILL] : S.skills.filter((s) => /^remotion/i.test(s.id)).slice(0, 1).map((s) => s.id);
   if (editor) sk.push(EDITOR_SKILL);
   conv.auto = { groups: ['read', 'edit', 'write', 'shell', 'video'], mcp: [], skills: sk };
+  // a personalidade de editor, se existir (o usuário pode trocar ou apagar)
+  if (!conv.personaId && S.personas.some((x) => x.id === 'diretor-de-video')) conv.personaId = 'diretor-de-video';
   conv.title = L('Vídeo: {0}', p.id); saveConvs(); renderConvList();
   setView('chat');
 }
