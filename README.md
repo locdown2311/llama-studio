@@ -127,6 +127,13 @@ Ligue em Utilitários › Apps opcionais. Aparece **Vídeos** na barra lateral, 
 - **Cenas em equipe (`video_scenes`):** o modelo da conversa escreve o roteiro (estilo comum e cenas com duração e descrição) e as APIs da equipe dos exploradores escrevem as cenas em paralelo, cada uma no seu arquivo (`src/scenes/<Nome>.tsx`). O studio monta a sequência (`src/scenes/Video.tsx`), registra a composição `Video` no `Root.tsx`, roda o `tsc` e devolve os erros a quem escreveu cada cena (até duas rodadas). Se uma API falhar, outra assume a cena.
 
 - **Teste rodando (`video_check`, e automático no fim do `video_scenes`):** além do `tsc`, renderiza um quadro por segundo em tamanho mínimo para pegar erros que só aparecem na prévia (um `interpolate` com a faixa fora de ordem, um valor `undefined`, um arquivo de `public/` que falta). O erro volta para quem escreveu a cena, com o quadro e a linha.
+- **Edição de gravações (`video_edit`):** o modelo manda uma lista de edição em JSON (trechos com início e fim, layout, transição, efeitos) e o studio monta com um modelo pronto (`src/edit/EditVideo.tsx`), sem o modelo escrever React. Tem:
+  - **cortes** e **cortar pausas sozinho** (`cutSilences`, pela legenda);
+  - **layouts:** recorte vertical com ponto de foco, vídeo inteiro com fundo desfocado, **react** (facecam em cima, vídeo embaixo), janela no canto e lado a lado;
+  - **transições** (fade, deslizar, cortina, zoom), zoom lento e de ênfase, velocidade, filtros, textos;
+  - **legenda animada** que segue os cortes e **música** de fundo.
+
+  A lista fica em `src/edit/<Nome>.ts` (dá para ajustar à mão) e vira a composição `<Nome>`. O studio confere arquivos e tempos antes e testa o vídeo rodando depois. `video_find` lista os trechos falados e as pausas para escolher os cortes.
 - **Mídia:** envie gravações, músicas, logos e fotos para `public/` pela página (arquivos grandes vão direto para o disco). As cenas usam esses arquivos (`<OffthreadVideo>`, `<Audio>`, `staticFile`).
 - **O modelo vê o vídeo (`video_look`):** o studio tira quadros espaçados com o ffmpeg do próprio Remotion e monta uma folha com o tempo de cada quadro, junto com a fala do trecho se houver legenda. Se o modelo da conversa não enxerga imagens, uma API da equipe marcada como "Aceita imagens" descreve os quadros.
 - **Legendas automáticas (`video_captions` ou o botão na mídia):** transcreve a fala com o Whisper no seu PC (whisper.cpp pelo Remotion) e grava `public/captions/<nome>.json` (palavras com tempo, para legendas animadas) e `.srt`. Na primeira vez baixa o Whisper e o modelo de fala escolhido (base 150 MB, small 470 MB, medium 1,5 GB ou large-v3-turbo 1,6 GB).

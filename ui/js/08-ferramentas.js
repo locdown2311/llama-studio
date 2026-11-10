@@ -15,7 +15,7 @@ const TOOL_INFO = {
   todo: { sec: L('Planejamento'), title: L('Lista de tarefas'), short: 'tarefas', desc: L('O modelo escreve um plano e vai marcando cada passo; você acompanha acima da caixa de texto.') },
   notebook: { sec: L('Planejamento'), title: L('Caderno de investigação'), short: 'caderno', desc: L('O modelo registra achados (endereços, funções, hipóteses) num caderno do projeto e consulta antes de repetir trabalho.') },
   interface: { sec: L('Interface'), title: L('Personalizar a interface'), short: 'interface', desc: L('Temas, cores, fontes e layout do studio, pedidos ao modelo.') },
-  video: { sec: L('Vídeo'), title: L('Cenas de vídeo em equipe'), short: L('cenas'), desc: L('Só nas conversas de um projeto de vídeo: as APIs da equipe escrevem as cenas em paralelo.') },
+  video: { sec: L('Vídeo'), title: L('Edição de vídeo'), short: L('vídeo'), desc: L('Só nas conversas de um projeto de vídeo: editar gravações (cortes, layouts, legendas), ver quadros, gerar legendas e criar cenas animadas em equipe.') },
   explore: { sec: L('Subagentes'), title: L('Subagentes exploradores'), short: 'exploradores', desc: L('Investigação só de leitura com contexto próprio, vários em paralelo.') },
 };
 function enabledGroups() { return TOOL_GROUPS.filter((g) => S.settings.tools[g]); }
@@ -97,6 +97,8 @@ async function execTool(name, args, info, tctx, tmsg) {
     if (name === 'video_scenes') return await runVideoScenes(args || {}, tctx, tmsg);
     if (name === 'video_look') return await runVideoLook(args || {}, tctx, tmsg);
     if (name === 'video_check') return await runVideoCheck(args || {}, tctx, tmsg);
+    if (name === 'video_edit') return await runVideoEdit(args || {}, tctx, tmsg);
+    if (name === 'video_find') return await runVideoFind(args || {}, tctx, tmsg);
     if (name === 'video_captions') return await runVideoCaptions(args || {}, tctx, tmsg);
     if (name === 'recall_history') return recallHistory(args || {}, tctx.conv);
     if (name === 'update_todos') return await updateTodos(tctx.conv, args, tctx.signal);

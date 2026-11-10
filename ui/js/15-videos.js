@@ -4,7 +4,7 @@
 /* ------------------------------------------------------------ estado e ativação */
 const VID = { data: null, sel: store.get('vidSel', null), comps: {}, compErr: {}, media: {}, up: null, poll: 0, busy: false };
 const VIDEO_SKILL = 'remotion-best-practices';
-const VIDEO_NOTE = L('Este projeto é um vídeo do Remotion (React). As composições ficam em src/ (Root.tsx registra cada uma). Siga a habilidade remotion-best-practices. Para um vídeo novo ou com várias cenas, use a ferramenta video_scenes: você escreve o roteiro (estilo comum e cenas com duração e descrição detalhada) e a equipe escreve as cenas em paralelo; depois revise e ajuste com edit_file. Depois de editar, a prévia do Remotion Studio no studio atualiza sozinha; confira com video_check (tipos e um teste rodando), que pega erros que só aparecem na prévia.');
+const VIDEO_NOTE = L('Este projeto é um vídeo do Remotion (React). Para editar gravações que estão em public/ (cortes, tirar pausas, recorte vertical, react com facecam em cima, legendas, transições, zoom, música), use video_edit com uma lista de edição: o studio monta com um modelo pronto, sem você escrever React. Antes de escolher os tempos, veja o vídeo com video_look e a fala com video_find (gere a legenda com video_captions). Para animações criadas do zero, use video_scenes: você escreve o roteiro e a equipe escreve as cenas em paralelo. Depois de mudar código à mão, confira com video_check. A prévia do Remotion Studio atualiza sozinha.');
 
 function videosOn() { return S.settings.videos === true; }
 function applyVideosNav() {
@@ -621,4 +621,58 @@ async function runVideoCheck(args, tctx, tmsg) {
   delete VID.comps[vid];
   if (r.ok) return { content: L('Tipos: ok. Teste rodando (um quadro por segundo): ok.'), isError: false };
   return { content: L('Tipos: ok. O vídeo quebra ao rodar, no quadro {0} ({1}): {2}', r.frame ?? '?', r.at || r.scene || '?', r.message), isError: true };
+}
+
+/* ------------------------------------------------------------ edição de vídeos de verdade (video_edit, video_find) */
+
+/** video_edit: o studio confere e grava a lista de edição, registra a composição e testa. */
+async function runVideoEdit(args, tctx, tmsg) {
+  let vid;
+  try { vid = await videoProjectOf(tctx); } catch (e) { return { content: e.message, isError: true }; }
+  const name = String(args.name || '').trim();
+  let edl = args.edl;
+  if (typeof edl === 'string') { try { edl = JSON.parse(edl); } catch { return { content: L('edl precisa ser um objeto JSON.'), isError: true }; } }
+  tmsg.phase = L('Conferindo a lista de edição...'); scheduleRender();
+  let r;
+  try { r = await api('/api/videos/edit', { id: vid, name, edl: edl || {} }); } catch (e) { tmsg.phase = ''; return { content: e.message, isError: true }; }
+  if (!r.ok) { tmsg.phase = ''; return { content: L('A lista de edição tem problemas; corrija e chame de novo:') + '\n' + r.errors.map((x) => '- ' + x).join('\n'), isError: true }; }
+  tmsg.edit = { name, seconds: r.seconds, clips: r.clips, width: r.width, height: r.height, cut: r.silenceCut };
+  delete VID.comps[vid]; delete VID.compErr[vid];
+  // tipos e o teste rodando, na composição nova
+  tmsg.phase = L('Conferindo os tipos...'); scheduleRender();
+  let check = '';
+  try {
+    const c = await api('/api/videos/check', { id: vid });
+    if (!c.ok) check = L('Erros de tipo:') + '\n```\n' + String(c.out).split(/\r?\n/).filter((l) => /error TS\d+/.test(l)).slice(0, 15).join('\n') + '\n```';
+    else {
+      tmsg.phase = L('Testando o vídeo rodando...'); scheduleRender();
+      const s = await api('/api/videos/smoke', { id: vid, comp: name });
+      check = s.ok ? L('Teste rodando (um quadro por segundo): ok.') : L('O vídeo quebra ao rodar, no quadro {0} ({1}): {2}', s.frame ?? '?', s.at || '?', s.message);
+    }
+  } catch (e) { check = L('Não consegui testar o vídeo rodando: {0}', e.message); }
+  tmsg.phase = '';
+  const cut = r.silenceCut > 0.05 ? ' ' + L('Pausas cortadas: {0}s.', r.silenceCut.toFixed(1)) : '';
+  return {
+    content: L('Composição "{0}": {1}x{2}, {3} trecho(s), {4} no total.{5}', name, r.width, r.height, r.clips, fmtDur(r.seconds), cut) + '\n'
+      + L('Lista gravada em {0} (dá para ajustar tempos ali com edit_file; o modelo de montagem é src/edit/EditVideo.tsx, não edite). A prévia do Remotion Studio mostra "{1}", e o usuário renderiza na página Vídeos.', r.file, name) + '\n\n' + check,
+    isError: /quebra|Erros de tipo/.test(check),
+  };
+}
+
+/** video_find: trechos falados e pausas pela legenda. */
+async function runVideoFind(args, tctx) {
+  let vid;
+  try { vid = await videoProjectOf(tctx); } catch (e) { return { content: e.message, isError: true }; }
+  let r;
+  try { r = await api('/api/videos/speech', { id: vid, file: String(args.file || ''), gap: Number(args.gap) || 0, from: Number(args.from) || 0, to: Number(args.to) || 0 }); }
+  catch (e) { return { content: e.message, isError: true }; }
+  const segs = r.segments.slice(0, 250).map((s) => `[${fmtDur(s.from)}–${fmtDur(s.to)}] ${s.text}`);
+  const sil = r.silences.filter((s) => s.to - s.from >= 0.3).slice(0, 120).map((s) => `${fmtDur(s.from)}–${fmtDur(s.to)} (${(s.to - s.from).toFixed(1)}s)`);
+  const total = r.silences.reduce((n, s) => n + (s.to - s.from), 0);
+  return {
+    content: L('public/{0}: {1} trecho(s) falado(s), {2} pausa(s) somando {3}s.', r.file, r.segments.length, r.silences.length, total.toFixed(1)) + '\n\n'
+      + L('Trechos (tempos no arquivo):') + '\n' + segs.join('\n') + (r.segments.length > segs.length ? '\n…' : '')
+      + (sil.length ? '\n\n' + L('Pausas:') + '\n' + sil.join(', ') : ''),
+    isError: false,
+  };
 }

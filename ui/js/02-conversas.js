@@ -3124,6 +3124,22 @@ function renderTool(tc, res, live) {
         })
       )
     );
+  } else if (name === "video_edit" && args?.edl?.clips) {
+    const e = args.edl;
+    bodyEl.append(
+      h(
+        "div.tool-sec",
+        null,
+        h("div.tool-sec-label", null, L("Lista de edição: {0} · {1} trecho(s){2}", args.name || "", e.clips.length, e.format ? " · " + e.format : "")),
+        h("div.md", {
+          html: md(
+            e.clips
+              .map((c, i) => `**${i + 1}.** ${c.src} ${fmtDur(Number(c.from) || 0)}–${fmtDur(Number(c.to) || 0)}` + [c.layout && c.layout !== "full" ? c.layout + (c.cam ? " + " + c.cam.src : "") : "", c.transition && c.transition !== "cut" ? c.transition : "", c.speed && c.speed !== 1 ? c.speed + "x" : "", c.cutSilences || e.cutSilences ? L("sem pausas") : "", c.texts?.length ? L("{0} texto(s)", c.texts.length) : ""].filter(Boolean).map((x) => " · " + x).join(""))
+              .join("\n\n") + (e.captions && e.captions.style !== "none" ? "\n\n" + L("Legenda: {0}", e.captions.style || "tiktok") : "") + (e.music ? "\n\n" + L("Música: {0}", e.music.src) : "")
+          ),
+        })
+      )
+    );
   } else if (name === "video_scenes" && args) {
     const scenes = Array.isArray(args.scenes) ? args.scenes : [];
     const only = Array.isArray(args.only) ? args.only : [];

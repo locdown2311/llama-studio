@@ -136,6 +136,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/videos/skills", post(videos_skills))
         .route("/api/videos/check", post(videos_check))
         .route("/api/videos/smoke", post(videos_smoke))
+        .route("/api/videos/edit", post(videos_edit))
+        .route("/api/videos/speech", post(videos_speech))
         .route("/api/videos/media", post(videos_media))
         // vídeos grandes: sem o limite de 200 MB dos outros pedidos (o arquivo vai direto para o disco)
         .route("/api/videos/upload", post(videos_upload).layer(DefaultBodyLimit::disable()))
@@ -361,6 +363,15 @@ async fn videos_frames(State(app): S, b: Bytes) -> Res {
 async fn videos_captions(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     app.videos.captions(app.clone(), st(&v, "id"), st(&v, "file"), st(&v, "model"), st(&v, "lang")).map(ok).map_err(bad)?
+}
+async fn videos_edit(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    app.videos.edit(&app, st(&v, "id"), st(&v, "name"), v["edl"].clone()).await.map(ok).map_err(bad)?
+}
+async fn videos_speech(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let f = |k: &str| v[k].as_f64().unwrap_or(0.0);
+    app.videos.speech(&app, st(&v, "id"), st(&v, "file"), f("gap"), f("from"), f("to")).map(ok).map_err(bad)?
 }
 async fn videos_smoke(State(app): S, b: Bytes) -> Res {
     let v = body(&b);

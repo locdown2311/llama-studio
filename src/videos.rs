@@ -451,6 +451,95 @@ impl Videos {
         Ok(smoke_error(&text))
     }
 
+    /// Lista de edição (video_edit): confere, corta silêncios se pedido, grava src/edit/<Nome>.ts e o modelo de
+    /// montagem, e registra a composição <Nome> no Root.tsx. Problemas na lista voltam em "errors".
+    pub async fn edit(&self, app: &App, id: &str, name: &str, edl: Value) -> Result<Value, String> {
+        use crate::videos_edl as ed;
+        let dir = project_dir(app, id).ok_or_else(|| L!("Projeto não encontrado.", "Project not found.").to_string())?;
+        let name = name.trim();
+        let ok_name = name.chars().next().is_some_and(|c| c.is_ascii_uppercase()) && name.len() <= 40 && name.chars().all(|c| c.is_ascii_alphanumeric()) && name != "Video" && name != "EditVideo";
+        if !ok_name {
+            return Ok(json!({ "ok": false, "errors": [L!("name: use PascalCase só com letras e números (ex.: Corte1, ReactShorts), sem \"Video\".", "name: use PascalCase with letters and digits only (e.g. Cut1, ReactShorts), not \"Video\".")] }));
+        }
+        let e: ed::Edl = match serde_json::from_value(edl) {
+            Ok(e) => e,
+            Err(err) => return Ok(json!({ "ok": false, "errors": [format!("edl: {err}")] })),
+        };
+        // durações dos arquivos usados (ffprobe do Remotion)
+        let comp = compositor(&dir);
+        let mut srcs: Vec<String> = vec![];
+        for c in &e.clips {
+            srcs.push(ed::norm_src(&c.src));
+            if let Some(cam) = &c.cam {
+                srcs.push(ed::norm_src(&cam.src));
+            }
+        }
+        if let Some(m) = &e.music {
+            srcs.push(ed::norm_src(&m.src));
+        }
+        srcs.sort();
+        srcs.dedup();
+        let mut durs: HashMap<String, Option<f64>> = HashMap::new();
+        for s in srcs {
+            let p = dir.join("public").join(&s);
+            if ed::safe_rel(&s) && p.is_file() {
+                let d = match &comp {
+                    Some(c) => duration_of(c, &p, &dir).await,
+                    None => None,
+                };
+                durs.insert(s, d);
+            }
+        }
+        let (e, cut) = match ed::prepare(e, &dir, &|s: &str| durs.get(s).copied()) {
+            Ok(x) => x,
+            Err(errors) => return Ok(json!({ "ok": false, "errors": errors })),
+        };
+        let edit_dir = dir.join("src").join("edit");
+        std::fs::create_dir_all(&edit_dir).map_err(|e| e.to_string())?;
+        std::fs::write(edit_dir.join("EditVideo.tsx"), ed::TEMPLATE).map_err(|e| e.to_string())?;
+        std::fs::write(edit_dir.join(format!("{name}.ts")), ed::edl_file(&e)).map_err(|e| e.to_string())?;
+        let root = dir.join("src").join("Root.tsx");
+        let text = std::fs::read_to_string(&root).map_err(|e| LF!("Não consegui ler src/Root.tsx: {e}", "Could not read src/Root.tsx: {e}"))?;
+        let wired = match ed::wire_root(&text, name) {
+            Some(new) => {
+                if new != text {
+                    std::fs::write(&root, new).map_err(|e| e.to_string())?;
+                }
+                true
+            }
+            None => false,
+        };
+        let mut v = ed::summary(&e, cut);
+        v["ok"] = json!(true);
+        v["file"] = json!(format!("src/edit/{name}.ts"));
+        v["wired"] = json!(wired);
+        v["edl"] = serde_json::to_value(&e).unwrap_or_default();
+        Ok(v)
+    }
+
+    /// Trechos falados e silêncios de um arquivo, pela legenda (public/captions/<nome>.json).
+    pub fn speech(&self, app: &App, id: &str, file: &str, gap: f64, from: f64, to: f64) -> Result<Value, String> {
+        use crate::videos_edl as ed;
+        let dir = project_dir(app, id).ok_or_else(|| L!("Projeto não encontrado.", "Project not found.").to_string())?;
+        let src = ed::norm_src(file);
+        let words = ed::words_of(&dir, &src).ok_or_else(|| LF!("public/{} ainda não tem legenda: gere com video_captions.", "public/{} has no captions yet: generate them with video_captions.", src))?;
+        let end = if to > 0.0 { to } else { words.last().map(|w| w.end_ms / 1000.0 + 1.0).unwrap_or(0.0) };
+        let gap = if gap > 0.05 { gap } else { 0.6 };
+        let segs = ed::speech(&words, from.max(0.0), end, gap);
+        let mut silences = vec![];
+        let mut at = from.max(0.0);
+        for (a, b, _) in &segs {
+            if a - at >= gap {
+                silences.push(json!({ "from": at, "to": a }));
+            }
+            at = *b;
+        }
+        if end - at >= gap {
+            silences.push(json!({ "from": at, "to": end }));
+        }
+        Ok(json!({ "file": src, "segments": segs.iter().map(|(a, b, t)| json!({ "from": a, "to": b, "text": t.trim() })).collect::<Vec<_>>(), "silences": silences }))
+    }
+
     /// fps e duração (em quadros) da sequência gerada pelo video_scenes, se houver.
     fn frames_hint(&self, dir: &Path) -> Option<(u64, u64)> {
         let t = std::fs::read_to_string(dir.join("src").join("scenes").join("Video.tsx")).ok()?;
