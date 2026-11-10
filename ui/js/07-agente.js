@@ -301,7 +301,11 @@ function exploreTeamNote() {
   const n = apiForAll('explorer').reduce((t, id) => t + explorerConc(id), 0);
   return n > 1 ? ' ' + L('Há {0} exploradores disponíveis ao mesmo tempo: quando a investigação tiver várias partes, use multi_explore com até {0} subtarefas independentes de uma vez.', n) : '';
 }
-const EXPLORE_MORE_NOTE = L('Os subagentes explore rodam numa API externa: não usam o modelo local nem o contexto desta conversa. Para investigar (achar arquivos, entender uma pasta, ler mais de 2 ou 3 arquivos, pesquisar na web), prefira delegar a explore em vez de ler você mesmo. Quando houver partes independentes, chame explore várias vezes na MESMA resposta: eles rodam em paralelo. Leia você mesmo só o trecho exato que vai editar.');
+const EXPLORE_MORE_NOTE = L('Os subagentes explore rodam numa API externa: não usam o modelo local nem o contexto desta conversa. Para investigar (achar arquivos, entender uma pasta, ler mais de 2 ou 3 arquivos, pesquisar na web), prefira delegar aos subagentes em vez de ler você mesmo. Leia você mesmo só o trecho exato que vai editar.');
+/** Com exploradores ou a conversa numa API, o multi_explore espalha as partes pela equipe e sai bem mais rápido
+    que vários explore. */
+function preferMulti(conv) { return !!(apiFor('explorer') || mainApiForChat(conv)); }
+const MULTI_NOTE = L('Para investigar mais de uma coisa, use multi_explore numa chamada só, com todas as partes como subtarefas independentes (cada uma com o seu escopo): aqui ele é bem mais rápido que vários explore. Use explore só para uma investigação única e pequena.');
 
 async function runAgent(conv) {
   const ac = new AbortController();
@@ -336,7 +340,12 @@ async function runAgent(conv) {
       const { text } = await api('/api/context', { skillsOnly: true, skills: late, lazy });
       if (text) { askMsg.skillNote = text; askMsg.skillIds = late; }
     }
-    const fetchTools = () => api('/api/tools', { ...sel, apis: S.settings.apiTools === true, extra: conv.extraTools || [], lazy, eager: eagerList(sel.mcp, conv.auto?.eager || []), full: sel.mcp.filter((n) => mcpLoadOf(n) === 'eager') });
+    const fetchTools = () => api('/api/tools', { ...sel, apis: S.settings.apiTools === true, extra: conv.extraTools || [], lazy, eager: eagerList(sel.mcp, conv.auto?.eager || []), full: sel.mcp.filter((n) => mcpLoadOf(n) === 'eager') })
+      .then((r) => {
+        // numa API, o explore aponta para o multi_explore (a descrição padrão manda chamar explore várias vezes)
+        if (preferMulti(conv)) for (const t of r.tools || []) if (t.function?.name === 'explore') t.function.description = L('Um subagente explorador para UMA investigação pequena (só leitura, contexto próprio, devolve um relatório). Com mais de uma parte, use multi_explore: aqui ele é bem mais rápido.');
+        return r;
+      });
     let [{ tools, meta, catalog }, ctx] = await Promise.all([
       fetchTools(),
       // o prompt de sistema precisa ficar idêntico entre mensagens para o llama-server reaproveitar o cache:
@@ -365,6 +374,7 @@ async function runAgent(conv) {
       S.settings.concise !== false && !['on', 'ultra'].includes(packLevels().caveman) ? CONCISE_NOTE : '',
       // exploradores numa API: não gastam o modelo local nem o contexto desta conversa, então vale delegar mais
       groups.includes('explore') && apiFor('explorer') && S.settings.exploreMore !== false ? EXPLORE_MORE_NOTE + exploreTeamNote() : '',
+      groups.includes('explore') && preferMulti(conv) ? MULTI_NOTE : '',
       persona?.prompt?.trim() ? L('# Personalidade: {0}\n{1}', persona.name, persona.prompt.trim()) : '',
       proj?.instructions?.trim() ? L('# Instruções do projeto "{0}"\n{1}', proj.name, proj.instructions.trim()) : '',
       ctx.text,
@@ -411,6 +421,7 @@ async function runAgent(conv) {
       if (!msg.tool_calls?.length) break;
 
       const parallel = [];
+      const explores = [];
       const reads = [];
       const images = [];
       let refetch = false;
@@ -442,12 +453,9 @@ async function runAgent(conv) {
           continue;
         }
         if (tc.function.name === 'explore') {
-          // subagentes rodam em paralelo (o llama-server atende vários slots)
+          // vários explore no mesmo passo: rodam juntos no fim do passo, espalhados pela equipe (teamRun)
           tmsg.status = 'running'; scheduleRender();
-          const ts = performance.now();
-          parallel.push(runExplorer(parseArgs(tc.function.arguments) || {}, tctx, tmsg).then((r) => {
-            tmsg.ms = performance.now() - ts; tmsg.content = r.content; tmsg.isError = r.isError; tmsg.status = r.isError ? 'error' : 'ok'; saveConvs(); scheduleRender();
-          }));
+          explores.push({ args: parseArgs(tc.function.arguments) || {}, tmsg, ts: performance.now() });
           continue;
         }
         if (tc.function.name === 'multi_explore') {
@@ -501,6 +509,13 @@ async function runAgent(conv) {
           if (a?.path && wsOf(conv) === S.ws.path) markFresh(a.path);
         }
         saveConvs(); scheduleRender();
+      }
+      if (explores.length) {
+        const done = (e, r) => { e.tmsg.ms = performance.now() - e.ts; e.tmsg.content = r.content; e.tmsg.isError = r.isError; e.tmsg.status = r.isError ? 'error' : 'ok'; saveConvs(); scheduleRender(); };
+        const run = (e, apiId) => runExplorer(e.args, tctx, e.tmsg, apiId).catch((err) => { if (ac.signal.aborted) throw err; return { content: String(err.message || err), isError: true }; }).then((r) => done(e, r));
+        // um só: como antes (a primeira API da equipe, ou o modelo local); vários: cada API pega o próximo ao terminar
+        if (explores.length === 1) parallel.push(run(explores[0]));
+        else parallel.push(teamRun(explores.length, (i, apiId) => run(explores[i], apiId), ac.signal, Number(S.settings.maxConcurrentExplorers) || explores.length));
       }
       if (parallel.length || reads.length) await Promise.all([...parallel, ...reads]);
       // econômico: depois de um erro o modelo volta a pensar no passo seguinte
