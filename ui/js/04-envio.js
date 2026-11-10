@@ -422,7 +422,10 @@ function apiMessages(conv, system) {
     if (m.role === 'user') {
       const text = userContent(m) + (m.use?.length && !m.auto?.undone ? L('\n\n(Use {0} para isso.)', m.use.join(' e ')) : '') + (m.plan ? PLAN_NOTE : '') + (m.skillNote ? '\n\n' + m.skillNote : '') + (m.catalogNote ? '\n\n' + m.catalogNote : '');
       const imgs = m.__i === lastUserIdx && visionOn() ? (m.refs || []).filter(isImgRef).map((r) => S.imgData.get(r.path)).filter(Boolean) : [];
-      out.push({ role: 'user', content: imgs.length ? [{ type: 'text', text }, ...imgs.map((url) => ({ type: 'image_url', image_url: { url } }))] : text });
+      // modelo sem visão: as imagens vão como a descrição que outra API fez
+      const desc = !imgs.length && m.imgDesc ? Object.entries(m.imgDesc).filter(([, d]) => d.text).map(([path, d]) => L('[Imagem {0}, descrita por {1} porque este modelo não enxerga imagens]\n{2}', path, d.by, d.text)).join('\n\n') : '';
+      const full = desc ? text + '\n\n' + desc : text;
+      out.push({ role: 'user', content: imgs.length ? [{ type: 'text', text: full }, ...imgs.map((url) => ({ type: 'image_url', image_url: { url } }))] : full });
     }
     else if (m.role === 'assistant') {
       const text = splitThink(m.content).text;

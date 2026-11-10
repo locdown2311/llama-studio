@@ -576,9 +576,51 @@ async function pasteImage(file) {
     r.path = up.path; r.name = basename(up.path); r.status = 'ok';
     if (data) S.imgData.set(up.path, data);
     refreshTree();
-    if (!visionOn()) toast(L('Imagem salva em anexos. O modelo atual não enxerga imagens: ele recebe só o caminho.'));
+    const seer = seerFor(cur());
+    if (seer) toast(L('O modelo da conversa não enxerga imagens: {0} vai descrevê-la para ele.', apiLabel(seer)));
+    else if (!visionOn()) toast(L('Imagem salva em anexos. O modelo atual não enxerga imagens: ele recebe só o caminho.'));
   } catch (e) { r.status = 'missing'; toast(L('Não consegui salvar a imagem: ') + e.message, 'err'); }
   updateRefPill(r); updatePickers();
+}
+/* ---- imagens no modo API: uma API que enxerga descreve para a que não enxerga ---- */
+/** API que aceita imagens para descrever pela conversa: as da equipe primeiro, depois qualquer pronta. */
+function visionApi(exceptId) {
+  const ids = [...apiForAll('explorer'), ...(S.info.apis || []).filter((a) => a.ready).map((a) => a.id)];
+  return ids.map(apiById).find((a) => a?.ready && a.vision && a.id !== exceptId && !apiCooled(a.id)) || null;
+}
+/** Só no modo API: a conversa roda numa API que não enxerga, e outra API enxerga. */
+function seerFor(conv) {
+  const ma = mainApiForChat(conv);
+  return ma && !visionOn() ? visionApi(ma.id) : null;
+}
+const DESCRIBE_IMG = L('Descreva esta imagem para um assistente que não consegue vê-la e vai trabalhar a partir da sua descrição. Transcreva exatamente todo texto visível (código, erros, números, nomes de arquivos, menus). Descreva o layout, os elementos importantes, cores quando importarem e o que parece estar acontecendo. Seja completo e objetivo, sem opinião e sem introdução.');
+/** Antes do primeiro passo: as imagens da última mensagem viram texto (guardado na mensagem, vale para o resto da conversa). */
+async function describeImgs(conv, signal) {
+  const seer = seerFor(conv);
+  if (!seer) return;
+  const m = [...conv.messages].reverse().find((x) => x.role === 'user' && !x.hidden);
+  const todo = (m?.refs || []).filter(isImgRef).filter((r) => !m.imgDesc?.[r.path]?.text);
+  if (!todo.length) return;
+  m.imgDesc ||= {};
+  conv._waitingModel = true; conv._waitText = L('{0} está olhando a imagem para o modelo da conversa...', apiLabel(seer)); scheduleRender();
+  try {
+    await Promise.all(todo.map(async (r) => {
+      const url = await loadImg(r.path, wsOf(conv));
+      if (!url) return;
+      const out = { content: '', reasoning: '', tool_calls: [] };
+      const ask = DESCRIBE_IMG + (String(m.content || '').trim() ? '\n\n' + L('O pedido do usuário junto com a imagem (foque no que importa para ele): {0}', String(m.content).slice(0, 600)) : '');
+      try {
+        await streamApi([{ role: 'user', content: [{ type: 'text', text: ask }, { type: 'image_url', image_url: { url } }] }], [], out, signal, null, { _p: seer.id, _timeout: 90000 });
+        const text = splitThink(out.content).text.trim();
+        if (text) m.imgDesc[r.path] = { by: `${apiLabel(seer)} · ${seer.model}`, text };
+      } catch (e) {
+        if (signal?.aborted) throw e;
+        m.imgDesc[r.path] = { by: apiLabel(seer), err: String(e.message || e).slice(0, 200) };
+      }
+    }));
+  } finally {
+    conv._waitingModel = false; conv._waitText = ''; saveConvs(); scheduleRender();
+  }
 }
 /** Carrega as imagens da última mensagem do usuário antes de mandar ao modelo. */
 async function preloadImgs(conv) {

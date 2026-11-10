@@ -1707,3 +1707,6 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .vid-media-item .btn svg, .vid-row .icon-btn svg { width: 14px; height: 14px; }
 #vid-up { display: flex; flex-direction: column; gap: 4px; }
 #vid-up[hidden] { display: none; }
+/* imagem descrita por outra API (modo API sem visão) */
+.u-imgdesc { display: inline-flex; align-items: center; gap: 5px; align-self: flex-end; font-size: 11.5px; color: var(--muted); margin-top: 4px; cursor: help; }
+.u-imgdesc svg { width: 12px; height: 12px; }

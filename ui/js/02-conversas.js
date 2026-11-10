@@ -2365,6 +2365,19 @@ function renderUser(m, idx, conv) {
       )
     : null;
 
+  // imagem descrita por outra API (o modelo da conversa não enxerga)
+  const descs = m.imgDesc ? Object.values(m.imgDesc) : [];
+  const descNote = descs.length
+    ? h(
+        "div.u-imgdesc",
+        { title: descs.map((d) => d.text || d.err).join("\n\n---\n\n") },
+        ic("image"),
+        descs.some((d) => d.err) && !descs.some((d) => d.text)
+          ? L("{0} não conseguiu descrever a imagem", descs[0].by)
+          : L("Imagem descrita por {0} para o modelo da conversa", descs.find((d) => d.text)?.by || "")
+      )
+    : null;
+
   return h(
     "div.msg.msg-user",
     { dataset: { start: idx } },
@@ -2372,6 +2385,7 @@ function renderUser(m, idx, conv) {
     h("div.stamp", null, fmtStamp(m.ts)),
 
     thumbs,
+    descNote,
 
     bubble,
 

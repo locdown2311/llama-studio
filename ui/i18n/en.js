@@ -1746,5 +1746,12 @@ const I18N_EN = {
 "Janela do modelo, para o medidor e a compactação.": "The model's window, for the meter and compaction.",
 "{0} APIs · clique numa para editar": "{0} APIs · click one to edit",
 "Fechar todas": "Collapse all",
-"Abrir todas": "Expand all"
+"Abrir todas": "Expand all",
+"Descreva esta imagem para um assistente que não consegue vê-la e vai trabalhar a partir da sua descrição. Transcreva exatamente todo texto visível (código, erros, números, nomes de arquivos, menus). Descreva o layout, os elementos importantes, cores quando importarem e o que parece estar acontecendo. Seja completo e objetivo, sem opinião e sem introdução.": "Describe this image for an assistant that cannot see it and will work from your description. Transcribe all visible text exactly (code, errors, numbers, file names, menus). Describe the layout, the important elements, colors when they matter and what seems to be happening. Be complete and objective, no opinion and no introduction.",
+"{0} está olhando a imagem para o modelo da conversa...": "{0} is looking at the image for the chat model...",
+"O pedido do usuário junto com a imagem (foque no que importa para ele): {0}": "The user's request along with the image (focus on what matters to them): {0}",
+"O modelo da conversa não enxerga imagens: {0} vai descrevê-la para ele.": "The chat model cannot see images: {0} will describe it for it.",
+"[Imagem {0}, descrita por {1} porque este modelo não enxerga imagens]\n{2}": "[Image {0}, described by {1} because this model cannot see images]\n{2}",
+"{0} não conseguiu descrever a imagem": "{0} could not describe the image",
+"Imagem descrita por {0} para o modelo da conversa": "Image described by {0} for the chat model"
 };

@@ -396,6 +396,7 @@ async function runAgent(conv) {
         await ensureModel(conv, ac.signal);
         if (!mainApiForChat(conv)) { await waitModel(conv, ac.signal); await assignSlot(conv); }
         await preloadImgs(conv);
+        await describeImgs(conv, ac.signal);
       }
       if (ac.signal.aborted) throw new DOMException('abort', 'AbortError');
       await maybeCompact(conv, system, tools, ac.signal);
