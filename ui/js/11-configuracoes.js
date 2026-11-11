@@ -208,6 +208,11 @@ function apiSection(put, field, saved) {
     const retries = h('input.input.mono', { type: 'number', min: '0', max: '10', value: a.retries != null ? a.retries : '', placeholder: L('1 (padrão)') });
     const ctxIn = h('input.input.mono', { type: 'number', min: '1024', step: '1024', value: a.contextSet ? a.context : '', placeholder: L('131072 (padrão)') });
     ctxIn.addEventListener('change', () => { const n = parseInt(ctxIn.value, 10); save({ apiProvider: { id: a.id, context: n >= 1024 ? n : 0 } }); });
+    // limites da conta: o NIM já vem com 40 por minuto; as outras só com o que a pessoa puser
+    const rpmIn = h('input.input.mono', { type: 'number', min: '0', value: a.rpm || '', placeholder: a.nim ? L('40 (NIM)') : L('sem limite') });
+    rpmIn.addEventListener('change', () => save({ apiProvider: { id: a.id, rpm: Math.max(0, parseInt(rpmIn.value, 10) || 0) } }));
+    const rpdIn = h('input.input.mono', { type: 'number', min: '0', value: a.rpd || '', placeholder: L('sem limite') });
+    rpdIn.addEventListener('change', () => save({ apiProvider: { id: a.id, rpd: Math.max(0, parseInt(rpdIn.value, 10) || 0) } }));
     retries.addEventListener('change', () => {
       const v = retries.value.trim();
       save({ apiProvider: { id: a.id, retries: v === '' ? null : Math.max(0, Math.min(10, parseInt(v, 10) || 0)) } });
@@ -321,6 +326,7 @@ function apiSection(put, field, saved) {
         ...roles.map((r) => h('span.tag.role', null, r)),
         a.vision ? h('span.tag', { title: L('Aceita imagens') }, ic('image'), L('imagens')) : null,
         isNimApi(a) ? h('span.tag', { title: L('Fila do NVIDIA NIM (40 pedidos por minuto)') }, 'NIM') : null,
+        !isNimApi(a) && a.limited ? h('span.tag', { title: L('Limite configurado: a fila segura os pedidos antes do limite') }, [a.rpm ? L('{0}/min', a.rpm) : '', a.rpd ? L('{0}/dia', a.rpd) : ''].filter(Boolean).join(' · ') || L('limite da conta')) : null,
         u.calls ? h('span.tag.use', { title: L('Hoje: {0} pedidos, {1} tokens, {2} falhas (voltaram para o modelo local).', u.calls, u.tokens.toLocaleString(LOCALE), u.fails) }, L('{0} hoje', u.calls) + (u.fails ? ` · ${u.fails}×` : '')) : null),
       h('div.api-acts', null, pingBtn, del));
     if (!open) return h('div.api-card.closed', null, head);
@@ -337,6 +343,9 @@ function apiSection(put, field, saved) {
           field(L('Modelo de fallback'), fallbackModel, L('Se o principal falhar ou a API cair.')),
           field(L('Tentativas'), retries, L('Reenvios em falha temporária (0 a 10).')),
           field(L('Contexto (tokens)'), ctxIn, L('Janela do modelo, para o medidor e a compactação.'))),
+        h('div.api-grid', null,
+          field(L('Pedidos por minuto'), rpmIn, L('O studio segura a fila antes de bater no limite e mostra o medidor na conversa. Vale para todas as APIs com o mesmo endereço e chave (a mesma conta).')),
+          field(L('Pedidos por dia'), rpdIn, L('Ao acabar, a API para até a meia-noite UTC e o pedido vai para outra API ou para o modelo local. Ex.: OpenRouter grátis, 50 por dia (1000 com créditos).'))),
         h('label.tcard.wrap', null, h('span.tc-main', null, h('span.tc-title', null, L('Aceita imagens')),
           h('span.tc-desc', null, L('Marque se o modelo enxerga imagens (Gemini, GPT-4o, Llama 4, Qwen-VL...). Aí ele recebe fotos anexadas, capturas de tela e os quadros dos vídeos.'))),
           h('span.switch', null, h('input', { type: 'checkbox', checked: a.vision === true, onchange: (e) => save({ apiProvider: { id: a.id, vision: e.target.checked } }) }), h('span'))),

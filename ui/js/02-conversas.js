@@ -1942,7 +1942,9 @@ function renderChat() {
 // aqui é só o mostrador: pedidos na janela de 60 s, e quanto falta para abrir vaga quando enche.
 const NIM = { timer: 0, data: null, at: 0 };
 
-function isNimModel() { return isNimApi(mainApiForChat()); }
+// O medidor vale para toda API com limite (o NIM vem com 40 por minuto; as outras, o que estiver configurado).
+function limitApi() { const a = mainApiForChat(); return a && (a.limited || isNimApi(a)) ? a : null; }
+function isNimModel() { return !!limitApi(); }
 
 function maybeStartNimPoll() {
   const el = $("#nim-meter");
@@ -1962,7 +1964,8 @@ function stopNimPoll() { clearInterval(NIM.timer); NIM.timer = 0; }
 
 async function updateNimStatusChat() {
   NIM.at = Date.now();
-  try { NIM.data = await api("/api/nim-status"); } catch { /* servidor fora: mantém o último */ }
+  const a = limitApi();
+  try { NIM.data = await api("/api/limit-status?id=" + encodeURIComponent(a?.id || "")); NIM.api = a; } catch { /* servidor fora: mantém o último */ }
   drawNimMeter();
 }
 
@@ -1970,19 +1973,32 @@ function drawNimMeter() {
   const el = $("#nim-meter");
   if (!el) return;
   const d = NIM.data;
-  if (!d || !isNimModel()) { el.hidden = true; return; }
+  const a = limitApi();
+  if (!d || !a || !d.limited || NIM.api?.id !== a.id) { el.hidden = true; return; }
+  const name = d.nim ? "NIM" : a.name || a.id;
+  const full = d.nim ? "NVIDIA NIM" : a.name || a.id;
   const age = Math.floor((Date.now() - NIM.at) / 1000);
   const wait = Math.max(0, (d.wait_secs || 0) - age);
-  const budget = d.budget || d.max || 40;
-  const pct = Math.min(100, (d.used / budget) * 100);
-  const lvl = wait > 0 || d.used >= budget ? "full" : pct >= 80 ? "hi" : pct >= 50 ? "mid" : "lo";
+  const dayOut = d.rpd > 0 && d.day >= d.rpd;
+  const perMin = d.max > 0;
+  const budget = d.budget || d.max || 1;
+  const pct = dayOut ? 100 : perMin ? Math.min(100, (d.used / budget) * 100) : Math.min(100, (d.day / d.rpd) * 100);
+  const lvl = dayOut || wait > 0 || (perMin && d.used >= budget) ? "full" : pct >= 80 ? "hi" : pct >= 50 ? "mid" : "lo";
   el.hidden = false;
   el.className = "nim-meter " + lvl;
-  const txt = wait > 0 ? L("NIM {0}/{1} · {2}s", d.used, d.max, wait) : L("NIM {0}/{1}", d.used, d.max);
-  el.innerHTML = `<i style="width:${pct.toFixed(0)}%"></i><span>${txt}</span>`;
-  el.title = (wait > 0
-    ? L("NVIDIA NIM: limite de {0} pedidos por minuto atingido. Os pedidos ficam na fila e saem sozinhos em {1}s.", d.max, wait)
-    : L("NVIDIA NIM: {0} de {1} pedidos no último minuto. O studio usa até {2} e guarda {3} para a conversa (exploradores e tarefas de fundo esperam antes).", d.used, d.max, budget, d.reserve || 0))
+  const day = d.rpd > 0 ? L(" · hoje {0}/{1}", d.day, d.rpd) : "";
+  const txt = dayOut ? L("{0}: limite do dia", name)
+    : !perMin ? L("{0} hoje {1}/{2}", name, d.day, d.rpd)
+    : wait > 0 ? L("{0} {1}/{2} · {3}s", name, d.used, d.max, wait) + day
+    : L("{0} {1}/{2}", name, d.used, d.max) + day;
+  el.innerHTML = `<i style="width:${pct.toFixed(0)}%"></i><span>${esc(txt)}</span>`;
+  el.title = (dayOut
+    ? L("{0}: os {1} pedidos do dia acabaram. Até a meia-noite UTC os pedidos vão para outra API ou para o modelo local.", full, d.rpd)
+    : !perMin ? L("{0}: {1} de {2} pedidos hoje (renova à meia-noite UTC).", full, d.day, d.rpd)
+    : wait > 0
+    ? L("{0}: limite de {1} pedidos por minuto atingido. Os pedidos ficam na fila e saem sozinhos em {2}s.", full, d.max, wait)
+    : L("{0}: {1} de {2} pedidos no último minuto. O studio usa até {3} e guarda {4} para a conversa (exploradores e tarefas de fundo esperam antes).", full, d.used, d.max, budget, d.reserve || 0))
+    + (d.rpd > 0 && !dayOut && perMin ? " " + L("Hoje: {0} de {1}.", d.day, d.rpd) : "")
     + (d.waiting ? " " + L("{0} na fila agora.", d.waiting) : "");
 }
 

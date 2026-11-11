@@ -85,6 +85,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/skills", get(skills_list))
         .route("/api/skills/get", get(skills_get))
 .route("/api/nim-status", get(nim_status_handler))
+        .route("/api/limit-status", get(nim_status_handler))
         .route("/api/skills/save", post(skills_save))
         .route("/api/skills/delete", post(skills_delete))
         .route("/api/skills/import-path", post(skills_import_path))
@@ -638,6 +639,12 @@ async fn set_config(State(app): S, b: Bytes) -> Res {
                 if let Some(x) = p.get("context") {
                     e.context = x.as_u64().map(|n| n.min(4_000_000) as u32).unwrap_or(0);
                 }
+                if let Some(x) = p.get("rpm") {
+                    e.rpm = x.as_u64().map(|n| n.min(100_000) as u32).unwrap_or(0);
+                }
+                if let Some(x) = p.get("rpd") {
+                    e.rpd = x.as_u64().map(|n| n.min(10_000_000) as u32).unwrap_or(0);
+                }
                 if let Some(r) = p.get("retries") {
                     e.retries = r.as_u64().map(|n| (n as u32).min(10));
                 }
@@ -937,10 +944,17 @@ async fn skills_get(State(app): S, Query(qs): Q) -> Res {
     ok(v)
 }
 
-async fn nim_status_handler(State(app): S) -> Res {
-    let n = app.nim.status();
-    ok(json!({"used": n.used, "wait_secs": n.wait_secs, "waiting": n.waiting, "free": n.free, "next_secs": n.next_secs,
-        "max": crate::nim::MAX, "budget": crate::nim::BUDGET, "reserve": crate::nim::RESERVE, "window_secs": crate::nim::WINDOW.as_secs()}))
+/// Medidor de limite da API (`id`); sem `id`, a primeira API do NIM (compatibilidade).
+async fn nim_status_handler(State(app): S, Query(q): Query<HashMap<String, String>>) -> Res {
+    let cfg = app.cfg();
+    let p = match q.get("id") {
+        Some(id) => cfg.api_providers.iter().find(|p| &p.id == id),
+        None => cfg.api_providers.iter().find(|p| crate::remote::is_nim(p)),
+    };
+    ok(match p {
+        Some(p) => app.limits.status(&app, p),
+        None => json!({ "limited": false }),
+    })
 }
 
 async fn skills_save(State(app): S, b: Bytes) -> Res {

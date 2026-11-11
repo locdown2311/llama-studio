@@ -74,6 +74,12 @@ pub struct ApiProvider {
     /// O modelo aceita imagens (quadros de vídeo, capturas de tela, fotos anexadas).
     #[serde(default)]
     pub vision: bool,
+    /// Limite de pedidos por minuto da conta (0 = sem; o NIM vale 40 sem configurar).
+    #[serde(default)]
+    pub rpm: u32,
+    /// Limite de pedidos por dia da conta (0 = sem).
+    #[serde(default)]
+    pub rpd: u32,
 
     #[serde(default)]
     pub params: HashMap<String, serde_json::Value>,
@@ -145,7 +151,7 @@ pub struct App {
     pub browser: Browser,
     pub llama: Llama,
     /// Fila do NVIDIA NIM (40 pedidos por minuto na conta).
-    pub nim: crate::nim::Nim,
+    pub limits: crate::limits::Limits,
 
     ui: OnceLock<Box<dyn Fn(UiMsg) + Send + Sync>>,
     pub rt: OnceLock<tokio::runtime::Handle>,
@@ -219,7 +225,7 @@ impl App {
             ui: OnceLock::new(),
             rt: OnceLock::new(),
             native_window: std::sync::atomic::AtomicBool::new(false),
-            nim: Default::default(),
+            limits: Default::default(),
             videos: Arc::new(crate::videos::Videos::default()),
         });
         app.save_config();

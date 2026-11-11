@@ -20,24 +20,38 @@ fn err(status: StatusCode, msg: String) -> Response {
 }
 
 /// Só o NVIDIA NIM (id "nvidia") tem limite de plano.
-fn is_nim(c: &ApiProvider) -> bool {
+pub(crate) fn is_nim(c: &ApiProvider) -> bool {
     c.id.trim().eq_ignore_ascii_case("nvidia") || c.base.to_ascii_lowercase().contains("integrate.api.nvidia.com")
 }
 
-/// Falha no envio: limite de plano (NIM) ou erro de rede.
+/// Falha no envio: limite de plano (por minuto ou por dia) ou erro de rede.
 enum SendErr {
     /// Segundos para esperar antes de tentar de novo.
-    Limit(u64),
+    Limit(u64, String),
+    /// Acabou o limite do dia (o número é o limite).
+    Daily(u32, String),
     Net(reqwest::Error),
 }
 
 impl SendErr {
     fn msg(self) -> String {
         match self {
-            SendErr::Limit(s) => LF!("Limite do NVIDIA NIM: 40 pedidos por minuto. Fila cheia. Tente de novo em {}s.", "NVIDIA NIM limit: 40 requests per minute. Queue full. Retry in {}s.", s),
+            SendErr::Limit(s, n) => LF!("Limite de pedidos por minuto de {n}: fila cheia. Tente de novo em {s}s.", "{n} requests-per-minute limit: queue full. Retry in {s}s."),
+            SendErr::Daily(d, n) => LF!("{n} já fez os {d} pedidos do dia (o limite renova à meia-noite UTC).", "{n} already made its {d} requests for today (the limit resets at midnight UTC)."),
             SendErr::Net(e) => chain(e),
         }
     }
+    fn wait(&self) -> Option<u64> {
+        match self {
+            SendErr::Limit(s, _) => Some(*s),
+            SendErr::Daily(..) => Some(3600),
+            SendErr::Net(_) => None,
+        }
+    }
+}
+
+fn label(c: &ApiProvider) -> String {
+    if is_nim(c) { "NVIDIA NIM".into() } else if !c.name.trim().is_empty() { c.name.trim().to_string() } else { c.id.clone() }
 }
 
 /// Contexto usado quando o provedor não informa o dele (a maioria dos modelos de API tem 128k ou mais).
@@ -74,6 +88,9 @@ pub fn public(app: &App) -> Value {
         "contextSet": p.context >= 1024,
         "vision": p.vision,
         "nim": is_nim(p),
+        "rpm": p.rpm,
+        "rpd": p.rpd,
+        "limited": crate::limits::rule(&app.cfg(), p).is_some(),
 
         "params": p.params,
         "thinkParams": p.think_params,
@@ -103,13 +120,16 @@ fn client() -> &'static reqwest::Client {
 /// `side`: pedido que não é a conversa (explorador, auditor, tarefa de fundo); na fila do NIM ele cede a vez.
 async fn send_with_retries(app: &App, c: &ApiProvider, body_str: &str, max_retries: u32, side: bool) -> Result<reqwest::Response, SendErr> {
     let mut attempt = 0u32;
-    let nim = is_nim(c);
+    let limited = crate::limits::rule(&app.cfg(), c).is_some();
 
     loop {
-        // NIM: espera uma vaga na janela de 60 s em vez de bater no limite (as novas tentativas também contam)
-        if nim {
-            if let Err(wait) = app.nim.acquire(side).await {
-                return Err(SendErr::Limit(wait));
+        // API com limite (NIM ou configurado): espera uma vaga na janela de 60 s em vez de bater no limite
+        // (as novas tentativas também contam); o limite do dia recusa na hora
+        if limited {
+            match app.limits.acquire(app, c, side).await {
+                Ok(()) => {}
+                Err(crate::limits::Deny::Wait(w)) => return Err(SendErr::Limit(w, label(c))),
+                Err(crate::limits::Deny::Daily(d)) => return Err(SendErr::Daily(d, label(c))),
             }
         }
         let mut rb = client()
@@ -134,11 +154,11 @@ async fn send_with_retries(app: &App, c: &ApiProvider, body_str: &str, max_retri
                 tokio::time::sleep(Duration::from_millis(delay)).await;
             }
 
-            // o NIM recusou mesmo com a fila (outro programa na mesma chave): fecha a porta pelo tempo que ele
+            // a API recusou mesmo com a fila (outro programa na mesma chave): fecha a porta pelo tempo que ela
             // pedir; a próxima tentativa espera na fila em vez de insistir e gastar mais pedidos
-            Ok(r) if nim && r.status().as_u16() == 429 => {
+            Ok(r) if limited && r.status().as_u16() == 429 => {
                 let secs = r.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(15);
-                app.nim.block(secs);
+                app.limits.block(app, c, secs);
                 if attempt >= max_retries.max(1) {
                     return Ok(r);
                 }
@@ -267,7 +287,7 @@ pub async fn chat(app: &App, id: &str, body: Bytes, side: bool) -> Response {
     let has_fallback = !c.fallback_model.trim().is_empty() && c.fallback_model.trim() != c.model.trim();
     if has_fallback {
         let needs_fallback = match &sent {
-            Err(SendErr::Limit(_)) => false,
+            Err(SendErr::Limit(..) | SendErr::Daily(..)) => false,
             Err(_) => true,
             Ok(r) => !r.status().is_success(),
         };
@@ -304,12 +324,12 @@ pub async fn chat(app: &App, id: &str, body: Bytes, side: bool) -> Response {
             out.body(Body::from_stream(resp.bytes_stream())).unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response())
         }
 
-        Err(SendErr::Limit(wait)) => {
+        Err(e @ (SendErr::Limit(..) | SendErr::Daily(..))) => {
             let mut h = axum::http::HeaderMap::new();
-            if let Ok(v) = wait.to_string().parse::<axum::http::HeaderValue>() {
+            if let Ok(v) = e.wait().unwrap_or(30).to_string().parse::<axum::http::HeaderValue>() {
                 h.insert(axum::http::header::RETRY_AFTER, v);
             }
-            (StatusCode::TOO_MANY_REQUESTS, h, Json(json!({ "error": { "message": SendErr::Limit(wait).msg() } }))).into_response()
+            (StatusCode::TOO_MANY_REQUESTS, h, Json(json!({ "error": { "message": e.msg() } }))).into_response()
         }
 
         Err(e) => err(StatusCode::BAD_GATEWAY, LF!("API externa indisponível ({}).", "External API unavailable ({}).", e.msg())),

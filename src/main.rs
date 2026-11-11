@@ -19,6 +19,7 @@ mod shell;
 mod desktop;
 mod dictate;
 mod backup;
+mod limits;
 mod llama;
 mod locate;
 mod engines;
