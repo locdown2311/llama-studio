@@ -307,7 +307,7 @@ async fn proxy(State(app): S, req: Request) -> Response {
                 }
                 out = out.header(k, v);
             }
-            out.body(Body::from_stream(resp.bytes_stream())).unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response())
+            out.body(Body::from_stream(crate::remote::safe_stream(resp, "llama-server".into()))).unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response())
         }
         Err(e) => (
             StatusCode::BAD_GATEWAY,

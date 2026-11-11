@@ -498,6 +498,12 @@ function cacheWhy(prev, now) {
   return { why: '', start: -1 };
 }
 
+/** Erro de conexão (vale tentar de novo): queda no meio do streaming, rede, API ou llama-server fora por um instante. */
+function isNetErr(e) {
+  const m = String(e?.message || e || '');
+  return e instanceof TypeError || /network ?error|failed to fetch|load failed|conexão .*caiu|connection .*dropped|respondeu (502|503|504)|responded (502|503|504)|ECONNRESET|socket hang up/i.test(m);
+}
+
 async function streamCompletion(conv, system, tools, msg, signal) {
   const msgs = apiMessages(conv, system);
   const print = reqPrint(conv, system, tools, msgs);
@@ -509,15 +515,24 @@ async function streamCompletion(conv, system, tools, msg, signal) {
   const extra = requestExtras(conv);
   if (tools?.length) extra.parallel_tool_calls = true;
   const mainApi = mainApiForChat(conv);
+  if (mainApi) { extra._remote = true; extra._p = mainApi.id; }
+  // a conexão caiu (rede, API ou llama-server reiniciando): tenta de novo do começo, até 2 vezes, sem
+  // mostrar o erro; a parte que já tinha chegado é descartada (o pedido é o mesmo)
   let r;
+  for (let attempt = 0; ; attempt++) {
+    try { r = await streamRaw(msgs, tools, msg, signal, scheduleRender, extra); break; }
+    catch (e) {
+      if (signal?.aborted || e.name === 'AbortError' || attempt >= 2 || !isNetErr(e)) throw e;
+      msg.content = ''; msg.reasoning = ''; msg.tool_calls = []; msg._pp = null;
+      msg._retry = L('A conexão caiu; tentando de novo ({0}/2)...', attempt + 1);
+      scheduleRender();
+      await new Promise((ok) => setTimeout(ok, attempt ? 4000 : 1500));
+      if (signal?.aborted) throw e;
+    } finally { delete msg._retry; }
+  }
   if (mainApi) {
-    extra._remote = true;
-    extra._p = mainApi.id;
-    r = await streamRaw(msgs, tools, msg, signal, scheduleRender, extra);
     apiUse({ calls: 1, tokens: msg.usage?.total_tokens || 0 }, mainApi.id);
     msg.via = msg._fallbackModel || mainApi.model || '';
-  } else {
-    r = await streamRaw(msgs, tools, msg, signal, scheduleRender, extra);
   }
   // medida real do servidor: prompt (com o que veio do cache) + resposta
   if (msg.ctxTokens) { conv.ctx = { tokens: msg.ctxTokens, n: conv.messages.length, cut: conv.compactCut || 0 }; drawCtxMeter(); }

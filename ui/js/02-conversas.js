@@ -2255,7 +2255,9 @@ function waitProgress(msg) {
       h(
         "div.wprog-txt",
         null,
-        msg?._pp
+        msg?._retry
+          ? msg._retry
+          : msg?._pp
           ? L("Contexto já estava pronto; começando a responder")
           : L("Preparando a resposta"),
         secs >= 2 ? L(" · {0}s", secs) : ""

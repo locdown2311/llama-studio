@@ -50,6 +50,27 @@ impl SendErr {
     }
 }
 
+/// O corpo da resposta repassado à interface. Se a conexão com a API cai no meio, em vez de cortar (o
+/// navegador mostra só "network error"), manda um último evento com o erro explicado e fecha direito; a
+/// interface tenta de novo sozinha.
+pub(crate) fn safe_stream(resp: reqwest::Response, who: String) -> impl futures_util::Stream<Item = Result<bytes::Bytes, std::convert::Infallible>> {
+    use futures_util::StreamExt;
+    let mut failed = false;
+    resp.bytes_stream().filter_map(move |r| {
+        let out = match r {
+            _ if failed => None,
+            Ok(b) => Some(Ok(b)),
+            Err(e) => {
+                failed = true;
+                let why = if e.is_timeout() { L!("ficou 3 minutos sem mandar nada", "sent nothing for 3 minutes").to_string() } else { chain(e) };
+                let msg = LF!("A conexão com {who} caiu no meio da resposta ({why}).", "The connection to {who} dropped mid-answer ({why}).");
+                Some(Ok(bytes::Bytes::from(format!("\n\ndata: {}\n\n", json!({ "error": { "message": msg, "type": "stream_cut" } })))))
+            }
+        };
+        std::future::ready(out)
+    })
+}
+
 fn label(c: &ApiProvider) -> String {
     if is_nim(c) { "NVIDIA NIM".into() } else if !c.name.trim().is_empty() { c.name.trim().to_string() } else { c.id.clone() }
 }
@@ -113,6 +134,9 @@ fn client() -> &'static reqwest::Client {
             .pool_max_idle_per_host(2)
             .tcp_keepalive(Duration::from_secs(20))
             .connect_timeout(Duration::from_secs(15))
+            // tempo sem chegar nada (não o total): modelos que pensam muito ou respostas longas passavam dos
+            // 5 minutos e a conexão era cortada no meio ("network error")
+            .read_timeout(Duration::from_secs(180))
             .build()
             .expect("cliente das APIs externas")
     })
@@ -134,7 +158,7 @@ async fn send_with_retries(app: &App, c: &ApiProvider, body_str: &str, max_retri
         }
         let mut rb = client()
             .post(endpoint(&c.base, "chat/completions"))
-            .timeout(Duration::from_secs(300))
+            .timeout(Duration::from_secs(45 * 60))
             .header("Content-Type", "application/json")
             .header("User-Agent", "Llama-Studio");
         if !c.key.trim().is_empty() {
@@ -321,7 +345,7 @@ pub async fn chat(app: &App, id: &str, body: Bytes, side: bool) -> Response {
                 out = out.header("x-studio-fallback-model", c.fallback_model.trim());
             }
 
-            out.body(Body::from_stream(resp.bytes_stream())).unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response())
+            out.body(Body::from_stream(safe_stream(resp, label(&c)))).unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response())
         }
 
         Err(e @ (SendErr::Limit(..) | SendErr::Daily(..))) => {

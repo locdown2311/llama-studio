@@ -1914,4 +1914,5 @@ const I18N_EN = {
 "Pedidos por dia": "Requests per day",
 "Ao acabar, a API para até a meia-noite UTC e o pedido vai para outra API ou para o modelo local. Ex.: OpenRouter grátis, 50 por dia (1000 com créditos).": "When used up, the API stops until midnight UTC and the request goes to another API or the local model. E.g. OpenRouter free, 50 per day (1000 with credits).",
 "limite da conta": "account limit",
+"A conexão caiu; tentando de novo ({0}/2)...": "The connection dropped; trying again ({0}/2)...",
 };
