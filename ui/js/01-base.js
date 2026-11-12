@@ -329,12 +329,22 @@ function highlight(text, lang) {
   return { html: esc(text), lang: lang || '' };
 }
 
+// Blocos que a pessoa abriu com "Mostrar tudo": continuam abertos quando a conversa é redesenhada.
+const CODE_OPEN = new Set();
+function codeKey(text) {
+  let h = 0;
+  for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) | 0;
+  return text.length + '-' + (h >>> 0).toString(36);
+}
+
 function codeHTML(text, lang, { title, collapse } = {}) {
   const r = highlight(text.replace(/\n$/, ''), (lang || '').toLowerCase());
   const label = title || LANG_NAME[r.lang] || r.lang || L('Texto');
   const lines = text.split('\n').length;
-  const col = collapse && lines > 18;
-  return `<div class="code${col ? ' collapsed' : ''}"><div class="code-head"><span class="code-lang" style="--lang:${LANG_COLOR[r.lang] || 'var(--muted)'}"><i></i>${esc(label)}</span><span class="spacer"></span><span class="code-lines">${lines} ${lines === 1 ? L('linha') : L('linhas')}</span><button class="copy-btn" data-copy="1">${svg('copy')}<span>${L('Copiar')}</span></button></div><pre><code class="hljs">${r.html}</code></pre>${col ? `<button class="code-more" data-expand="1">${L('Mostrar tudo')}</button>` : ''}</div>`;
+  const key = codeKey(text);
+  const big = collapse && lines > 18;
+  const col = big && !CODE_OPEN.has(key);
+  return `<div class="code${col ? ' collapsed' : ''}${big && !col ? ' expanded' : ''}" data-code="${key}"><div class="code-head"><span class="code-lang" style="--lang:${LANG_COLOR[r.lang] || 'var(--muted)'}"><i></i>${esc(label)}</span><span class="spacer"></span><span class="code-lines">${lines} ${lines === 1 ? L('linha') : L('linhas')}</span><button class="copy-btn" data-copy="1">${svg('copy')}<span>${L('Copiar')}</span></button></div><pre><code class="hljs">${r.html}</code></pre>${col ? `<button class="code-more" data-expand="1">${L('Mostrar tudo')}</button>` : ''}</div>`;
 }
 
 if (window.marked) {
@@ -350,7 +360,7 @@ function md(text) {
   const hit = mdCache.get(text);
   if (hit) return hit;
   let html;
-  try { html = DOMPurify.sanitize(marked.parse(text), { ADD_ATTR: ['data-copy', 'data-expand'] }); }
+  try { html = DOMPurify.sanitize(marked.parse(text), { ADD_ATTR: ['data-copy', 'data-expand', 'data-code'] }); }
   catch { html = `<p>${esc(text)}</p>`; }
   if (mdCache.size > 400) mdCache.clear();
   mdCache.set(text, html);
@@ -396,7 +406,11 @@ document.addEventListener('click', (e) => {
     return;
   }
   const ex = e.target.closest('[data-expand]');
-  if (ex) { ex.closest('.code').classList.remove('collapsed'); ex.remove(); }
+  if (ex) {
+    const box = ex.closest('.code');
+    if (box.dataset.code) CODE_OPEN.add(box.dataset.code);
+    box.classList.remove('collapsed'); box.classList.add('expanded'); ex.remove();
+  }
 });
 
 /* ============================================================ estado */

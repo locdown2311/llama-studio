@@ -295,6 +295,8 @@ svg { display: block; flex: none; width: 16px; height: 16px; }
 .copy-btn.done { color: var(--ok); }
 .code pre { margin: 0; padding: 13px 16px; overflow-x: auto; font-size: 13px; line-height: 1.6; tab-size: 4; }
 .code.collapsed pre { max-height: 300px; overflow: hidden; -webkit-mask-image: linear-gradient(#000 65%, transparent); mask-image: linear-gradient(#000 65%, transparent); }
+/* aberto com "Mostrar tudo": sem o limite de altura (nem o dos cartões de ferramenta) */
+.code.expanded pre, .tool-sec .code.expanded pre { max-height: none; }
 .code-more { display: block; width: 100%; border: 0; border-top: 1px solid var(--line); background: var(--card); color: var(--accent); font-size: 12.5px; padding: 7px; font-weight: 500; }
 .code-more:hover { background: var(--hover); }
 
