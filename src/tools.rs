@@ -376,8 +376,10 @@ pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[Strin
     }
     if has("shell") && app.cfg().sandbox.on_for(ws) {
         parts.push(LF!(
-            "Terminal: run_command roda num Linux Alpine isolado (WSL), não no PowerShell. A pasta de trabalho aparece como /workspace (o cwd é relativo a ela); o resto do Windows não existe lá. Use comandos Linux (sh/bash, ls, grep, rg, git, python3, node, npm, jq, curl). Para instalar o que faltar: apk add <pacote> (ou pip/npm){}. Os outros arquivos você lê e edita normalmente com as ferramentas de arquivo, pelo caminho do Windows.",
-            "Terminal: run_command runs in an isolated Alpine Linux (WSL), not PowerShell. The working folder shows as /workspace (cwd is relative to it); the rest of Windows does not exist there. Use Linux commands (sh/bash, ls, grep, rg, git, python3, node, npm, jq, curl). To install what is missing: apk add <package> (or pip/npm){}. Read and edit files normally with the file tools, by the Windows path.",
+            "Terminal: run_command roda num Linux isolado ({}, WSL), não no PowerShell, como root. A pasta de trabalho aparece como /workspace (o cwd é relativo a ela); o resto do Windows não existe lá. Use comandos Linux (sh/bash, ls, grep, rg, git, python3, node, npm, jq, curl). Para instalar o que faltar: {} (ou pip/npm){}. Os outros arquivos você lê e edita normalmente com as ferramentas de arquivo, pelo caminho do Windows.",
+            "Terminal: run_command runs in an isolated Linux ({}, WSL), not PowerShell, as root. The working folder shows as /workspace (cwd is relative to it); the rest of Windows does not exist there. Use Linux commands (sh/bash, ls, grep, rg, git, python3, node, npm, jq, curl). To install what is missing: {} (or pip/npm){}. Read and edit files normally with the file tools, by the Windows path.",
+            crate::sandbox::distro_label(app, ws),
+            if crate::sandbox::pm_for(app, ws) == "apt" { L!("apt-get install -y <pacote>", "apt-get install -y <package>") } else { L!("apk add <pacote>", "apk add <package>") },
             if app.cfg().sandbox.no_net { L!("; os comandos estão sem internet, então downloads não funcionam", "; commands have no internet, so downloads do not work") } else { "" }
         ));
     } else if has("shell") {

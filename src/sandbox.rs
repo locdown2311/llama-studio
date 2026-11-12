@@ -1,5 +1,5 @@
 //! Isolamento dos comandos (opcional, desligado por padrão): cada pasta de trabalho ganha um Linux próprio no
-//! WSL2 (uma distro Alpine importada pelo studio). Lá dentro o C: não é montado e programas do Windows não
+//! WSL2 (Alpine, Ubuntu, Debian ou Kali, importado pelo studio). Lá dentro o C: não é montado e programas do Windows não
 //! rodam; só a pasta de trabalho aparece, em /workspace. Os comandos dos agentes (run_command) rodam ali, com
 //! as ferramentas instaladas na preparação e o `apk add` para baixar o que faltar.
 //!
@@ -18,6 +18,14 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 const PREFIX: &str = "llama-studio-";
 const BASE: &str = "llama-studio-base";
 pub const DEFAULT_PACKAGES: &str = "bash coreutils findutils grep sed gawk diffutils git python3 py3-pip nodejs npm ripgrep jq curl wget tar unzip zip xz file util-linux util-linux-misc ca-certificates";
+/// Os mesmos comandos nos sistemas com apt (Ubuntu, Debian, Kali).
+pub const APT_PACKAGES: &str = "bash coreutils findutils grep sed gawk diffutils git python3 python3-pip python3-venv nodejs npm ripgrep jq curl wget tar unzip zip xz-utils file util-linux procps ca-certificates";
+/// Distribuições que dá para escolher (id, nome, gerenciador de pacotes).
+pub const DISTROS: &[(&str, &str, &str)] = &[("alpine", "Alpine Linux", "apk"), ("ubuntu", "Ubuntu", "apt"), ("debian", "Debian", "apt"), ("kali-linux", "Kali Linux", "apt")];
+
+fn pm_of_distro(id: &str) -> &'static str {
+    DISTROS.iter().find(|d| d.0 == id).map(|d| d.2).unwrap_or("apk")
+}
 
 #[derive(Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
@@ -30,6 +38,8 @@ pub struct SandboxCfg {
     pub packages: String,
     /// Pastas de trabalho em que o isolamento fica desligado (os comandos rodam no PowerShell, como antes).
     pub off: Vec<String>,
+    /// Distribuição da base: alpine (padrão), ubuntu, debian ou kali-linux.
+    pub distro: String,
 }
 
 fn ws_key(ws: &str) -> String {
@@ -70,6 +80,31 @@ fn dir(app: &App) -> PathBuf {
 }
 fn base_tar(app: &App) -> PathBuf {
     dir(app).join("base.tar")
+}
+
+/// Distribuição e gerenciador de pacotes da base pronta (base.json; sem ele, Alpine).
+fn base_info(app: &App) -> (String, String) {
+    let v: Value = std::fs::read_to_string(dir(app).join("base.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(json!({}));
+    let d = v["distro"].as_str().unwrap_or("alpine").to_string();
+    let pm = v["pm"].as_str().unwrap_or(pm_of_distro(&d)).to_string();
+    (d, pm)
+}
+
+/// Gerenciador de pacotes do Linux de uma pasta (apk ou apt): o da base de quando ele foi criado.
+pub fn pm_for(app: &App, ws: &Path) -> String {
+    let name = distro_of(ws);
+    std::fs::read_to_string(dir(app).join("ws").join(name.trim_start_matches(PREFIX)).join("pm.txt")).map(|t| t.trim().to_string()).ok().filter(|t| !t.is_empty()).unwrap_or_else(|| base_info(app).1)
+}
+
+/// Nome da distribuição do Linux de uma pasta (o da base atual, para o prompt).
+pub fn distro_label(app: &App, ws: &Path) -> &'static str {
+    let _ = ws;
+    let d = base_info(app).0;
+    DISTROS.iter().find(|x| x.0 == d).map(|x| x.1).unwrap_or("Alpine Linux")
+}
+
+fn pm_of_name(app: &App, name: &str) -> String {
+    std::fs::read_to_string(dir(app).join("ws").join(name.trim_start_matches(PREFIX)).join("pm.txt")).map(|t| t.trim().to_string()).ok().filter(|t| !t.is_empty()).unwrap_or_else(|| base_info(app).1)
 }
 
 /// Nome da distro de uma pasta de trabalho (o mesmo caminho dá sempre o mesmo nome).
@@ -182,7 +217,7 @@ pub async fn status(app: &App) -> Value {
     json!({
         "enabled": cfg.enabled, "noNet": cfg.no_net, "off": cfg.off, "packages": cfg.packages, "defaultPackages": DEFAULT_PACKAGES,
         "windows": cfg!(windows), "wsl": ver.is_ok(), "wslVersion": ver.unwrap_or_default().lines().next().unwrap_or("").trim(),
-        "ready": base_tar(app).is_file(), "distros": mine, "job": { "running": running, "step": step, "error": err },
+        "ready": base_tar(app).is_file(), "distro": if cfg.distro.is_empty() { "alpine" } else { cfg.distro.as_str() }, "baseDistro": base_info(app).0, "distros_available": DISTROS.iter().map(|d| json!({ "id": d.0, "name": d.1, "pm": d.2 })).collect::<Vec<_>>(), "aptPackages": APT_PACKAGES, "baseSize": std::fs::metadata(base_tar(app)).map(|m| m.len()).unwrap_or(0), "basePath": base_tar(app).to_string_lossy(), "distros": mine, "job": { "running": running, "step": step, "error": err },
     })
 }
 
@@ -210,7 +245,42 @@ async fn prepare_inner(app: &App) -> Result<(), String> {
     wsl_ver().await.map_err(|_| L!("O WSL2 não está instalado. Abra o PowerShell como administrador, rode `wsl --install --no-distribution` e reinicie o PC.", "WSL2 is not installed. Open PowerShell as administrator, run `wsl --install --no-distribution` and restart the PC.").to_string())?;
     let d = dir(app);
     std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
-    // 1. o Alpine mínimo mais novo
+    let distro = { let x = app.cfg().sandbox.distro.clone(); if x.is_empty() { "alpine".to_string() } else { x } };
+    let pm = pm_of_distro(&distro);
+    let _ = wsl_out(&["--unregister", BASE], 60).await;
+    let base_dir = d.join("base-distro");
+    let _ = std::fs::remove_dir_all(&base_dir);
+    std::fs::create_dir_all(&base_dir).map_err(|e| e.to_string())?;
+    let bd = base_dir.to_string_lossy().to_string();
+    let rootfs = if distro == "alpine" { alpine_rootfs(app, &d).await? } else { modern_rootfs(app, &d, &distro).await? };
+    // 2. distro base
+    job.set(true, L!("Criando o Linux base no WSL...", "Creating the base Linux in WSL..."), "");
+    let rf = rootfs.to_string_lossy().to_string();
+    if let Err(e) = wsl_out(&["--import", BASE, &bd, &rf, "--version", "2"], 600).await {
+        // os pacotes .wsl mais novos: o WSL instala do arquivo (sem abrir a tela de primeiro uso)
+        wsl_out(&["--install", "--from-file", &rf, "--name", BASE, "--location", &bd, "--no-launch"], 600).await.map_err(|e2| LF!("wsl --import falhou: {e} / {e2}", "wsl --import failed: {e} / {e2}"))?;
+    }
+    // 3. configuração e pacotes
+    let extra = app.cfg().sandbox.packages.split_whitespace().filter(|p| pkg_ok(p)).collect::<Vec<_>>().join(" ");
+    job.set(true, L!("Instalando os comandos (git, python, node, ripgrep...). Pode levar alguns minutos.", "Installing the commands (git, python, node, ripgrep...). This may take a few minutes."), "");
+    let install = if pm == "apt" {
+        format!("export DEBIAN_FRONTEND=noninteractive\napt-get update && apt-get install -y --no-install-recommends {APT_PACKAGES} {extra}\napt-get clean\n")
+    } else {
+        format!("apk update && apk add --no-cache {DEFAULT_PACKAGES} {extra}\n")
+    };
+    // sem a tela de primeiro uso (criar usuário) das distros novas; root é o usuário
+    let body = format!("rm -f /etc/wsl-distribution.conf\ncat > /etc/wsl.conf <<'EOF'\n{WSL_CONF}EOF\n{install}");
+    let (code, _o, e) = sh_in(BASE, &body, 3600).await?;
+    if code != Some(0) {
+        return Err(LF!("A instalação dos pacotes falhou: {}", "Package installation failed: {}", e.trim().lines().last().unwrap_or("?")));
+    }
+    let _ = std::fs::write(d.join("base.json.part"), json!({ "distro": distro, "pm": pm }).to_string());
+    finish_base(app, &d, &rootfs, &base_dir).await
+}
+
+/// O Alpine mínimo mais novo, descompactado em .tar.
+async fn alpine_rootfs(app: &App, d: &Path) -> Result<PathBuf, String> {
+    let job = &app.sandbox_job;
     job.set(true, L!("Baixando o Alpine Linux (3 MB)...", "Downloading Alpine Linux (3 MB)..."), "");
     let idx = "https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/x86_64/latest-releases.yaml";
     let (st, y) = crate::update::fetch(app, idx, false, Duration::from_secs(60)).await?;
@@ -227,22 +297,60 @@ async fn prepare_inner(app: &App) -> Result<(), String> {
     std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&gz[..]), &mut tar).map_err(|e| e.to_string())?;
     let rootfs = d.join("alpine-rootfs.tar");
     std::fs::write(&rootfs, &tar).map_err(|e| e.to_string())?;
-    // 2. distro base
-    job.set(true, L!("Criando o Linux base no WSL...", "Creating the base Linux in WSL..."), "");
-    let _ = wsl_out(&["--unregister", BASE], 60).await;
-    let base_dir = d.join("base-distro");
-    let _ = std::fs::remove_dir_all(&base_dir);
-    std::fs::create_dir_all(&base_dir).map_err(|e| e.to_string())?;
-    let (bd, rf) = (base_dir.to_string_lossy().to_string(), rootfs.to_string_lossy().to_string());
-    wsl_out(&["--import", BASE, &bd, &rf, "--version", "2"], 300).await.map_err(|e| LF!("wsl --import falhou: {e}", "wsl --import failed: {e}"))?;
-    // 3. configuração e pacotes
-    let extra = app.cfg().sandbox.packages.split_whitespace().filter(|p| p.chars().all(|c| c.is_ascii_alphanumeric() || "-_.+".contains(c))).collect::<Vec<_>>().join(" ");
-    job.set(true, L!("Instalando os comandos (git, python, node, ripgrep...). Pode levar alguns minutos.", "Installing the commands (git, python, node, ripgrep...). This may take a few minutes."), "");
-    let body = format!("cat > /etc/wsl.conf <<'EOF'\n{WSL_CONF}EOF\napk update && apk add --no-cache {DEFAULT_PACKAGES} {extra}\n");
-    let (code, _o, e) = sh_in(BASE, &body, 1500).await?;
-    if code != Some(0) {
-        return Err(LF!("A instalação dos pacotes falhou: {}", "Package installation failed: {}", e.trim().lines().last().unwrap_or("?")));
+    Ok(rootfs)
+}
+
+/// Ubuntu, Debian ou Kali: o pacote oficial do WSL, achado na lista de distribuições da Microsoft (a mesma
+/// que o `wsl --install` usa), com o SHA-256 conferido.
+async fn modern_rootfs(app: &App, d: &Path, distro: &str) -> Result<PathBuf, String> {
+    let job = &app.sandbox_job;
+    let name = DISTROS.iter().find(|x| x.0 == distro).map(|x| x.1).unwrap_or(distro);
+    job.set(true, &LF!("Procurando o {name} oficial do WSL...", "Looking up the official WSL {name}..."), "");
+    let list = "https://raw.githubusercontent.com/microsoft/WSL/master/distributions/DistributionInfo.json";
+    let (st, b) = crate::update::fetch(app, list, false, Duration::from_secs(60)).await?;
+    if st != 200 {
+        return Err(LF!("Não consegui ler a lista de distribuições do WSL ({st}).", "Could not read the WSL distribution list ({st})."));
     }
+    let v: Value = serde_json::from_slice(&b).map_err(|e| e.to_string())?;
+    let (url, sha) = pick_modern(&v, distro).ok_or_else(|| LF!("{name} não está na lista de distribuições do WSL.", "{name} is not in the WSL distribution list."))?;
+    job.set(true, &LF!("Baixando o {name} (algumas centenas de MB)...", "Downloading {name} (a few hundred MB)..."), "");
+    let (st, bytes) = crate::update::fetch(app, &url, false, Duration::from_secs(3600)).await?;
+    if st != 200 || bytes.len() < 10_000_000 {
+        return Err(LF!("Download do {name} falhou ({st}).", "{name} download failed ({st})."));
+    }
+    if !sha.is_empty() && crate::update::sha256_hex(&bytes) != sha {
+        return Err(LF!("O arquivo do {name} veio corrompido (SHA-256 não confere).", "The {name} file came corrupted (SHA-256 mismatch)."));
+    }
+    let ext = if url.ends_with(".wsl") { "wsl" } else if url.ends_with(".tar.xz") { "tar.xz" } else { "tar.gz" };
+    let p = d.join(format!("{distro}-rootfs.{ext}"));
+    std::fs::write(&p, &bytes).map_err(|e| e.to_string())?;
+    Ok(p)
+}
+
+/// Na lista do WSL (ModernDistributions), a versão padrão da família pedida: (url amd64, sha256 sem 0x).
+fn pick_modern(v: &Value, distro: &str) -> Option<(String, String)> {
+    let fams = v["ModernDistributions"].as_object()?;
+    let mut best: Option<(bool, String, String)> = None;
+    for (fam, items) in fams {
+        for it in items.as_array().into_iter().flatten() {
+            let n = it["Name"].as_str().unwrap_or("").to_lowercase();
+            if !(fam.to_lowercase() == distro || n == distro || n.starts_with(&format!("{distro}-"))) {
+                continue;
+            }
+            let Some(url) = it["Amd64Url"]["Url"].as_str() else { continue };
+            let sha = it["Amd64Url"]["Sha256"].as_str().unwrap_or("").trim_start_matches("0x").to_lowercase();
+            let def = it["Default"].as_bool().unwrap_or(false);
+            if best.as_ref().is_none_or(|b| def && !b.0) {
+                best = Some((def, url.to_string(), sha));
+            }
+        }
+    }
+    best.map(|b| (b.1, b.2))
+}
+
+/// Confere a montagem, exporta a base pronta e limpa.
+async fn finish_base(app: &App, d: &Path, rootfs: &Path, base_dir: &Path) -> Result<(), String> {
+    let job = &app.sandbox_job;
     // confere a montagem de uma pasta do Windows (é o que cada comando faz com a pasta de trabalho)
     job.set(true, L!("Conferindo a montagem da pasta...", "Checking the folder mount..."), "");
     let probe = format!("mkdir -p /tmp/t && mount -t drvfs {} /tmp/t -o metadata && ls /tmp/t >/dev/null && umount /tmp/t", q(&d.to_string_lossy()));
@@ -257,8 +365,9 @@ async fn prepare_inner(app: &App) -> Result<(), String> {
     let t = tmp.to_string_lossy().to_string();
     wsl_out(&["--export", BASE, &t], 900).await.map_err(|e| LF!("wsl --export falhou: {e}", "wsl --export failed: {e}"))?;
     std::fs::rename(&tmp, base_tar(app)).map_err(|e| e.to_string())?;
-    let _ = std::fs::remove_file(&rootfs);
-    let _ = std::fs::remove_dir_all(&base_dir);
+    let _ = std::fs::rename(d.join("base.json.part"), d.join("base.json"));
+    let _ = std::fs::remove_file(rootfs);
+    let _ = std::fs::remove_dir_all(base_dir);
     Ok(())
 }
 
@@ -276,6 +385,7 @@ async fn ensure(app: &App, ws: &Path) -> Result<String, String> {
     let (t, b) = (to.to_string_lossy().to_string(), base_tar(app).to_string_lossy().to_string());
     wsl_out(&["--import", &name, &t, &b, "--version", "2"], 300).await.map_err(|e| LF!("Não consegui criar o Linux desta pasta: {e}", "Could not create this folder's Linux: {e}"))?;
     let _ = std::fs::write(to.join("pasta.txt"), ws.to_string_lossy().as_bytes());
+    let _ = std::fs::write(to.join("pm.txt"), base_info(app).1);
     Ok(name)
 }
 
@@ -332,9 +442,10 @@ async fn mine(name: &str) -> Result<(), String> {
 }
 
 /// Pacotes que a pessoa (ou a preparação) pediu na distro: o /etc/apk/world.
-pub async fn packages(name: &str) -> Result<Value, String> {
+pub async fn packages(app: &App, name: &str) -> Result<Value, String> {
     mine(name).await?;
-    let (_, o, e) = sh_in(name, "cat /etc/apk/world; echo ---; apk info 2>/dev/null | wc -l\n", 60).await?;
+    let body = if pm_of_name(app, name) == "apt" { "apt-mark showmanual 2>/dev/null; echo ---; dpkg-query -W -f='.\\n' 2>/dev/null | wc -l\n" } else { "cat /etc/apk/world; echo ---; apk info 2>/dev/null | wc -l\n" };
+    let (_, o, e) = sh_in(name, body, 60).await?;
     let (world, count) = o.split_once("---").unwrap_or((&o, "0"));
     if world.trim().is_empty() && !e.trim().is_empty() {
         return Err(e.trim().to_string());
@@ -345,16 +456,34 @@ pub async fn packages(name: &str) -> Result<Value, String> {
 }
 
 /// Procura pacotes do Alpine pelo nome ou descrição (precisa de internet para o índice estar em dia).
-pub async fn search(name: &str, query: &str) -> Result<Value, String> {
+pub async fn search(app: &App, name: &str, query: &str) -> Result<Value, String> {
     mine(name).await?;
     let term: String = query.chars().filter(|c| c.is_ascii_alphanumeric() || "-_.+".contains(*c)).take(60).collect();
     if term.len() < 2 {
         return Ok(json!({ "items": [] }));
     }
-    let body = format!("apk search -d {} 2>/dev/null | head -n 400\n", q(&format!("*{term}*")));
-    let (_, o, _) = sh_in(name, &body, 60).await?;
-    let items = parse_search(&o, &term);
+    let apt = pm_of_name(app, name) == "apt";
+    let body = if apt {
+        // o índice do apt pode estar vazio (a base limpa o cache): atualiza antes se faltar
+        format!("ls /var/lib/apt/lists/*_Packages >/dev/null 2>&1 || apt-get update >/dev/null 2>&1\napt-cache search {} 2>/dev/null | head -n 400\n", q(&term))
+    } else {
+        format!("apk search -d {} 2>/dev/null | head -n 400\n", q(&format!("*{term}*")))
+    };
+    let (_, o, _) = sh_in(name, &body, 180).await?;
+    let items = if apt { parse_apt_search(&o, &term) } else { parse_search(&o, &term) };
     Ok(json!({ "items": items }))
+}
+
+/// Linhas do `apt-cache search` ("nome - descrição") em itens, o nome exato primeiro.
+fn parse_apt_search(o: &str, term: &str) -> Vec<Value> {
+    let mut items: Vec<Value> = o.lines().filter_map(|l| l.split_once(" - ")).map(|(n, d)| json!({ "name": n.trim(), "version": "", "desc": d.trim() })).collect();
+    let ql = term.to_lowercase();
+    items.sort_by_key(|v| {
+        let n = v["name"].as_str().unwrap_or("").to_lowercase();
+        (n != ql, !n.starts_with(&ql), !n.contains(&ql), n.len())
+    });
+    items.truncate(60);
+    items
 }
 
 /// Linhas do `apk search -d` ("nome-versão - descrição") em itens, o nome exato primeiro.
@@ -379,19 +508,28 @@ fn parse_search(o: &str, term: &str) -> Vec<Value> {
 }
 
 /// apk add / apk del na distro. Devolve a saída para mostrar.
-pub async fn change(name: &str, add: &[String], del: &[String]) -> Result<Value, String> {
+pub async fn change(app: &App, name: &str, add: &[String], del: &[String]) -> Result<Value, String> {
     mine(name).await?;
     let add: Vec<&str> = add.iter().map(String::as_str).filter(|p| pkg_ok(p)).collect();
     let del: Vec<&str> = del.iter().map(String::as_str).filter(|p| pkg_ok(p)).collect();
     if add.is_empty() && del.is_empty() {
         return Err(L!("Nenhum pacote.", "No package.").into());
     }
+    let apt = pm_of_name(app, name) == "apt";
     let mut body = String::new();
+    if apt {
+        body.push_str("export DEBIAN_FRONTEND=noninteractive\n");
+    }
     if !add.is_empty() {
-        body.push_str(&format!("apk add {} 2>&1 || exit $?\n", add.join(" ")));
+        if apt {
+            body.push_str(&format!("apt-get install -y {0} 2>&1 || {{ apt-get update 2>&1 && apt-get install -y {0} 2>&1; }} || exit $?\n", add.join(" ")));
+        } else {
+            body.push_str(&format!("apk add {} 2>&1 || exit $?\n", add.join(" ")));
+        }
     }
     if !del.is_empty() {
-        body.push_str(&format!("apk del {} 2>&1 || exit $?\n", del.join(" ")));
+        let cmd = if apt { "apt-get remove -y" } else { "apk del" };
+        body.push_str(&format!("{cmd} {} 2>&1 || exit $?\n", del.join(" ")));
     }
     let (code, o, e) = sh_in(name, &body, 1200).await?;
     let text = format!("{}{}", o.trim_end(), if e.trim().is_empty() { String::new() } else { format!("\n{}", e.trim()) });
@@ -419,6 +557,20 @@ mod t {
         let s = script(r"D:\x", "", "curl x", true);
         assert!(s.contains("cd '/workspace'") && s.contains("unshare -n sh -c 'curl x'"));
         assert!(WSL_CONF.contains("enabled = false") && WSL_CONF.contains("appendWindowsPath = false"));
+    }
+
+    #[test]
+    fn le_a_busca_do_apt_e_a_lista_do_wsl() {
+        let it = parse_apt_search("nmap-common - Architecture independent files for nmap\nnmap - The Network Mapper\nzenmap - GUI\n", "nmap");
+        assert_eq!(it[0]["name"], "nmap");
+        assert_eq!(it[1]["name"], "nmap-common");
+        let v = json!({ "ModernDistributions": {
+            "Ubuntu": [ { "Name": "Ubuntu-22.04", "Default": false, "Amd64Url": { "Url": "https://x/u22.wsl", "Sha256": "0xAA" } },
+                        { "Name": "Ubuntu", "Default": true, "Amd64Url": { "Url": "https://x/u24.wsl", "Sha256": "0xBB" } } ],
+            "kali-linux": [ { "Name": "kali-linux", "Default": true, "Amd64Url": { "Url": "https://x/kali.wsl", "Sha256": "CC" } } ] } });
+        assert_eq!(pick_modern(&v, "ubuntu"), Some(("https://x/u24.wsl".into(), "bb".into())));
+        assert_eq!(pick_modern(&v, "kali-linux"), Some(("https://x/kali.wsl".into(), "cc".into())));
+        assert_eq!(pick_modern(&v, "debian"), None);
     }
 
     #[test]

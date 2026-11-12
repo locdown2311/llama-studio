@@ -1962,4 +1962,13 @@ const I18N_EN = {
 "Procurando...": "Searching...",
 "Nada encontrado (sem internet, o índice pode estar velho).": "Nothing found (without internet, the index may be stale).",
 "Pacotes · {0}": "Packages · {0}",
+"Linux base pronto: um arquivo ({0}, {1}), não uma distro do WSL. Cada pasta ganha a sua distro a partir dele no primeiro comando.": "Base Linux ready: a file ({0}, {1}), not a WSL distro. Each folder gets its own distro from it on the first command.",
+"ex.: kali-linux-headless (as ferramentas do Kali, alguns GB) nmap sqlmap": "e.g. kali-linux-headless (the Kali tools, a few GB) nmap sqlmap",
+"ex.: build-essential default-jdk ffmpeg": "e.g. build-essential default-jdk ffmpeg",
+"Distribuição": "Distribution",
+"Alpine: a mais leve (~150 MB com os comandos).": "Alpine: the lightest (~150 MB with the commands).",
+"Kali Linux: base Debian com os repositórios do Kali; as ferramentas de segurança vêm pelos pacotes (ex.: kali-linux-headless).": "Kali Linux: Debian base with the Kali repositories; the security tools come as packages (e.g. kali-linux-headless).",
+"{0}: maior (algumas centenas de MB), com apt e os pacotes do Debian/Ubuntu.": "{0}: larger (a few hundred MB), with apt and the Debian/Ubuntu packages.",
+"A base pronta é {0}. Clique em Preparar de novo para usar {1}; as pastas que já têm Linux continuam com o antigo até você apagá-las.": "The ready base is {0}. Click Prepare again to use {1}; folders that already have a Linux keep the old one until you delete them.",
+"Já vêm: {0}. Nomes do apt (packages.debian.org, packages.ubuntu.com, pkg.kali.org).": "Included: {0}. apt names (packages.debian.org, packages.ubuntu.com, pkg.kali.org).",
 };

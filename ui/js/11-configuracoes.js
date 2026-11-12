@@ -528,8 +528,14 @@ async function drawSandbox(box) {
   }
   const steps = h('div.sb-state', null,
     h('div.sb-line', null, ic('check'), L('WSL: {0}', r.wslVersion || L('instalado'))),
-    h('div.sb-line', null, r.ready ? ic('check') : ic('x'), r.ready ? L('Linux base pronto (Alpine com os comandos instalados)') : L('Linux base ainda não preparado')));
-  const pkgs = h('input.input.mono', { value: r.packages || '', placeholder: L('ex.: gcc g++ make openjdk17 dotnet8-sdk') });
+    h('div.sb-line', null, r.ready ? ic('check') : ic('x'), r.ready ? L('Linux base pronto: um arquivo ({0}, {1}), não uma distro do WSL. Cada pasta ganha a sua distro a partir dele no primeiro comando.', r.basePath, fmtSize(r.baseSize)) : L('Linux base ainda não preparado')));
+  const distro = h('select.select', null, (r.distros_available || []).map((d) => h('option', { value: d.id }, d.name)));
+  distro.value = r.distro || 'alpine';
+  distro.addEventListener('change', () => set({ distro: distro.value }));
+  const sel = (r.distros_available || []).find((d) => d.id === distro.value);
+  const apt = sel?.pm === 'apt';
+  const differs = r.ready && (r.baseDistro || 'alpine') !== distro.value;
+  const pkgs = h('input.input.mono', { value: r.packages || '', placeholder: distro.value === 'kali-linux' ? L('ex.: kali-linux-headless (as ferramentas do Kali, alguns GB) nmap sqlmap') : apt ? L('ex.: build-essential default-jdk ffmpeg') : L('ex.: gcc g++ make openjdk17 dotnet8-sdk') });
   pkgs.addEventListener('change', () => set({ packages: pkgs.value }));
   const prep = h('button.btn' + (r.ready ? '' : '.primary'), { type: 'button', disabled: job.running, onclick: async () => {
     if (r.ready && !(await confirmBox(L('Preparar de novo o Linux base? As pastas que já têm o Linux delas continuam com o antigo; para usar o novo, apague-as abaixo.'), L('Preparar')))) return;
@@ -539,8 +545,11 @@ async function drawSandbox(box) {
     steps,
     job.running ? h('div.sb-job', null, h('span.spin', { html: svg('loader') }), h('span', null, job.step)) : null,
     !job.running && job.error ? h('div.err.small', null, L('A preparação falhou: {0}', job.error)) : null,
+    h('div.field', null, h('label', null, L('Distribuição')), distro,
+      h('small', null, distro.value === 'alpine' ? L('Alpine: a mais leve (~150 MB com os comandos).') : distro.value === 'kali-linux' ? L('Kali Linux: base Debian com os repositórios do Kali; as ferramentas de segurança vêm pelos pacotes (ex.: kali-linux-headless).') : L('{0}: maior (algumas centenas de MB), com apt e os pacotes do Debian/Ubuntu.', sel?.name || distro.value)),
+      differs ? h('small.err', null, L('A base pronta é {0}. Clique em Preparar de novo para usar {1}; as pastas que já têm Linux continuam com o antigo até você apagá-las.', (r.distros_available || []).find((d) => d.id === r.baseDistro)?.name || r.baseDistro, sel?.name || distro.value)) : null),
     h('div.field', null, h('label', null, L('Pacotes a mais na preparação')), pkgs,
-      h('small', null, L('Já vêm: {0}. Os nomes são os do Alpine (pkgs.alpinelinux.org).', r.defaultPackages))),
+      h('small', null, apt ? L('Já vêm: {0}. Nomes do apt (packages.debian.org, packages.ubuntu.com, pkg.kali.org).', r.aptPackages) : L('Já vêm: {0}. Os nomes são os do Alpine (pkgs.alpinelinux.org).', r.defaultPackages))),
     h('div.backup-now', null, prep),
     tcard(L('Rodar os comandos dos agentes no Linux isolado'), L('Cada pasta de trabalho ganha o Linux dela na primeira vez que um comando roda (alguns segundos). O agente passa a usar comandos Linux, e a pasta aparece como /workspace. As ferramentas de arquivo continuam como estão.'), r.enabled, (v) => set({ enabled: v }), !r.ready && !r.enabled),
     tcard(L('Sem internet nos comandos'), L('Os comandos não acessam a rede (nem o apk add). As APIs e o navegador do studio não mudam.'), r.noNet, (v) => set({ noNet: v }))].filter(Boolean));

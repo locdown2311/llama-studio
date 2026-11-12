@@ -415,6 +415,11 @@ async fn sandbox_settings(State(app): S, b: Bytes) -> Res {
         if let Some(x) = v["packages"].as_str() {
             c.sandbox.packages = x.trim().to_string();
         }
+        if let Some(x) = v["distro"].as_str() {
+            if crate::sandbox::DISTROS.iter().any(|d| d.0 == x) {
+                c.sandbox.distro = x.to_string();
+            }
+        }
         if let (Some(f), Some(off)) = (v["folder"].as_str(), v["off"].as_bool()) {
             c.sandbox.set_off(f, off);
         }
@@ -427,15 +432,15 @@ async fn sandbox_prepare(State(app): S) -> Res {
     ok(json!({ "started": true }))
 }
 /// Pacotes do Linux de uma pasta: {name} lista, {name, q} procura, {name, add, del} instala ou remove.
-async fn sandbox_packages(State(_app): S, b: Bytes) -> Res {
+async fn sandbox_packages(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     let name = st(&v, "name");
     let r = if v.get("add").is_some() || v.get("del").is_some() {
-        crate::sandbox::change(name, &strs(&v, "add"), &strs(&v, "del")).await
+        crate::sandbox::change(&app, name, &strs(&v, "add"), &strs(&v, "del")).await
     } else if let Some(q) = v["q"].as_str() {
-        crate::sandbox::search(name, q).await
+        crate::sandbox::search(&app, name, q).await
     } else {
-        crate::sandbox::packages(name).await
+        crate::sandbox::packages(&app, name).await
     };
     r.map(ok).map_err(bad)?
 }
