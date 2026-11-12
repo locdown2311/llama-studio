@@ -309,6 +309,9 @@ const MULTI_NOTE = L('Para investigar mais de uma coisa, use multi_explore numa 
 
 async function runAgent(conv) {
   const ac = new AbortController();
+  // a conversa fica presa ao modelo com que começou: trocar o modelo em outra conversa (ou o padrão) no meio
+  // não muda para onde esta resposta vai
+  if (!conv.modelId) { const m0 = convModel(conv); if (m0) conv.modelId = m0.id; }
   S.runs.set(conv.id, ac);
   renderComposer(); renderConvList();
   const t0 = Date.now();
@@ -345,7 +348,7 @@ async function runAgent(conv) {
         // numa API, o explore aponta para o multi_explore (a descrição padrão manda chamar explore várias vezes)
         if (preferMulti(conv)) for (const t of r.tools || []) if (t.function?.name === 'explore') t.function.description = L('Um subagente explorador para UMA investigação pequena (só leitura, contexto próprio, devolve um relatório). Com mais de uma parte, use multi_explore: aqui ele é bem mais rápido.');
         // analyze_image só com alguém que enxergue (o modelo da conversa ou uma API com visão)
-        if (!visionOn() && !visionQueue(mainApiForChat(conv)?.id).length) r.tools = (r.tools || []).filter((t) => t.function?.name !== 'analyze_image');
+        if (!visionOn(conv) && !visionQueue(mainApiForChat(conv)?.id).length) r.tools = (r.tools || []).filter((t) => t.function?.name !== 'analyze_image');
         return r;
       });
     let [{ tools, meta, catalog }, ctx] = await Promise.all([
@@ -528,7 +531,7 @@ async function runAgent(conv) {
       conv._thinkNext = stepResults.some((m) => m.status === 'error' || m.status === 'denied');
       dedupeResults(conv, stepResults);
       if (guardStep(conv, msg, meta, g, step)) conv._thinkNext = true;
-      if (images.length && visionOn()) {
+      if (images.length && visionOn(conv)) {
         for (const im of images) conv.messages.push({ role: 'user', hidden: true, content: L('[Imagem devolvida pela ferramenta {0}]', im.name), _images: im.images });
       }
       const why = escalateWhy(conv, msg, esc);

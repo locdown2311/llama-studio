@@ -19,11 +19,12 @@ const TOOL_INFO = {
   explore: { sec: L('Subagentes'), title: L('Subagentes exploradores'), short: 'exploradores', desc: L('Investigação só de leitura com contexto próprio, vários em paralelo.') },
 };
 function enabledGroups() { return TOOL_GROUPS.filter((g) => S.settings.tools[g]); }
-function visionOn() {
+/** O modelo da conversa enxerga? (a conversa importa: com várias respondendo ao mesmo tempo, cada uma tem o seu) */
+function visionOn(conv) {
   if (S.settings.vision === 'on') return true;
   if (S.settings.vision !== 'auto') return false;
   // conversa numa API externa: vale a marca "Aceita imagens" do provedor
-  const ma = typeof mainApiForChat === 'function' ? mainApiForChat() : null;
+  const ma = typeof mainApiForChat === 'function' ? mainApiForChat(conv === undefined ? cur() : conv) : null;
   return ma ? ma.vision === true : !!S.vision;
 }
 

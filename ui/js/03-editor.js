@@ -380,11 +380,18 @@ async function escalate(conv, why, st, signal) {
   saveConvs();
 }
 
-/** Antes de responder: carrega o modelo da conversa (esperando outras conversas terminarem). */
+/** Antes de responder: carrega o modelo da conversa (esperando outras conversas terminarem).
+ *  Conversa numa API externa não carrega nada nem espera ninguém: várias respondem ao mesmo tempo. */
 async function ensureModel(conv, signal) {
   const want = conv.modelId && modelById(conv.modelId);
   if (!want || want.id === S.models.active) return;
-  const others = () => [...S.runs.keys()].some((id) => id !== conv.id && !S.convs.find((x) => x.id === id)?._waitingModel);
+  if (String(want.model || '').startsWith('remote:')) return;
+  // só as conversas que usam o llama-server atrapalham a troca do modelo local
+  const others = () => [...S.runs.keys()].some((id) => {
+    if (id === conv.id) return false;
+    const o = S.convs.find((x) => x.id === id);
+    return !o?._waitingModel && !mainApiForChat(o);
+  });
   if (others()) {
     conv._waitingModel = true; conv._waitText = L('Esperando outra conversa terminar para trocar para {0}.', want.name); scheduleRender();
     try { while (others() && !signal.aborted) await new Promise((r) => setTimeout(r, 700)); }
@@ -607,7 +614,7 @@ function visionQueue(exceptId) {
 function visionApi(exceptId) { return visionQueue(exceptId)[0] || null; }
 /** O modelo da conversa (local ou API) não enxerga, e alguma API enxerga. */
 function seerFor(conv) {
-  if (visionOn()) return null;
+  if (visionOn(conv)) return null;
   return visionApi(mainApiForChat(conv)?.id);
 }
 
@@ -660,7 +667,7 @@ async function describeImgs(conv, signal) {
 }
 /** Carrega as imagens da última mensagem do usuário antes de mandar ao modelo. */
 async function preloadImgs(conv) {
-  if (!visionOn()) return;
+  if (!visionOn(conv)) return;
   const m = [...conv.messages].reverse().find((x) => x.role === 'user' && !x.hidden);
   await Promise.all((m?.refs || []).filter(isImgRef).map((r) => loadImg(r.path, wsOf(conv))));
 }
@@ -933,7 +940,7 @@ async function runAnalyzeImage(args, tctx, tmsg) {
   if (!url) return { content: L('Não consegui abrir a imagem {0}.', path), isError: true };
   if (tmsg) tmsg._images = [url];
   const q = String(args.question || '').trim();
-  if (visionOn() && !visionQueue(mainApiForChat(conv)?.id).length) {
+  if (visionOn(conv) && !visionQueue(mainApiForChat(conv)?.id).length) {
     return { content: L('Imagem {0} anexada abaixo.', path) + (q ? ' ' + L('Pergunta: {0}', q) : ''), isError: false, images: [url] };
   }
   if (tmsg) { tmsg.phase = L('Um modelo com visão está olhando a imagem...'); scheduleRender(); }

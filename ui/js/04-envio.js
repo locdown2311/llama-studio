@@ -421,7 +421,7 @@ function apiMessages(conv, system) {
     }
     if (m.role === 'user') {
       const text = userContent(m) + (m.use?.length && !m.auto?.undone ? L('\n\n(Use {0} para isso.)', m.use.join(' e ')) : '') + (m.plan ? PLAN_NOTE : '') + (m.skillNote ? '\n\n' + m.skillNote : '') + (m.catalogNote ? '\n\n' + m.catalogNote : '');
-      const imgs = m.__i === lastUserIdx && visionOn() ? (m.refs || []).filter(isImgRef).map((r) => S.imgData.get(r.path)).filter(Boolean) : [];
+      const imgs = m.__i === lastUserIdx && visionOn(conv) ? (m.refs || []).filter(isImgRef).map((r) => S.imgData.get(r.path)).filter(Boolean) : [];
       // modelo sem visão: as imagens vão como a descrição que outra API fez
       const desc = !imgs.length && m.imgDesc ? Object.entries(m.imgDesc).filter(([, d]) => d.text).map(([path, d]) => L('[Imagem {0}, descrita por {1} porque este modelo não enxerga imagens]\n{2}', path, d.by, d.text)).join('\n\n') : '';
       const full = desc ? text + '\n\n' + desc : text;

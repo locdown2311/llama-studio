@@ -645,7 +645,7 @@ async function runVideoLook(args, tctx, tmsg) {
     }
   } catch { /* sem legenda */ }
   const imgs = sheets.filter(Boolean);
-  if (visionOn()) return { content: text, isError: false, images: imgs };
+  if (visionOn(tctx?.conv)) return { content: text, isError: false, images: imgs };
   // o modelo da conversa não enxerga: uma API da equipe (ou outra pronta) que enxergue descreve os quadros
   const seer = [...apiForAll('explorer'), ...(S.info.apis || []).filter((a) => a.ready).map((a) => a.id)].map(apiById).find((a) => a?.vision && !apiCooled(a.id));
   if (!seer) return { content: text + '\n\n' + L('O modelo desta conversa não recebe imagens, e nenhuma API marcada como "Aceita imagens" está disponível para descrever os quadros. Os tempos e a fala acima ainda servem para planejar os cortes.'), isError: false };
@@ -810,7 +810,7 @@ async function runVideoThumbnail(args, tctx, tmsg) {
   let img = null;
   try { const f = await api('/api/videos/frames', { id: vid, file: r.file, times: [0], width: 540 }); img = f.frames[0]?.data || null; } catch { /* sem prévia */ }
   if (img && tmsg) tmsg._images = [img];
-  if (img && visionOn()) return { content: text + ' ' + L('Confira: texto legível, rosto ou ação visível, nada importante coberto.'), isError: false, images: [img] };
+  if (img && visionOn(tctx?.conv)) return { content: text + ' ' + L('Confira: texto legível, rosto ou ação visível, nada importante coberto.'), isError: false, images: [img] };
   return { content: text, isError: false };
 }
 
