@@ -544,12 +544,74 @@ async function drawSandbox(box) {
     h('div.backup-now', null, prep),
     tcard(L('Rodar os comandos dos agentes no Linux isolado'), L('Cada pasta de trabalho ganha o Linux dela na primeira vez que um comando roda (alguns segundos). O agente passa a usar comandos Linux, e a pasta aparece como /workspace. As ferramentas de arquivo continuam como estão.'), r.enabled, (v) => set({ enabled: v }), !r.ready && !r.enabled),
     tcard(L('Sem internet nos comandos'), L('Os comandos não acessam a rede (nem o apk add). As APIs e o navegador do studio não mudam.'), r.noNet, (v) => set({ noNet: v }))].filter(Boolean));
-  if (r.distros?.length) {
-    box.append(h('div.set-group-title', null, L('Linux de cada pasta')), h('div.backup-list', null, r.distros.map((d) => h('div.backup-row', null,
-      ic('box'), h('div.br-main', null, h('b', null, d.folder || d.name), h('small.muted', null, d.name)),
-      h('button.btn.sm', { type: 'button', onclick: async () => {
-        if (!(await confirmBox(L('Apagar o Linux de {0}? O que foi instalado lá dentro se perde (a pasta de trabalho não muda). Ele é recriado no próximo comando.', d.folder || d.name), L('Apagar'), true))) return;
-        try { await api('/api/sandbox/remove', { name: d.name }); drawSandbox(box); } catch (e) { toast(e.message, 'err'); }
-      } }, L('Apagar'))))));
+  // pastas: as que têm Linux, as desligadas e a pasta de trabalho atual
+  const key = (f) => String(f || '').replace(/[\\/]+$/, '').toLowerCase();
+  const rows = new Map();
+  for (const d of r.distros || []) rows.set(key(d.folder) || d.name, { folder: d.folder, name: d.name });
+  for (const f of r.off || []) if (!rows.has(key(f))) rows.set(key(f), { folder: f });
+  for (const f of [S.info.workspace, ...(S.projects || []).map((p) => p.dir)]) if (f && !rows.has(key(f))) rows.set(key(f), { folder: f });
+  const offSet = new Set((r.off || []).map(key));
+  if (rows.size) {
+    box.append(h('div.set-group-title', null, L('Pastas de trabalho')), h('div.backup-list', null, [...rows.values()].map((d) => {
+      const isOff = d.folder && offSet.has(key(d.folder));
+      const sw = h('input', { type: 'checkbox', checked: !isOff, disabled: !d.folder, title: L('Isolamento nesta pasta') });
+      sw.addEventListener('change', () => set({ folder: d.folder, off: !sw.checked }));
+      return h('div.backup-row', null,
+        ic('box'),
+        h('div.br-main', null, h('b', null, d.folder || d.name),
+          h('small.muted', null, isOff ? L('isolamento desligado: os comandos rodam no PowerShell') : d.name ? d.name : L('o Linux é criado no primeiro comando'))),
+        d.name ? h('button.btn.sm', { type: 'button', onclick: () => sandboxPackages(d) }, ic('download'), L('Pacotes')) : null,
+        d.name ? h('button.btn.sm', { type: 'button', onclick: async () => {
+          if (!(await confirmBox(L('Apagar o Linux de {0}? O que foi instalado lá dentro se perde (a pasta de trabalho não muda). Ele é recriado no próximo comando.', d.folder || d.name), L('Apagar'), true))) return;
+          try { await api('/api/sandbox/remove', { name: d.name }); drawSandbox(box); } catch (e) { toast(e.message, 'err'); }
+        } }, L('Apagar')) : null,
+        h('label.switch', { title: L('Isolamento nesta pasta') }, sw, h('span')));
+    })));
   }
+}
+
+/** Pacotes do Linux de uma pasta: os pedidos (com remover) e a busca no Alpine (com instalar). */
+async function sandboxPackages(d) {
+  const list = h('div.pkg-list', null, h('div.muted', null, L('Carregando...')));
+  const results = h('div.pkg-list');
+  const log = h('pre.term.pkg-log', { hidden: true });
+  const qIn = h('input.input', { type: 'search', placeholder: L('Procurar pacote (ex.: gcc, openjdk, ffmpeg)') });
+  let busy = false;
+  const run = async (add, del) => {
+    if (busy) return; busy = true;
+    log.hidden = false; log.textContent = (add.length ? 'apk add ' + add.join(' ') : 'apk del ' + del.join(' ')) + '\n' + L('rodando...');
+    try { const x = await api('/api/sandbox/packages', { name: d.name, add, del }); log.textContent = x.log || 'ok'; toast(add.length ? L('Instalado: {0}', add.join(', ')) : L('Removido: {0}', del.join(', '))); await load(); }
+    catch (e) { log.textContent += '\n' + e.message; toast(e.message, 'err'); }
+    finally { busy = false; }
+  };
+  const load = async () => {
+    try {
+      const x = await api('/api/sandbox/packages', { name: d.name });
+      list.innerHTML = '';
+      list.append(h('small.muted', null, L('{0} pacotes instalados no total; estes foram pedidos (o resto são dependências):', x.installed)));
+      list.append(h('div.pkg-chips', null, x.world.map((p) => h('span.pkg-chip', null, p, h('button.icon-btn.sm', { title: L('Remover {0}', p), 'aria-label': L('Remover {0}', p), html: svg('x'), onclick: async () => { if (await confirmBox(L('Remover {0} deste Linux?', p), L('Remover'), true)) run([], [p]); } })))));
+    } catch (e) { list.innerHTML = ''; list.append(h('div.err', null, e.message)); }
+  };
+  let t = 0;
+  qIn.addEventListener('input', () => {
+    clearTimeout(t);
+    t = setTimeout(async () => {
+      const q = qIn.value.trim();
+      results.innerHTML = '';
+      if (q.length < 2) return;
+      results.append(h('div.muted', null, L('Procurando...')));
+      try {
+        const x = await api('/api/sandbox/packages', { name: d.name, q });
+        results.innerHTML = '';
+        if (!x.items.length) results.append(h('div.muted', null, L('Nada encontrado (sem internet, o índice pode estar velho).')));
+        for (const it of x.items) results.append(h('div.pkg-row', null, h('div.pr-main', null, h('b', null, it.name), h('small.muted', null, `${it.version} · ${it.desc}`)), h('button.btn.sm', { onclick: () => run([it.name], []) }, ic('plus'), L('Instalar'))));
+      } catch (e) { results.innerHTML = ''; results.append(h('div.err', null, e.message)); }
+    }, 350);
+  });
+  const m = modal({
+    title: L('Pacotes · {0}', d.folder || d.name), wide: true,
+    body: h('div.pkg-box', null, list, qIn, results, log),
+    foot: [h('span.spacer'), h('button.btn', { onclick: () => m.close() }, L('Fechar'))],
+  });
+  load();
 }

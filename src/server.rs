@@ -150,6 +150,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/sandbox/settings", post(sandbox_settings))
         .route("/api/sandbox/prepare", post(sandbox_prepare))
         .route("/api/sandbox/remove", post(sandbox_remove))
+        .route("/api/sandbox/packages", post(sandbox_packages))
         .route("/api/backup/settings", post(backup_settings))
         .route("/api/backup/now", post(backup_now))
         .route("/api/backup/restore", post(backup_restore))
@@ -414,6 +415,9 @@ async fn sandbox_settings(State(app): S, b: Bytes) -> Res {
         if let Some(x) = v["packages"].as_str() {
             c.sandbox.packages = x.trim().to_string();
         }
+        if let (Some(f), Some(off)) = (v["folder"].as_str(), v["off"].as_bool()) {
+            c.sandbox.set_off(f, off);
+        }
     }
     app.save_config();
     ok(crate::sandbox::status(&app).await)
@@ -421,6 +425,19 @@ async fn sandbox_settings(State(app): S, b: Bytes) -> Res {
 async fn sandbox_prepare(State(app): S) -> Res {
     crate::sandbox::prepare(app.clone());
     ok(json!({ "started": true }))
+}
+/// Pacotes do Linux de uma pasta: {name} lista, {name, q} procura, {name, add, del} instala ou remove.
+async fn sandbox_packages(State(_app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let name = st(&v, "name");
+    let r = if v.get("add").is_some() || v.get("del").is_some() {
+        crate::sandbox::change(name, &strs(&v, "add"), &strs(&v, "del")).await
+    } else if let Some(q) = v["q"].as_str() {
+        crate::sandbox::search(name, q).await
+    } else {
+        crate::sandbox::packages(name).await
+    };
+    r.map(ok).map_err(bad)?
 }
 async fn sandbox_remove(State(app): S, b: Bytes) -> Res {
     let v = body(&b);

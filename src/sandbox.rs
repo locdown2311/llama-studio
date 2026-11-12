@@ -28,6 +28,26 @@ pub struct SandboxCfg {
     pub no_net: bool,
     /// Pacotes do Alpine a mais na preparação (separados por espaço).
     pub packages: String,
+    /// Pastas de trabalho em que o isolamento fica desligado (os comandos rodam no PowerShell, como antes).
+    pub off: Vec<String>,
+}
+
+fn ws_key(ws: &str) -> String {
+    ws.trim().trim_end_matches(['\\', '/']).to_lowercase()
+}
+
+impl SandboxCfg {
+    /// O isolamento vale para esta pasta?
+    pub fn on_for(&self, ws: &Path) -> bool {
+        self.enabled && !self.off.iter().any(|o| ws_key(o) == ws_key(&ws.to_string_lossy()))
+    }
+    pub fn set_off(&mut self, ws: &str, off: bool) {
+        let k = ws_key(ws);
+        self.off.retain(|o| ws_key(o) != k);
+        if off && !k.is_empty() {
+            self.off.push(ws.trim().to_string());
+        }
+    }
 }
 
 /// Andamento da preparação (a interface consulta).
@@ -160,7 +180,7 @@ pub async fn status(app: &App) -> Value {
     let list = if ver.is_ok() { distros().await } else { vec![] };
     let mine: Vec<&String> = list.iter().filter(|d| d.starts_with(PREFIX) && d.as_str() != BASE).collect();
     json!({
-        "enabled": cfg.enabled, "noNet": cfg.no_net, "packages": cfg.packages, "defaultPackages": DEFAULT_PACKAGES,
+        "enabled": cfg.enabled, "noNet": cfg.no_net, "off": cfg.off, "packages": cfg.packages, "defaultPackages": DEFAULT_PACKAGES,
         "windows": cfg!(windows), "wsl": ver.is_ok(), "wslVersion": ver.unwrap_or_default().lines().next().unwrap_or("").trim(),
         "ready": base_tar(app).is_file(), "distros": mine, "job": { "running": running, "step": step, "error": err },
     })
@@ -300,6 +320,87 @@ pub async fn remove(app: &App, name: &str, all: bool) -> Result<Value, String> {
     Ok(json!({ "removed": n }))
 }
 
+fn pkg_ok(p: &str) -> bool {
+    !p.is_empty() && p.len() <= 80 && p.chars().all(|c| c.is_ascii_alphanumeric() || "-_.+".contains(c))
+}
+
+async fn mine(name: &str) -> Result<(), String> {
+    if !name.starts_with(PREFIX) || name == BASE || !distros().await.iter().any(|d| d == name) {
+        return Err(L!("Esse Linux não existe (apagado?).", "That Linux does not exist (deleted?).").into());
+    }
+    Ok(())
+}
+
+/// Pacotes que a pessoa (ou a preparação) pediu na distro: o /etc/apk/world.
+pub async fn packages(name: &str) -> Result<Value, String> {
+    mine(name).await?;
+    let (_, o, e) = sh_in(name, "cat /etc/apk/world; echo ---; apk info 2>/dev/null | wc -l\n", 60).await?;
+    let (world, count) = o.split_once("---").unwrap_or((&o, "0"));
+    if world.trim().is_empty() && !e.trim().is_empty() {
+        return Err(e.trim().to_string());
+    }
+    let mut list: Vec<&str> = world.split_whitespace().collect();
+    list.sort();
+    Ok(json!({ "world": list, "installed": count.trim().parse::<u32>().unwrap_or(0) }))
+}
+
+/// Procura pacotes do Alpine pelo nome ou descrição (precisa de internet para o índice estar em dia).
+pub async fn search(name: &str, query: &str) -> Result<Value, String> {
+    mine(name).await?;
+    let term: String = query.chars().filter(|c| c.is_ascii_alphanumeric() || "-_.+".contains(*c)).take(60).collect();
+    if term.len() < 2 {
+        return Ok(json!({ "items": [] }));
+    }
+    let body = format!("apk search -d {} 2>/dev/null | head -n 400\n", q(&format!("*{term}*")));
+    let (_, o, _) = sh_in(name, &body, 60).await?;
+    let items = parse_search(&o, &term);
+    Ok(json!({ "items": items }))
+}
+
+/// Linhas do `apk search -d` ("nome-versão - descrição") em itens, o nome exato primeiro.
+fn parse_search(o: &str, term: &str) -> Vec<Value> {
+    // linhas "nome-versão - descrição"; o nome vai até o último "-" antes de um dígito
+    let mut items: Vec<Value> = o
+        .lines()
+        .filter_map(|l| {
+            let (pv, desc) = l.split_once(" - ").unwrap_or((l, ""));
+            let cut = pv.char_indices().filter(|(i, c)| *c == '-' && pv[i + 1..].starts_with(|d: char| d.is_ascii_digit())).map(|(i, _)| i).next()?;
+            Some(json!({ "name": &pv[..cut], "version": &pv[cut + 1..], "desc": desc.trim() }))
+        })
+        .collect();
+    // o nome exato primeiro, depois os que começam com o termo
+    let ql = term.to_lowercase();
+    items.sort_by_key(|v| {
+        let n = v["name"].as_str().unwrap_or("").to_lowercase();
+        (n != ql, !n.starts_with(&ql), n.len())
+    });
+    items.truncate(60);
+    items
+}
+
+/// apk add / apk del na distro. Devolve a saída para mostrar.
+pub async fn change(name: &str, add: &[String], del: &[String]) -> Result<Value, String> {
+    mine(name).await?;
+    let add: Vec<&str> = add.iter().map(String::as_str).filter(|p| pkg_ok(p)).collect();
+    let del: Vec<&str> = del.iter().map(String::as_str).filter(|p| pkg_ok(p)).collect();
+    if add.is_empty() && del.is_empty() {
+        return Err(L!("Nenhum pacote.", "No package.").into());
+    }
+    let mut body = String::new();
+    if !add.is_empty() {
+        body.push_str(&format!("apk add {} 2>&1 || exit $?\n", add.join(" ")));
+    }
+    if !del.is_empty() {
+        body.push_str(&format!("apk del {} 2>&1 || exit $?\n", del.join(" ")));
+    }
+    let (code, o, e) = sh_in(name, &body, 1200).await?;
+    let text = format!("{}{}", o.trim_end(), if e.trim().is_empty() { String::new() } else { format!("\n{}", e.trim()) });
+    if code != Some(0) {
+        return Err(text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("apk falhou").to_string());
+    }
+    Ok(json!({ "ok": true, "log": text }))
+}
+
 /// Pasta de trabalho de cada distro (para a lista nas configurações).
 pub fn folder_of(app: &App, name: &str) -> String {
     std::fs::read_to_string(dir(app).join("ws").join(name.trim_start_matches(PREFIX)).join("pasta.txt")).unwrap_or_default()
@@ -318,6 +419,26 @@ mod t {
         let s = script(r"D:\x", "", "curl x", true);
         assert!(s.contains("cd '/workspace'") && s.contains("unshare -n sh -c 'curl x'"));
         assert!(WSL_CONF.contains("enabled = false") && WSL_CONF.contains("appendWindowsPath = false"));
+    }
+
+    #[test]
+    fn le_a_busca_do_apk() {
+        let o = "gcc-doc-14.2.0-r6 - GNU docs\nlibgcc-14.2.0-r6 - runtime\ngcc-14.2.0-r6 - The GNU Compiler Collection\npython3-3.12.11-r0 - A high-level language\n";
+        let it = parse_search(o, "gcc");
+        assert_eq!(it[0]["name"], "gcc");
+        assert_eq!(it[0]["version"], "14.2.0-r6");
+        assert_eq!(it[1]["name"], "gcc-doc");
+        assert!(it.iter().any(|v| v["name"] == "python3" && v["version"] == "3.12.11-r0"));
+    }
+
+    #[test]
+    fn desligado_por_pasta() {
+        let mut c = SandboxCfg { enabled: true, ..Default::default() };
+        c.set_off(r"C:\Proj\A\", true);
+        assert!(!c.on_for(Path::new(r"c:\proj\a")));
+        assert!(c.on_for(Path::new(r"C:\Proj\B")));
+        c.set_off(r"C:\proj\a", false);
+        assert!(c.on_for(Path::new(r"C:\Proj\A")) && c.off.is_empty());
     }
 
     #[test]
