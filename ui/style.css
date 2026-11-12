@@ -1771,3 +1771,10 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
    Sem content-visibility: a altura estimada dos blocos fora da tela fazia a rolagem pular para cima. */
 .msg-more { display: flex; justify-content: center; align-items: center; gap: 12px; margin: 4px 0 18px; }
 .cache-low { color: #c47a12 !important; }
+
+/* isolamento */
+.sb-state { display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; }
+.sb-state svg { width: 14px; height: 14px; vertical-align: -2px; }
+.sb-job { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; font-size: 13.5px; }
+.sb-job .spin { display: inline-grid; } .sb-job svg { width: 16px; height: 16px; }
+.sb-line { display: flex; align-items: center; gap: 8px; }

@@ -20,6 +20,7 @@ mod desktop;
 mod dictate;
 mod backup;
 mod limits;
+mod sandbox;
 mod llama;
 mod locate;
 mod engines;

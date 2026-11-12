@@ -1473,11 +1473,12 @@ checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
 
 [[package]]
 name = "llama-studio"
-version = "2.83.1"
+version = "2.84.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
  "bytes",
+ "flate2",
  "futures-util",
  "jpeg-encoder",
  "mime_guess",

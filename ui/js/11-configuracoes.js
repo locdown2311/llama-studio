@@ -89,6 +89,10 @@ function renderSettings() {
 
   section('api', L('API externa'), 'globe', L('Provedores de IA na internet para tirar trabalho do modelo local, cada função no que você escolher. Auditor e exploradores pela API não ocupam slot do llama-server, então a conversa nunca perde o cache por causa deles. Se a API falhar (sem internet, limite do plano grátis), volta para o modelo local.'), apiSection(put, field, saved));
 
+  const sb = h('div.backup-box', null, h('div.muted', null, L('Carregando...')));
+  drawSandbox(sb);
+  section('sandbox', L('Isolamento'), 'box', L('Opcional: os comandos dos agentes rodam num Linux próprio de cada pasta de trabalho (WSL2), que só enxerga essa pasta. O resto do disco e os programas do Windows ficam de fora. Os comandos comuns já vêm instalados, e o que faltar o agente baixa com apk add.'), sb);
+
   const bk = h('div.backup-box', null, h('div.muted', null, L('Carregando...')));
   drawBackup(bk);
   section('backup', L('Backup'), 'archive', L('Uma cópia das conversas, personalidades, projetos, prompts, configurações, habilidades e conectores numa pasta. Use a pasta do Google Drive para computador e ela vai para a nuvem sozinha.'), bk);
@@ -133,7 +137,7 @@ function renderSettings() {
 /* As configurações são um painel só: as subpáginas de ajuste e as páginas de recursos (servidor,
    conectores, habilidades...) ficam no mesmo menu. Os itens da barra lateral são atalhos para elas. */
 const SET_EMBED = [['server', L('Servidor'), 'server'], ['mcp', L('Conectores'), 'plug'], ['skills', L('Habilidades'), 'sparkles'], ['personas', L('Personalidades'), 'user'], ['tools', L('Utilitários'), 'wrench']];
-const SET_GROUPS = [[L('Geral'), ['set:model', 'set:tools', 'set:auto', 'set:context', 'set:api']], [L('Recursos'), ['v:server', 'v:mcp', 'v:skills', 'v:personas', 'v:tools']], [L('Segurança'), ['set:safety', 'set:auditor']], [L('Sistema'), ['set:look', 'set:window', 'set:backup', 'set:share', 'set:updates', 'set:advanced', 'set:tests']]];
+const SET_GROUPS = [[L('Geral'), ['set:model', 'set:tools', 'set:auto', 'set:context', 'set:api']], [L('Recursos'), ['v:server', 'v:mcp', 'v:skills', 'v:personas', 'v:tools']], [L('Segurança'), ['set:safety', 'set:auditor', 'set:sandbox']], [L('Sistema'), ['set:look', 'set:window', 'set:backup', 'set:share', 'set:updates', 'set:advanced', 'set:tests']]];
 let SET_PAGES = [];
 let setPage = null;
 function openSettings(page) { setPage = page; setView('settings'); }
@@ -494,5 +498,58 @@ async function drawBackup(box) {
           setTimeout(() => location.reload(), 900);
         } catch (e) { toast(e.message, 'err'); }
       } }, L('Restaurar'))))));
+  }
+}
+
+/* ------------------------------------------------------------ isolamento (Linux no WSL) */
+let SANDBOX_POLL = 0;
+async function drawSandbox(box) {
+  let r;
+  try { r = await api('/api/sandbox'); } catch (e) { box.innerHTML = ''; box.append(h('div.err', null, e.message)); return; }
+  if (!box.isConnected && box.dataset.drawn) return;
+  box.dataset.drawn = '1';
+  box.innerHTML = '';
+  const set = async (patch) => { try { await api('/api/sandbox/settings', patch); drawSandbox(box); } catch (e) { toast(e.message, 'err'); } };
+  const job = r.job || {};
+  clearTimeout(SANDBOX_POLL);
+  if (job.running) SANDBOX_POLL = setTimeout(() => { if (box.isConnected) drawSandbox(box); }, 2000);
+  const tcard = (title, desc, checked, onchange, disabled) => {
+    const cb = h('input', { type: 'checkbox', checked, disabled: !!disabled });
+    cb.addEventListener('change', () => onchange(cb.checked));
+    return h('label.tcard', null, h('span.tc-main', null, h('span.tc-title', null, title), h('span.tc-desc', null, desc)), h('span.switch', null, cb, h('span')));
+  };
+  if (!r.windows) { box.append(h('p.muted', null, L('O isolamento usa o WSL2 e só existe no Windows.'))); return; }
+  if (!r.wsl) {
+    box.append(h('div.vid-warn', null, ic('alert'), h('div', null,
+      h('b', null, L('O WSL2 não está instalado.')), ' ',
+      L('Abra o PowerShell como administrador, rode o comando abaixo e reinicie o PC. Depois volte aqui.'),
+      h('pre.term', null, 'wsl --install --no-distribution'))));
+    return;
+  }
+  const steps = h('div.sb-state', null,
+    h('div.sb-line', null, ic('check'), L('WSL: {0}', r.wslVersion || L('instalado'))),
+    h('div.sb-line', null, r.ready ? ic('check') : ic('x'), r.ready ? L('Linux base pronto (Alpine com os comandos instalados)') : L('Linux base ainda não preparado')));
+  const pkgs = h('input.input.mono', { value: r.packages || '', placeholder: L('ex.: gcc g++ make openjdk17 dotnet8-sdk') });
+  pkgs.addEventListener('change', () => set({ packages: pkgs.value }));
+  const prep = h('button.btn' + (r.ready ? '' : '.primary'), { type: 'button', disabled: job.running, onclick: async () => {
+    if (r.ready && !(await confirmBox(L('Preparar de novo o Linux base? As pastas que já têm o Linux delas continuam com o antigo; para usar o novo, apague-as abaixo.'), L('Preparar')))) return;
+    try { await api('/api/sandbox/prepare', {}); drawSandbox(box); } catch (e) { toast(e.message, 'err'); }
+  } }, ic('download'), r.ready ? L('Preparar de novo') : L('Preparar (baixa ~150 MB)'));
+  box.append(...[
+    steps,
+    job.running ? h('div.sb-job', null, h('span.spin', { html: svg('loader') }), h('span', null, job.step)) : null,
+    !job.running && job.error ? h('div.err.small', null, L('A preparação falhou: {0}', job.error)) : null,
+    h('div.field', null, h('label', null, L('Pacotes a mais na preparação')), pkgs,
+      h('small', null, L('Já vêm: {0}. Os nomes são os do Alpine (pkgs.alpinelinux.org).', r.defaultPackages))),
+    h('div.backup-now', null, prep),
+    tcard(L('Rodar os comandos dos agentes no Linux isolado'), L('Cada pasta de trabalho ganha o Linux dela na primeira vez que um comando roda (alguns segundos). O agente passa a usar comandos Linux, e a pasta aparece como /workspace. As ferramentas de arquivo continuam como estão.'), r.enabled, (v) => set({ enabled: v }), !r.ready && !r.enabled),
+    tcard(L('Sem internet nos comandos'), L('Os comandos não acessam a rede (nem o apk add). As APIs e o navegador do studio não mudam.'), r.noNet, (v) => set({ noNet: v }))].filter(Boolean));
+  if (r.distros?.length) {
+    box.append(h('div.set-group-title', null, L('Linux de cada pasta')), h('div.backup-list', null, r.distros.map((d) => h('div.backup-row', null,
+      ic('box'), h('div.br-main', null, h('b', null, d.folder || d.name), h('small.muted', null, d.name)),
+      h('button.btn.sm', { type: 'button', onclick: async () => {
+        if (!(await confirmBox(L('Apagar o Linux de {0}? O que foi instalado lá dentro se perde (a pasta de trabalho não muda). Ele é recriado no próximo comando.', d.folder || d.name), L('Apagar'), true))) return;
+        try { await api('/api/sandbox/remove', { name: d.name }); drawSandbox(box); } catch (e) { toast(e.message, 'err'); }
+      } }, L('Apagar'))))));
   }
 }

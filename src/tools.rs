@@ -374,7 +374,13 @@ pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[Strin
             parts.push(LF!("O usuário referenciou estes caminhos (você pode lê-los usando o caminho absoluto):\n{}", "The user referenced these paths (you can read them using the absolute path):\n{}", list.join("\n")));
         }
     }
-    if has("shell") {
+    if has("shell") && app.cfg().sandbox.enabled {
+        parts.push(LF!(
+            "Terminal: run_command roda num Linux Alpine isolado (WSL), não no PowerShell. A pasta de trabalho aparece como /workspace (o cwd é relativo a ela); o resto do Windows não existe lá. Use comandos Linux (sh/bash, ls, grep, rg, git, python3, node, npm, jq, curl). Para instalar o que faltar: apk add <pacote> (ou pip/npm){}. Os outros arquivos você lê e edita normalmente com as ferramentas de arquivo, pelo caminho do Windows.",
+            "Terminal: run_command runs in an isolated Alpine Linux (WSL), not PowerShell. The working folder shows as /workspace (cwd is relative to it); the rest of Windows does not exist there. Use Linux commands (sh/bash, ls, grep, rg, git, python3, node, npm, jq, curl). To install what is missing: apk add <package> (or pip/npm){}. Read and edit files normally with the file tools, by the Windows path.",
+            if app.cfg().sandbox.no_net { L!("; os comandos estão sem internet, então downloads não funcionam", "; commands have no internet, so downloads do not work") } else { "" }
+        ));
+    } else if has("shell") {
         // o terminal é o PowerShell; os extras só para o que eles fazem melhor (antes o modelo
         // via "uv/uvx" na lista e tentava rodar tudo com uvx)
         let mut tips: Vec<&str> = vec![];
@@ -495,6 +501,12 @@ pub async fn call(app: &Arc<App>, ws: PathBuf, name: &str, args: Value, allow: &
         }
         let fixed = fix_command(s(&args, "command"));
         let command = fixed.as_str();
+        // Linux isolado (WSL) ligado: o comando roda lá, só com a pasta de trabalho à vista
+        if app.cfg().sandbox.enabled {
+            let res = crate::sandbox::run(app, &ws, command, s(&args, "cwd"), timeout).await;
+            let res = res.map(|t| if compact_on { crate::compact::compact(&t, &crate::compact::saidas_dir(app), command, 12000).text } else { t });
+            return out(res.map(|t| (t, vec![])));
+        }
         let rtk = if rtk_on { crate::compact::rtk_rewrite(command) } else { None };
         let mut res = match &rtk {
             Some(rc) => crate::shell::run(&ws, rc, s(&args, "cwd"), timeout).await,

@@ -146,6 +146,10 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/dictate", post(dictate).layer(DefaultBodyLimit::max(64 * 1024 * 1024)))
         .route("/api/dictate/status", get(dictate_status))
         .route("/api/backup", get(backup_status))
+        .route("/api/sandbox", get(sandbox_status))
+        .route("/api/sandbox/settings", post(sandbox_settings))
+        .route("/api/sandbox/prepare", post(sandbox_prepare))
+        .route("/api/sandbox/remove", post(sandbox_remove))
         .route("/api/backup/settings", post(backup_settings))
         .route("/api/backup/now", post(backup_now))
         .route("/api/backup/restore", post(backup_restore))
@@ -389,6 +393,38 @@ async fn videos_captions_save(State(app): S, b: Bytes) -> Res {
 async fn dictate(State(app): S, Query(q): Query<HashMap<String, String>>, b: Bytes) -> Res {
     let g = |k: &str| q.get(k).map(String::as_str).unwrap_or("");
     crate::dictate::transcribe(&app, &b, g("lang"), g("model")).await.map(ok).map_err(bad)?
+}
+async fn sandbox_status(State(app): S) -> Res {
+    let mut v = crate::sandbox::status(&app).await;
+    if let Some(list) = v["distros"].as_array().cloned() {
+        v["distros"] = json!(list.iter().filter_map(|d| d.as_str()).map(|d| json!({ "name": d, "folder": crate::sandbox::folder_of(&app, d) })).collect::<Vec<_>>());
+    }
+    ok(v)
+}
+async fn sandbox_settings(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    {
+        let mut c = app.config.write().unwrap();
+        if let Some(x) = v["enabled"].as_bool() {
+            c.sandbox.enabled = x;
+        }
+        if let Some(x) = v["noNet"].as_bool() {
+            c.sandbox.no_net = x;
+        }
+        if let Some(x) = v["packages"].as_str() {
+            c.sandbox.packages = x.trim().to_string();
+        }
+    }
+    app.save_config();
+    ok(crate::sandbox::status(&app).await)
+}
+async fn sandbox_prepare(State(app): S) -> Res {
+    crate::sandbox::prepare(app.clone());
+    ok(json!({ "started": true }))
+}
+async fn sandbox_remove(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    crate::sandbox::remove(&app, st(&v, "name"), v["all"] == json!(true)).await.map(ok).map_err(bad)?
 }
 async fn backup_status(State(app): S) -> Res {
     ok(crate::backup::status(&app))

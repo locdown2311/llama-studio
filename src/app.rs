@@ -52,6 +52,8 @@ pub struct Config {
     /// APIs externas compatíveis com OpenAI; cada função (auditor, exploradores...) escolhe uma.
     /// A chave nunca volta para a interface (só "tem chave") nem sai no pacote de compartilhar.
     pub api_providers: Vec<ApiProvider>,
+    /// Comandos dos agentes num Linux isolado (WSL) por pasta de trabalho.
+    pub sandbox: crate::sandbox::SandboxCfg,
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -109,6 +111,7 @@ impl Default for Config {
             api_key: String::new(),
             api_model: String::new(),
             api_providers: vec![],
+            sandbox: Default::default(),
             ui_settings: json!({
                 "theme": "dark",
                 "colors": {
@@ -152,6 +155,7 @@ pub struct App {
     pub llama: Llama,
     /// Fila do NVIDIA NIM (40 pedidos por minuto na conta).
     pub limits: crate::limits::Limits,
+    pub sandbox_job: crate::sandbox::Job,
 
     ui: OnceLock<Box<dyn Fn(UiMsg) + Send + Sync>>,
     pub rt: OnceLock<tokio::runtime::Handle>,
@@ -226,6 +230,7 @@ impl App {
             rt: OnceLock::new(),
             native_window: std::sync::atomic::AtomicBool::new(false),
             limits: Default::default(),
+            sandbox_job: Default::default(),
             videos: Arc::new(crate::videos::Videos::default()),
         });
         app.save_config();
