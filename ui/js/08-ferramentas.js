@@ -96,6 +96,7 @@ async function execTool(name, args, info, tctx, tmsg) {
     if (name === 'execute_code') return await runCode(args?.code ?? '', tctx, tmsg);
     if (name === 'video_scenes') return await runVideoScenes(args || {}, tctx, tmsg);
     if (name === 'video_look') return await runVideoLook(args || {}, tctx, tmsg);
+    if (name === 'analyze_image') return await runAnalyzeImage(args || {}, tctx, tmsg);
     if (name === 'video_check') return await runVideoCheck(args || {}, tctx, tmsg);
     if (name === 'video_edit') return await runVideoEdit(args || {}, tctx, tmsg);
     if (name === 'video_find') return await runVideoFind(args || {}, tctx, tmsg);

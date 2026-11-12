@@ -598,14 +598,38 @@ async function pasteImage(file) {
 }
 /* ---- imagens no modo API: uma API que enxerga descreve para a que não enxerga ---- */
 /** API que aceita imagens para descrever pela conversa: as da equipe primeiro, depois qualquer pronta. */
-function visionApi(exceptId) {
-  const ids = [...apiForAll('explorer'), ...(S.info.apis || []).filter((a) => a.ready).map((a) => a.id)];
-  return ids.map(apiById).find((a) => a?.ready && a.vision && a.id !== exceptId && !apiCooled(a.id)) || null;
+/** Fila de quem enxerga: as APIs com "Aceita imagens" (a ordem da equipe de exploradores primeiro), sem as
+ *  que estão esfriando depois de um erro. */
+function visionQueue(exceptId) {
+  const ids = [...new Set([...apiForAll('explorer'), ...(S.info.apis || []).filter((a) => a.ready).map((a) => a.id)])];
+  return ids.map(apiById).filter((a) => a?.ready && a.vision && a.id !== exceptId && !apiCooled(a.id));
 }
-/** Só no modo API: a conversa roda numa API que não enxerga, e outra API enxerga. */
+function visionApi(exceptId) { return visionQueue(exceptId)[0] || null; }
+/** O modelo da conversa (local ou API) não enxerga, e alguma API enxerga. */
 function seerFor(conv) {
-  const ma = mainApiForChat(conv);
-  return ma && !visionOn() ? visionApi(ma.id) : null;
+  if (visionOn()) return null;
+  return visionApi(mainApiForChat(conv)?.id);
+}
+
+/** Pergunta sobre uma imagem a um modelo com visão, trocando de API se uma falhar. Devolve { text, by }. */
+async function askVision(url, ask, signal, exceptId) {
+  const queue = visionQueue(exceptId);
+  if (!queue.length) throw new Error(L('Nenhuma API com visão pronta: marque "Aceita imagens" numa API em Configurações › API externa.'));
+  let last;
+  for (const api of queue) {
+    const out = { content: '', reasoning: '', tool_calls: [] };
+    try {
+      await streamApi([{ role: 'user', content: [{ type: 'text', text: ask }, { type: 'image_url', image_url: { url } }] }], [], out, signal, null, { _p: api.id, _bg: true, _timeout: 120000 });
+      const text = splitThink(out.content).text.trim();
+      if (text) return { text, by: `${apiLabel(api)} · ${api.model}` };
+      last = new Error(L('{0} não devolveu texto.', apiLabel(api)));
+    } catch (e) {
+      if (signal?.aborted) throw e;
+      last = e;
+      apiCool?.(api.id);
+    }
+  }
+  throw last || new Error(L('Nenhuma API conseguiu olhar a imagem.'));
 }
 const DESCRIBE_IMG = L('Descreva esta imagem para um assistente que não consegue vê-la e vai trabalhar a partir da sua descrição. Transcreva exatamente todo texto visível (código, erros, números, nomes de arquivos, menus). Descreva o layout, os elementos importantes, cores quando importarem e o que parece estar acontecendo. Seja completo e objetivo, sem opinião e sem introdução.');
 /** Antes do primeiro passo: as imagens da última mensagem viram texto (guardado na mensagem, vale para o resto da conversa). */
@@ -617,16 +641,14 @@ async function describeImgs(conv, signal) {
   if (!todo.length) return;
   m.imgDesc ||= {};
   conv._waitingModel = true; conv._waitText = L('{0} está olhando a imagem para o modelo da conversa...', apiLabel(seer)); scheduleRender();
+  const except = mainApiForChat(conv)?.id;
   try {
     await Promise.all(todo.map(async (r) => {
       const url = await loadImg(r.path, wsOf(conv));
       if (!url) return;
-      const out = { content: '', reasoning: '', tool_calls: [] };
       const ask = DESCRIBE_IMG + (String(m.content || '').trim() ? '\n\n' + L('O pedido do usuário junto com a imagem (foque no que importa para ele): {0}', String(m.content).slice(0, 600)) : '');
       try {
-        await streamApi([{ role: 'user', content: [{ type: 'text', text: ask }, { type: 'image_url', image_url: { url } }] }], [], out, signal, null, { _p: seer.id, _timeout: 90000 });
-        const text = splitThink(out.content).text.trim();
-        if (text) m.imgDesc[r.path] = { by: `${apiLabel(seer)} · ${seer.model}`, text };
+        m.imgDesc[r.path] = await askVision(url, ask, signal, except);
       } catch (e) {
         if (signal?.aborted) throw e;
         m.imgDesc[r.path] = { by: apiLabel(seer), err: String(e.message || e).slice(0, 200) };
@@ -899,4 +921,27 @@ async function setupDictation(st) {
     return false;
   } catch (e) { toast(L('Não consegui baixar o Whisper: {0}', e.message), 'err'); return false; }
   finally { VOICE.busy = false; drawMic(); }
+}
+
+/** analyze_image: uma pergunta sobre uma imagem do projeto. Se o modelo da conversa enxerga, a imagem vai para
+ *  ele junto do resultado; senão, a fila de APIs com visão olha e responde em texto. */
+async function runAnalyzeImage(args, tctx, tmsg) {
+  const path = String(args.path || '').trim();
+  if (!IMG_RE.test(path)) return { content: L('Passe o caminho de uma imagem (png, jpg, gif, webp ou bmp).'), isError: true };
+  const conv = tctx?.conv || cur();
+  const url = await loadImg(path, wsOf(conv));
+  if (!url) return { content: L('Não consegui abrir a imagem {0}.', path), isError: true };
+  if (tmsg) tmsg._images = [url];
+  const q = String(args.question || '').trim();
+  if (visionOn() && !visionQueue(mainApiForChat(conv)?.id).length) {
+    return { content: L('Imagem {0} anexada abaixo.', path) + (q ? ' ' + L('Pergunta: {0}', q) : ''), isError: false, images: [url] };
+  }
+  if (tmsg) { tmsg.phase = L('Um modelo com visão está olhando a imagem...'); scheduleRender(); }
+  try {
+    const ask = q ? L('Olhe a imagem e responda com precisão, transcrevendo exatamente qualquer texto relevante: {0}', q) : DESCRIBE_IMG;
+    const r = await askVision(url, ask, tctx?.signal, mainApiForChat(conv)?.id);
+    return { content: L('Resposta de {0} sobre {1}:', r.by, path) + '\n\n' + r.text, isError: false };
+  } catch (e) {
+    return { content: String(e.message || e), isError: true };
+  } finally { if (tmsg) tmsg.phase = ''; }
 }

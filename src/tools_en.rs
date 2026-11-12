@@ -6,6 +6,8 @@ pub fn def_en(name: &str) -> Option<(&'static str, &'static str)> {
     Some(match name {
         "list_directory" => ("Lists files and folders. The path is relative to the workspace (use \".\" for the root). Also accepts absolute paths the user referenced.",
             r#"{"type":"object","properties":{"path":{"type":"string","description":"Folder path"}},"required":["path"]}"#),
+        "analyze_image" => ("Looks at an image in the project and answers about it (screenshot, photo, diagram, error print). A vision model does the looking, in a queue that switches automatically if one fails; you get the text. Use it whenever you need to know what is in an image.",
+            r#"{"type":"object","properties":{"path":{"type":"string","description":"Image: path in the project (or absolute) of a png, jpg, gif, webp or bmp"},"question":{"type":"string","description":"What you want to know (e.g. \"what error shows?\", \"transcribe the code\", \"where is the Save button?\"). Empty = full description"}},"required":["path"]}"#),
         "read_file" => ("Reads a text file. A large file without offset/limit comes back as an outline (sections, headings, functions) with line numbers: then read only the parts you need with offset/limit.",
             r#"{"type":"object","properties":{"path":{"type":"string"},"offset":{"type":"integer","description":"First line (1 = first)"},"limit":{"type":"integer","description":"Maximum number of lines"}},"required":["path"]}"#),
         "search_files" => ("Searches files by name (accepts * as a wildcard) and, optionally, by content (regular expression). Returns relative paths and, when searching content, the matching lines with their numbers. path can be a file: searches only in it.",
@@ -87,7 +89,7 @@ pub fn def_en(name: &str) -> Option<(&'static str, &'static str)> {
 mod t {
     #[test]
     fn esquemas_validos() {
-        for n in ["video_edit", "video_peaks", "video_thumbnail", "video_find", "video_check", "video_look", "video_captions", "video_scenes", "list_directory", "read_file", "search_files", "write_file", "create_directory", "edit_file", "run_command", "execute_code", "browser_navigate", "browser_read", "browser_click", "browser_type", "browser_press", "browser_back", "browser_screenshot", "browser_eval", "computer_windows", "computer_focus", "computer_elements", "computer_screenshot", "computer_click", "computer_type", "computer_key", "computer_scroll", "recall_history", "notebook", "update_todos", "search_tools", "explore", "multi_explore", "read_skill_file", "customize_ui"] {
+        for n in ["analyze_image", "video_edit", "video_peaks", "video_thumbnail", "video_find", "video_check", "video_look", "video_captions", "video_scenes", "list_directory", "read_file", "search_files", "write_file", "create_directory", "edit_file", "run_command", "execute_code", "browser_navigate", "browser_read", "browser_click", "browser_type", "browser_press", "browser_back", "browser_screenshot", "browser_eval", "computer_windows", "computer_focus", "computer_elements", "computer_screenshot", "computer_click", "computer_type", "computer_key", "computer_scroll", "recall_history", "notebook", "update_todos", "search_tools", "explore", "multi_explore", "read_skill_file", "customize_ui"] {
             let (_, p) = super::def_en(n).unwrap_or_else(|| panic!("sem inglês: {n}"));
             serde_json::from_str::<serde_json::Value>(p).unwrap_or_else(|e| panic!("{n}: {e}"));
         }
