@@ -50,15 +50,18 @@ fn q<'a>(q: &'a HashMap<String, String>, k: &str) -> &'a str {
     q.get(k).map(String::as_str).unwrap_or("")
 }
 /// Pasta de trabalho da conversa (a do projeto) ou a geral.
-fn ws_of(app: &App, p: &str) -> PathBuf {
+/// A pasta de trabalho pedida (a do projeto da conversa) ou, sem nenhuma, a global. Se a pasta pedida não existe,
+/// é erro: cair na global em silêncio fazia o agente trabalhar (e gravar arquivos) na pasta errada.
+fn ws_of(app: &App, p: &str) -> Result<PathBuf, ApiErr> {
     let p = p.trim();
-    if !p.is_empty() {
-        let pb = PathBuf::from(p);
-        if pb.is_absolute() && pb.is_dir() {
-            return app::normalize(&pb);
-        }
+    if p.is_empty() {
+        return Ok(app.workspace());
     }
-    app.workspace()
+    let pb = PathBuf::from(p);
+    if pb.is_absolute() && pb.is_dir() {
+        return Ok(app::normalize(&pb));
+    }
+    Err(ApiErr(StatusCode::NOT_FOUND, LF!("A pasta do projeto não existe: {}. Crie a pasta ou corrija o caminho do projeto.", "The project folder does not exist: {}. Create it or fix the project path.", p)))
 }
 
 pub fn router(app: Arc<App>) -> Router {
@@ -859,7 +862,7 @@ fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
 }
 
 async fn ws_list(State(app): S, Query(qs): Q) -> Res {
-    let ws = ws_of(&app, q(&qs, "ws"));
+    let ws = ws_of(&app, q(&qs, "ws"))?;
     let dir = resolve(&ws, q(&qs, "path"));
     if !is_inside(&ws, &dir) {
         return Err(ApiErr(StatusCode::FORBIDDEN, L!("Fora da pasta de trabalho", "Outside the workspace").into()));
@@ -879,7 +882,7 @@ async fn ws_list(State(app): S, Query(qs): Q) -> Res {
 }
 
 async fn ws_read(State(app): S, Query(qs): Q) -> Res {
-    let ws = ws_of(&app, q(&qs, "ws"));
+    let ws = ws_of(&app, q(&qs, "ws"))?;
     let file = resolve(&ws, q(&qs, "path"));
     if !is_inside(&ws, &file) {
         return Err(ApiErr(StatusCode::FORBIDDEN, L!("Fora da pasta de trabalho", "Outside the workspace").into()));
@@ -898,7 +901,7 @@ async fn ws_read(State(app): S, Query(qs): Q) -> Res {
 async fn ws_upload(State(app): S, Query(qs): Q, b: Bytes) -> Res {
     let name = file_name(Path::new(q(&qs, "name")));
     let name = if name.is_empty() { "arquivo".into() } else { name };
-    let dir = ws_of(&app, q(&qs, "ws")).join("anexos");
+    let dir = ws_of(&app, q(&qs, "ws"))?.join("anexos");
     std::fs::create_dir_all(&dir).map_err(|e| bad(e.to_string()))?;
     let p = Path::new(&name);
     let (stem, ext) = (p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(), p.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default());
@@ -920,7 +923,7 @@ async fn export_conv(State(app): S, b: Bytes) -> Res {
     if name.is_empty() {
         name = "conversa".into();
     }
-    let dir = ws_of(&app, st(&v, "ws")).join("conversas");
+    let dir = ws_of(&app, st(&v, "ws"))?.join("conversas");
     std::fs::create_dir_all(&dir).map_err(|e| bad(e.to_string()))?;
     let mut target = dir.join(format!("{name}.md"));
     let mut i = 2;
@@ -934,7 +937,7 @@ async fn export_conv(State(app): S, b: Bytes) -> Res {
 
 async fn reveal(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
-    let p = resolve(&ws_of(&app, st(&v, "ws")), st(&v, "path"));
+    let p = resolve(&ws_of(&app, st(&v, "ws"))?, st(&v, "path"));
     if !p.exists() {
         return Err(ApiErr(StatusCode::NOT_FOUND, LF!("Não encontrado: {}", "Not found: {}", p.display())));
     }
@@ -979,7 +982,7 @@ async fn remember(State(app): S, b: Bytes) -> Res {
 
 async fn stat(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
-    let p = resolve(&ws_of(&app, st(&v, "ws")), st(&v, "path"));
+    let p = resolve(&ws_of(&app, st(&v, "ws"))?, st(&v, "path"));
     match std::fs::metadata(&p) {
         Ok(m) => ok(json!({"exists": true, "path": p, "dir": m.is_dir(), "size": m.len()})),
         Err(_) => ok(json!({"exists": false, "path": p})),
@@ -1239,7 +1242,7 @@ async fn context(State(app): S, b: Bytes) -> Res {
     if v.get("skillsOnly").and_then(Value::as_bool).unwrap_or(false) {
         return ok(json!({ "text": tools::skill_blocks(&app, &strs(&v, "skills"), v.get("lazy").and_then(Value::as_bool).unwrap_or(false)) }));
     }
-    let mut text = tools::build_context(&app, &ws_of(&app, st(&v, "ws")), &strs(&v, "skills"), &groups_of(&v), &strs(&v, "refs"), st(&v, "now"), v.get("lazy").and_then(Value::as_bool).unwrap_or(false), v.get("map").and_then(Value::as_bool).unwrap_or(false));
+    let mut text = tools::build_context(&app, &ws_of(&app, st(&v, "ws"))?, &strs(&v, "skills"), &groups_of(&v), &strs(&v, "refs"), st(&v, "now"), v.get("lazy").and_then(Value::as_bool).unwrap_or(false), v.get("map").and_then(Value::as_bool).unwrap_or(false));
     // pacotes de instruções: {"packs": {"ponytail": "full", "caveman": "on"}} (ou o antigo "ponytail": "full")
     let mut levels = v.get("packs").cloned().unwrap_or_else(|| json!({}));
     if levels.get("ponytail").is_none() && !st(&v, "ponytail").is_empty() {
@@ -1263,7 +1266,7 @@ async fn tools_call(State(app): S, b: Bytes) -> Res {
         Some(a) => a.clone(),
         None => json!({}),
     };
-    let ws = ws_of(&app, st(&v, "ws"));
+    let ws = ws_of(&app, st(&v, "ws"))?;
     let name = st(&v, "name");
     if name.starts_with("remote_api_") {
         let provider_id = name.trim_start_matches("remote_api_");
@@ -1457,7 +1460,7 @@ async fn engines_cancel(State(app): S, b: Bytes) -> Res {
 /// Apaga os caches de conversa mais antigos (mantém `keep`) e os de `drop` (conversas apagadas).
 async fn projmap_get(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
-    let ws = ws_of(&app, st(&v, "ws"));
+    let ws = ws_of(&app, st(&v, "ws"))?;
     let refresh = v["refresh"] == true;
     let r = tokio::task::spawn_blocking({ let app = app.clone(); move || crate::projmap::get(&app, &ws, refresh) }).await.map_err(|e| bad(e.to_string()))?;
     ok(r)
@@ -1465,7 +1468,7 @@ async fn projmap_get(State(app): S, b: Bytes) -> Res {
 
 async fn projmap_summary(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
-    ok(crate::projmap::set_summary(&app, &ws_of(&app, st(&v, "ws")), st(&v, "summary")))
+    ok(crate::projmap::set_summary(&app, &ws_of(&app, st(&v, "ws"))?, st(&v, "summary")))
 }
 
 async fn arr_get(State(app): S) -> Res {
@@ -1562,7 +1565,7 @@ async fn sig_save(State(app): S, b: Bytes) -> Res {
 
 async fn sig_make(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
-    let path = resolve(&ws_of(&app, st(&v, "ws")), st(&v, "file"));
+    let path = resolve(&ws_of(&app, st(&v, "ws"))?, st(&v, "file"));
     let (addr, base, len) = (st(&v, "addr").to_string(), st(&v, "base").to_string(), v["len"].as_u64().unwrap_or(48) as usize);
     let r = tokio::task::spawn_blocking(move || crate::pe::make(&path, &addr, &base, len)).await.map_err(|e| bad(e.to_string()))?;
     ok(r.map_err(bad)?)
@@ -1570,7 +1573,7 @@ async fn sig_make(State(app): S, b: Bytes) -> Res {
 
 async fn sig_scan(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
-    let path = resolve(&ws_of(&app, st(&v, "ws")), st(&v, "file"));
+    let path = resolve(&ws_of(&app, st(&v, "ws"))?, st(&v, "file"));
     let app2 = app.clone();
     let r = tokio::task::spawn_blocking(move || crate::pe::scan(&app2, &path)).await.map_err(|e| bad(e.to_string()))?;
     ok(r.map_err(bad)?)
@@ -1601,7 +1604,7 @@ async fn cp_diff(State(app): S, b: Bytes) -> Res {
 async fn img_data(State(app): S, b: Bytes) -> Res {
     use base64::Engine;
     let v = body(&b);
-    let ws = ws_of(&app, st(&v, "ws"));
+    let ws = ws_of(&app, st(&v, "ws"))?;
     let file = resolve(&ws, st(&v, "path"));
     let ext = file.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
     let mime = match ext.as_str() {
