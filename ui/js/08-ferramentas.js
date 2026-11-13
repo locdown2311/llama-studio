@@ -16,7 +16,7 @@ const TOOL_INFO = {
   notebook: { sec: L('Planejamento'), title: L('Caderno de investigação'), short: 'caderno', desc: L('O modelo registra achados (endereços, funções, hipóteses) num caderno do projeto e consulta antes de repetir trabalho.') },
   interface: { sec: L('Interface'), title: L('Personalizar a interface'), short: 'interface', desc: L('Temas, cores, fontes e layout do studio, pedidos ao modelo.') },
   video: { sec: L('Vídeo'), title: L('Edição de vídeo'), short: L('vídeo'), desc: L('Só nas conversas de um projeto de vídeo: editar gravações (cortes, layouts, legendas), ver quadros, gerar legendas e criar cenas animadas em equipe.') },
-  explore: { sec: L('Subagentes'), title: L('Subagentes exploradores'), short: 'exploradores', desc: L('Investigação só de leitura com contexto próprio, vários em paralelo.') },
+  explore: { sec: L('Subagentes'), title: L('Subagentes exploradores'), short: 'exploradores', desc: L('Investigação com contexto próprio, vários em paralelo. Com a escrita ligada, também criam e editam os arquivos que o modelo der a cada um.') },
 };
 function enabledGroups() { return TOOL_GROUPS.filter((g) => S.settings.tools[g]); }
 /** O modelo da conversa enxerga? (a conversa importa: com várias respondendo ao mesmo tempo, cada uma tem o seu) */
@@ -271,13 +271,62 @@ async function teamRun(count, runOne, signal, limit = count) {
   }
 }
 
-/** Subagente explorador: ciclo próprio, só ferramentas de leitura, devolve um relatório.
-   apiId: força uma API externa específica (o multi_explore distribui as subtarefas entre as escolhidas). */
-async function runExplorer(args, tctx, tmsg, apiId) {
+/* ---- subagentes que escrevem ----
+   Com `files`, o subagente também cria e edita, mas só dentro desses arquivos/pastas (dois subagentes não dividem
+   arquivo). Cada alteração passa pelas mesmas regras das do agente: auditor, pedido de permissão (no cartão do
+   subagente) e ponto de restauração. Configurações › Agente › "Subagentes podem escrever" desliga. */
+function normPath(ws, p) { return joinPath(ws, String(p || '').trim()).replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase(); }
+function inScope(ws, scope, p) {
+  const a = normPath(ws, p);
+  return scope.some((s) => a === s || a.startsWith(s + '\\'));
+}
+/** Escopos de escrita que se cruzam (um arquivo ou pasta de um agente dentro do de outro). */
+function scopeClash(ws, lists) {
+  const all = lists.map((l) => (l || []).map((p) => normPath(ws, p)));
+  for (let i = 0; i < all.length; i++) for (let j = i + 1; j < all.length; j++)
+    for (const a of all[i]) for (const b of all[j]) if (a === b || a.startsWith(b + '\\') || b.startsWith(a + '\\')) return L('Os agentes {0} e {1} iam escrever no mesmo lugar ({2}). Dê a cada um arquivos ou pastas diferentes.', i + 1, j + 1, a.length < b.length ? a : b);
+  return '';
+}
+function writeScope(args) { return Array.isArray(args?.files) ? args.files.map(String).map((x) => x.trim()).filter(Boolean) : []; }
+function subWriteOn(tctx) { return S.settings.subWrite !== false && !tctx.plan && (tctx.groups.includes('write') || tctx.groups.includes('edit')); }
+
+/** Permissão para uma alteração de um subagente: auditor e/ou o usuário, no cartão de quem o chamou. */
+async function subGate(name, args, info, tctx, root, who) {
+  const conv = tctx.conv;
+  const tc = { id: 'sub_' + uid(), function: { name, arguments: JSON.stringify(args) } };
+  if (shouldAudit(info, conv)) {
+    const a = await auditCall(tc, info, conv, tctx.signal);
+    if (a.approve) return null;
+  } else if (!needsApproval(info, conv)) return null;
+  const ask = { id: tc.id, who, name, summary: toolSummary(name, args) };
+  (root.asks ||= []).push(ask);
+  S.waiting.add(conv.id); renderConvList(); scheduleRender();
+  if (conv.id !== S.curId || S.view !== 'chat') toast(L('"{0}" está esperando sua permissão', conv.title));
+  const ans = await waitApproval(tc.id, tctx.signal);
+  root.asks = (root.asks || []).filter((x) => x !== ask);
+  if (!root.asks.length) { delete root.asks; S.waiting.delete(conv.id); renderConvList(); }
+  scheduleRender();
+  if (tctx.signal.aborted) return L('Cancelado pelo usuário.');
+  if (ans === 'deny') return L('O usuário negou esta alteração. Não tente de novo; diga no relatório o que faltou fazer.');
+  if (ans === 'always') conv.autoApprove = true;
+  return null;
+}
+
+/** Subagente: ciclo próprio, ferramentas de leitura (e, com files, de escrita nesses arquivos), devolve um relatório.
+   apiId: força uma API externa específica (o multi_explore distribui as subtarefas entre as escolhidas).
+   root: a mensagem da ferramenta que o chamou (onde aparecem os pedidos de permissão e os pontos de restauração). */
+async function runExplorer(args, tctx, tmsg, apiId, root = tmsg, who = '') {
   const only = ['list_directory', 'read_file', 'search_files'];
   if (tctx.groups.includes('browser')) only.push('browser_navigate', 'browser_read', 'browser_click', 'browser_back');
   if (tctx.groups.includes('history')) only.push('recall_history');
-  const { tools } = await api('/api/tools', { groups: ['read', 'browser', 'history'], mcp: [], skills: [], only });
+  const asked = writeScope(args);
+  const scope = asked.length && subWriteOn(tctx) ? asked.map((p) => normPath(tctx.ws, p)) : [];
+  const writer = scope.length > 0;
+  if (writer) {
+    if (tctx.groups.includes('write')) only.push('write_file', 'create_directory');
+    if (tctx.groups.includes('edit')) only.push('edit_file');
+  }
+  const { tools } = await api('/api/tools', { groups: ['read', 'browser', 'history', ...(writer ? ['write', 'edit'] : [])], mcp: [], skills: [], only });
   // conectores da conversa (decompilador, debugger...): o explorador usa as ferramentas que só leem
   const mcpMeta = {};
   if (tctx.mcp?.length) {
@@ -292,20 +341,40 @@ async function runExplorer(args, tctx, tmsg, apiId) {
       for (const t of ro) { tools.push(t); only.push(t.function.name); mcpMeta[t.function.name] = r.meta[t.function.name]; }
     } catch { /* conectores fora: segue só com as ferramentas de leitura */ }
   }
-  const sys = L('Você é um subagente explorador do llama studio. Investigue a tarefa usando só as ferramentas de leitura disponíveis. ')
-    + L('Seja eficiente: procure antes de ler, leia só o necessário. Não faça perguntas. Quando terminar, responda com um relatório objetivo em português: ')
-    + L('o que encontrou, com caminhos de arquivo, trechos curtos relevantes e URLs. Se algo não existir, diga.\n\n') + L('Use só as ferramentas que você recebeu (aqui não existem update_todos, search_tools nem nada que escreva).\n\n')
+  const sys = (writer
+    ? L('Você é um subagente do llama studio. Faça a tarefa com as ferramentas que recebeu: leia o que precisar e crie ou edite só estes arquivos/pastas (caminhos relativos à pasta de trabalho): {0}. Fora deles a escrita é recusada. ', asked.join(', '))
+      + L('Seja eficiente: procure antes de ler, leia só o necessário, prefira edit_file a reescrever um arquivo inteiro. Não faça perguntas. Quando terminar, responda com um relatório objetivo em português: ')
+      + L('o que mudou em cada arquivo, o que encontrou (com caminhos e trechos curtos) e o que ficou faltando.\n\n') + L('Use só as ferramentas que você recebeu (aqui não existem run_command, update_todos nem search_tools).\n\n')
+    : L('Você é um subagente explorador do llama studio. Investigue a tarefa usando só as ferramentas de leitura disponíveis. ')
+      + L('Seja eficiente: procure antes de ler, leia só o necessário. Não faça perguntas. Quando terminar, responda com um relatório objetivo em português: ')
+      + L('o que encontrou, com caminhos de arquivo, trechos curtos relevantes e URLs. Se algo não existir, diga.\n\n') + L('Use só as ferramentas que você recebeu (aqui não existem update_todos, search_tools nem nada que escreva).\n\n'))
     // o contexto da conversa, sem as partes que falam de ferramentas que o explorador não tem
     + tctx.ctxText.split('\n\n').filter((p) => !p.startsWith('The user turned on the sk') && !p.startsWith('O usuário ativou as skills')
-      && !/\b(update_todos|search_tools|execute_code|run_command|edit_file|write_file|notebook|explore)\b/.test(p)).join('\n\n');
-  const msgs = [{ role: 'system', content: sys }, { role: 'user', content: args.task + (args.where ? L('\n\nComece por: {0}', args.where) : '') }];
+      && !(writer ? /\b(update_todos|search_tools|execute_code|run_command|notebook|explore)\b/ : /\b(update_todos|search_tools|execute_code|run_command|edit_file|write_file|notebook|explore)\b/).test(p)).join('\n\n');
+  // pediu para escrever mas não dá: avisa o subagente (e o relatório vai dizer)
+  const noWrite = asked.length && !writer
+    ? '\n\n' + (tctx.plan ? L('(Modo plano: nada pode ser alterado agora; só investigue.)') : L('(Escrita por subagentes desligada nesta conversa: só investigue e diga no relatório o que mudaria.)'))
+    : '';
+  const msgs = [{ role: 'system', content: sys }, { role: 'user', content: args.task + (args.where ? L('\n\nComece por: {0}', args.where) : '') + noWrite }];
   tmsg._sub = [];
+  if (writer) tmsg.files = asked;
   // fora do slot da conversa (ela fica esperando o relatório e não pode perder o cache)
   // equipe: a API indicada (multi_explore) ou a primeira da ordem que não falhou há pouco
   const st = teamStart(apiId);
   // onde o subagente roda, para o cartão mostrar (API e modelo, ou local)
   tmsg.runOn = teamRunOn(st);
   tmsg.apiTokens = 0;
+  const cpOwner = { _cpOwner: root, tool_call_id: root.tool_call_id };
+  const write = async (name, a) => {
+    if (!a?.path) return { content: L('Falta o path.'), isError: true };
+    if (!inScope(tctx.ws, scope, a.path)) return { content: L('{0} está fora dos arquivos deste subagente ({1}). Escreva só neles.', a.path, asked.join(', ')), isError: true };
+    const info = { source: 'builtin', mutating: true };
+    const no = await subGate(name, a, info, tctx, root, who);
+    if (no) return { content: no, isError: true };
+    const r = await execTool(name, a, info, tctx, cpOwner);
+    if (!r.isError) { (tmsg.wrote ||= []).includes(a.path) || tmsg.wrote.push(a.path); if (tctx.ws === S.ws.path) markFresh(a.path); }
+    return r;
+  };
   const max = Math.max(3, Number(S.settings.explorerSteps) || 20);
   for (let step = 0; step <= max; step++) {
     if (tctx.signal.aborted) return { content: 'Cancelado.', isError: true };
@@ -316,9 +385,13 @@ async function runExplorer(args, tctx, tmsg, apiId) {
     const calls = m.tool_calls.filter((t) => t && t.function?.name);
     calls.forEach((t) => { if (!t.id) t.id = 'call_' + uid(); });
     const text = splitThink(m.content).text;
-    if (!calls.length) { tmsg.sub = tmsg._sub.map((x) => ({ name: x.name, summary: x.summary, status: x.status })); return { content: text.trim() || L('O subagente terminou sem relatório.'), isError: false }; }
+    if (!calls.length) {
+      tmsg.sub = tmsg._sub.map((x) => ({ name: x.name, summary: x.summary, status: x.status }));
+      const wrote = tmsg.wrote?.length ? '\n\n' + L('[Arquivos alterados por este subagente: {0}]', tmsg.wrote.join(', ')) : '';
+      return { content: (text.trim() || L('O subagente terminou sem relatório.')) + wrote, isError: false };
+    }
     msgs.push({ role: 'assistant', content: text, tool_calls: calls.map((t) => ({ id: t.id, type: 'function', function: { name: t.function.name, arguments: validArgs(t.function.arguments, () => {}) } })) });
-    // leituras do mesmo passo rodam juntas; o navegador (uma página só) vai em ordem
+    // leituras do mesmo passo rodam juntas; o navegador (uma página só) e as escritas vão em ordem
     const results = new Array(calls.length);
     const pend = [];
     for (let i = 0; i < calls.length; i++) {
@@ -326,7 +399,9 @@ async function runExplorer(args, tctx, tmsg, apiId) {
       const a = parseArgs(t.function.arguments) || {};
       const st = { name: t.function.name, summary: toolSummary(t.function.name, a), status: 'running' };
       tmsg._sub.push(st); scheduleRender();
-      const run = () => (only.includes(t.function.name) ? execTool(t.function.name, a, mcpMeta[t.function.name] || {}, tctx, {}) : Promise.resolve({ content: L('Ferramenta não disponível para o explorador. Use uma destas: {0}', only.join(', ')), isError: true }))
+      const run = () => (!only.includes(t.function.name) ? Promise.resolve({ content: L('Ferramenta não disponível para o subagente. Use uma destas: {0}', only.join(', ')), isError: true })
+        : FILE_MUT.has(t.function.name) ? write(t.function.name, a)
+        : execTool(t.function.name, a, mcpMeta[t.function.name] || {}, tctx, {}))
         .then((r) => { results[i] = r; st.status = r.isError ? 'error' : 'ok'; scheduleRender(); });
       if (PARALLEL_READS.has(t.function.name)) pend.push(run());
       else { await Promise.all(pend); pend.length = 0; await run(); }
@@ -342,6 +417,7 @@ async function runMultiExplore(args, tctx, tmsg) {
   const task = String(args.task || '').trim();
   const subs = Array.isArray(args.subtasks) ? args.subtasks.filter((s) => s && String(s.task).trim()) : [];
   if (!subs.length) return { content: L('multi_explore precisa de pelo menos uma subtarefa.'), isError: true };
+  if (subWriteOn(tctx)) { const clash = scopeClash(tctx.ws, subs.map(writeScope)); if (clash) return { content: clash, isError: true }; }
   // prioridade: arg explícito > config do usuário > ilimitado
   let limit = Number(args.maxConcurrentExplorers);
   if (!Number.isFinite(limit) || limit < 1) limit = Number(S.settings?.maxConcurrentExplorers) || subs.length;
@@ -353,6 +429,7 @@ async function runMultiExplore(args, tctx, tmsg) {
     status: 'queued',
     task: String(sub.task),
     where: String(sub.where || ''),
+    files: writeScope(sub),
   }));
   scheduleRender();
   const all = new Array(subs.length);
@@ -360,7 +437,7 @@ async function runMultiExplore(args, tctx, tmsg) {
     const sub = subs[i], subMsg = tmsg.subs[i];
     subMsg.status = 'running'; scheduleRender();
     let r;
-    try { r = await runExplorer({ task: sub.task, where: sub.where || '' }, tctx, subMsg, apiId); }
+    try { r = await runExplorer({ task: sub.task, where: sub.where || '', files: sub.files }, tctx, subMsg, apiId, tmsg, L('Agente {0}', i + 1)); }
     catch (e) { if (tctx.signal.aborted) throw e; r = { content: String(e.message || e), isError: true }; }
     subMsg.status = r.isError ? 'error' : 'ok';
     subMsg.content = r.content;

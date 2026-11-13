@@ -347,6 +347,12 @@ async function runAgent(conv) {
       .then((r) => {
         // numa API, o explore aponta para o multi_explore (a descrição padrão manda chamar explore várias vezes)
         if (preferMulti(conv)) for (const t of r.tools || []) if (t.function?.name === 'explore') t.function.description = L('Um subagente explorador para UMA investigação pequena (só leitura, contexto próprio, devolve um relatório). Com mais de uma parte, use multi_explore: aqui ele é bem mais rápido.');
+        // escrita por subagentes desligada (ou sem ferramentas de escrita): o parâmetro files some
+        if (S.settings.subWrite === false || !(groups.includes('write') || groups.includes('edit'))) for (const t of r.tools || []) {
+          const pr = t.function?.parameters?.properties;
+          if (t.function?.name === 'explore' && pr?.files) delete pr.files;
+          if (t.function?.name === 'multi_explore' && pr?.subtasks?.items?.properties?.files) delete pr.subtasks.items.properties.files;
+        }
         // analyze_image só com alguém que enxergue (o modelo da conversa ou uma API com visão)
         if (!visionOn(conv) && !visionQueue(mainApiForChat(conv)?.id).length) r.tools = (r.tools || []).filter((t) => t.function?.name !== 'analyze_image');
         return r;
@@ -391,6 +397,7 @@ async function runAgent(conv) {
     const g = stepGuard(Math.max(1, Number(S.settings.maxSteps) || 40));
     const lastAsk = [...conv.messages].reverse().find((m) => m.role === 'user' && !m.hidden);
     const planTurn = !!lastAsk?.plan;
+    tctx.plan = planTurn;
     const esc = { fails: 0, sigs: new Set(), repeat: '', done: false };
 
     for (let step = 0; step < g.limit; step++) {
@@ -522,7 +529,10 @@ async function runAgent(conv) {
         const done = (e, r) => { e.tmsg.ms = performance.now() - e.ts; e.tmsg.content = r.content; e.tmsg.isError = r.isError; e.tmsg.status = r.isError ? 'error' : 'ok'; saveConvs(); scheduleRender(); };
         const run = (e, apiId) => runExplorer(e.args, tctx, e.tmsg, apiId).catch((err) => { if (ac.signal.aborted) throw err; return { content: String(err.message || err), isError: true }; }).then((r) => done(e, r));
         // um só: como antes (a primeira API da equipe, ou o modelo local); vários: cada API pega o próximo ao terminar
-        if (explores.length === 1) parallel.push(run(explores[0]));
+        // subagentes que escrevem não dividem arquivos
+        const clash = explores.length > 1 && subWriteOn(tctx) ? scopeClash(tctx.ws, explores.map((e) => writeScope(e.args))) : '';
+        if (clash) for (const e of explores) done(e, { content: clash, isError: true });
+        else if (explores.length === 1) parallel.push(run(explores[0]));
         else parallel.push(teamRun(explores.length, (i, apiId) => run(explores[i], apiId), ac.signal, Number(S.settings.maxConcurrentExplorers) || explores.length));
       }
       if (parallel.length || reads.length) await Promise.all([...parallel, ...reads]);
@@ -565,6 +575,7 @@ async function runAgent(conv) {
     const why = ac.signal.aborted ? L('Cancelado pelo usuário.') : L('Não executada: a resposta parou por um erro do studio (veja a mensagem abaixo).');
     const stuck = ac.signal.aborted ? 'denied' : 'error';
     for (const m of conv.messages) if (m.role === 'tool') {
+      delete m.asks;
       if (['pending', 'running', 'approval', 'audit'].includes(m.status)) { m.status = stuck; m.isError = true; m.content = m.content || why; }
       // subtarefas de explore/multi_explore: sem isso os spinners seguem girando após cancelar
       for (const st of m._sub || []) if (st.status === 'running' || st.status === 'queued') st.status = stuck;

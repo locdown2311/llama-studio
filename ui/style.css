@@ -369,7 +369,8 @@ svg { display: block; flex: none; width: 16px; height: 16px; }
 .spin { animation: spin .9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .tool-body { display: none; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--code-bg) 55%, var(--card)); }
-.tool.open .tool-body, .tool.s-approval .tool-body { display: block; }
+.tool.open .tool-body, .tool.s-approval .tool-body, .tool.asking .tool-body { display: block; }
+.tool.asking .tool-card { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); box-shadow: 0 0 0 3px var(--warn-soft); }
 .tool-sec { padding: 10px 12px 12px; }
 .tool-sec + .tool-sec { border-top: 1px solid var(--line); }
 .tool-sec-label { font-size: 12px; color: var(--muted); margin-bottom: 7px; display: flex; align-items: center; gap: 8px; font-weight: 500; }

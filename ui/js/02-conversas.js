@@ -3189,7 +3189,8 @@ function renderTool(tc, res, live) {
       ".src-" +
       source +
       (open ? ".open" : "") +
-      ((name === "multi_explore" || name === "video_scenes") && res?.subs?.length ? ".multi" : ""),
+      ((name === "multi_explore" || name === "video_scenes") && res?.subs?.length ? ".multi" : "") +
+      (res?.asks?.length ? ".asking" : ""),
     { dataset: { id: key } }
   );
 
@@ -3307,7 +3308,8 @@ function renderTool(tc, res, live) {
         h("div.md", {
           html: md(
             args.task +
-              (args.where ? L("\n\n**Começar por:** {0}", args.where) : "")
+              (args.where ? L("\n\n**Começar por:** {0}", args.where) : "") +
+              (Array.isArray(args.files) && args.files.length ? L("\n\n**Pode alterar:** {0}", args.files.join(", ")) : "")
           ),
         })
       )
@@ -3915,6 +3917,20 @@ function renderTool(tc, res, live) {
         )
       )
     );
+  }
+
+  // um subagente quer alterar um arquivo e precisa da sua permissão
+  for (const ask of res?.asks || []) {
+    const answer = (a) => {
+      const fn = S.approvals.get(ask.id);
+      if (fn) { S.approvals.delete(ask.id); fn(a); }
+    };
+    bodyEl.append(
+      h("div.approval", null,
+        h("span", null, L("{0} quer {1}: {2}. Permitir?", ask.who || L("O subagente"), ask.name === "edit_file" ? L("editar") : ask.name === "create_directory" ? L("criar a pasta") : L("gravar"), ask.summary || "")),
+        h("button.btn.sm.danger", { onclick: () => answer("deny") }, L("Negar")),
+        h("button.btn.sm", { onclick: () => answer("always") }, L("Sempre nesta conversa")),
+        h("button.btn.sm.primary", { onclick: () => answer("allow") }, L("Permitir"))));
   }
 
   el.append(h("div.tool-card", null, head, bodyEl));

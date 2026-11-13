@@ -50,7 +50,8 @@ function renderSettings() {
         field(L('Passos com ferramentas por resposta'), input('input.input', { value: st.maxSteps, inputmode: 'numeric' }, (x) => put({ maxSteps: Number(x.value) || 40 })), L('Limite base. Se a tarefa está avançando (lista de tarefas, arquivos alterados), o studio dá mais passos sozinho, até 3 vezes isso. Repetições sem resultado novo são interrompidas antes.')),
         field(L('Passos de cada subagente'), input('input.input', { value: st.explorerSteps, inputmode: 'numeric' }, (x) => put({ explorerSteps: Number(x.value) || 20 })))),
       h('div.row', null,
-        field(L('Exploradores em paralelo'), input('input.input', { value: st.maxConcurrentExplorers ?? '', placeholder: '3', inputmode: 'numeric' }, (x) => put({ maxConcurrentExplorers: Number(x.value) || 0 }))))));
+        field(L('Exploradores em paralelo'), input('input.input', { value: st.maxConcurrentExplorers ?? '', placeholder: '3', inputmode: 'numeric' }, (x) => put({ maxConcurrentExplorers: Number(x.value) || 0 })))),
+      sw(L('Subagentes podem escrever'), L('O modelo pode dar a um subagente arquivos ou pastas para criar e editar (só eles; dois subagentes não dividem arquivo). Cada alteração passa pelo auditor e pelas suas permissões, com ponto de restauração. Desligado, os subagentes só leem.'), st.subWrite !== false, (v) => put({ subWrite: v }))));
 
   const autoCur = st.autoRoute === false ? 'desligado' : (st.autoLevel || 'equilibrado');
   const autoList = h('div.set-choices', null, AUTO_LEVELS.map(([v, l, d]) => {
