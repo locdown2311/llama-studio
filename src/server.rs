@@ -1002,6 +1002,7 @@ async fn skills_get(State(app): S, Query(qs): Q) -> Res {
     let mut v = serde_json::to_value(&s).unwrap();
     v["body"] = json!(b);
     v["meta"] = json!(meta);
+    v["toolsText"] = json!(std::fs::read_to_string(s.dir.join("tools.json")).unwrap_or_default());
     ok(v)
 }
 
@@ -1027,7 +1028,7 @@ async fn skills_save(State(app): S, b: Bytes) -> Res {
     if !id.is_empty() && !skills::get(&app, id).is_some_and(|s| s.editable) {
         return Err(bad(L!("Essa habilidade fica fora da pasta do studio; importe-a para editar.", "That skill is outside the studio folder; import it to edit it.")));
     }
-    let id = skills::write(&app, (!id.is_empty()).then_some(id), st(&v, "name").trim(), st(&v, "description").trim(), st(&v, "body")).map_err(bad)?;
+    let id = skills::write_full(&app, (!id.is_empty()).then_some(id), st(&v, "name").trim(), st(&v, "description").trim(), st(&v, "body"), v.get("triggers").and_then(Value::as_str), v.get("tools").and_then(Value::as_str)).map_err(bad)?;
     ok(json!({"id": id}))
 }
 
@@ -1204,6 +1205,10 @@ async fn tools_list(State(app): S, b: Bytes) -> Res {
     
     // Pega as ferramentas normais geradas pelo sistema
     let mut built = tools::build_tools(&app, &groups_of(&v), &strs(&v, "mcp"), !strs(&v, "skills").is_empty(), &strs(&v, "extra"), only.as_deref(), lazy, &strs(&v, "eager"), &strs(&v, "full"));
+    // skills: use_skill (com o catálogo) e as ferramentas das skills ativas ou carregadas
+    if only.is_none() {
+        tools::add_skill_tools(&app, &mut built, v.get("skillCatalog").and_then(Value::as_bool).unwrap_or(false), &strs(&v, "skillTools"));
+    }
     
     // APIs remotas como ferramentas: só no pedido principal da conversa e com a opção ligada ("apis": true).
     // Exploradores, auditor e listas restritas não recebem (gastaria contexto em todo pedido).
@@ -1251,6 +1256,12 @@ async fn context(State(app): S, b: Bytes) -> Res {
     let pt = crate::packs::sections(&app, &levels);
     if !pt.is_empty() {
         text = format!("{text}\n\n{pt}");
+    }
+    if v.get("skillCatalog").and_then(Value::as_bool).unwrap_or(false) {
+        let cat = tools::skill_catalog(&app, &strs(&v, "skills"));
+        if !cat.is_empty() {
+            text = format!("{text}\n\n{cat}");
+        }
     }
     ok(json!({ "text": text }))
 }

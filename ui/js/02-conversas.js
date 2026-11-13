@@ -3110,6 +3110,7 @@ const TOOL_ICON = {
   create_directory: "folderPlus",
   search_files: "search",
   read_skill_file: "book",
+  use_skill: "sparkles",
   run_command: "terminal",
   execute_code: "code",
   recall_history: "history",

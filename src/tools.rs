@@ -46,7 +46,7 @@ const DEFS: &[Def] = &[
     // ---------------- shell
     d("run_command", "shell", true, false, "Executa um comando no PowerShell (Windows) dentro da pasta de trabalho e devolve a saída e o código de saída. Use para compilar, rodar scripts, git, instalar pacotes etc. Não use para comandos interativos.",
       r#"{"type":"object","properties":{"command":{"type":"string","description":"Comando ou script do PowerShell"},"cwd":{"type":"string","description":"Subpasta onde rodar (padrão: raiz da pasta de trabalho)"},"timeout":{"type":"integer","description":"Segundos até encerrar (padrão 120, máximo 1800)"}},"required":["command"]}"#),
-    d("execute_code", "code", true, true, "Executa JavaScript (assíncrono) para orquestrar várias ferramentas de uma vez, sem encher o contexto com resultados intermediários. Dentro do código: `await tool('nome_da_ferramenta', {argumentos})` devolve o texto do resultado (lança erro se a ferramenta falhar); `console.log(...)` registra; `return valor` devolve o resultado final. Ex.: laços sobre arquivos, filtrar resultados, chamar várias ferramentas e resumir.",
+    d("execute_code", "code", true, true, "Executa JavaScript (assíncrono, num worker do navegador: sem Node, require, import estático nem Python) para orquestrar várias ferramentas de uma vez, sem encher o contexto com resultados intermediários. Dentro do código: `await tool('nome_da_ferramenta', {argumentos})` devolve o texto do resultado (lança erro se a ferramenta falhar); `console.log(...)` registra; `return valor` devolve o resultado final. Ex.: laços sobre arquivos, filtrar resultados, chamar várias ferramentas e resumir.",
       r#"{"type":"object","properties":{"code":{"type":"string","description":"Corpo de uma função async em JavaScript"}},"required":["code"]}"#),
     // ---------------- navegador
     d("browser_navigate", "browser", false, false, "Abre uma URL na janela de navegador controlada pelo studio e devolve o texto da página e os elementos interativos numerados.",
@@ -116,6 +116,9 @@ const SKILL_TOOL: Def = d("read_skill_file", "", false, false, "Lê um arquivo a
     r#"{"type":"object","properties":{"skill":{"type":"string","description":"id da skill"},"path":{"type":"string"},"offset":{"type":"integer"},"limit":{"type":"integer"}},"required":["skill","path"]}"#);
 
 
+const USE_SKILL: Def = d("use_skill", "", false, false, "Carrega uma skill do catálogo (instruções completas, arquivos auxiliares e ferramentas que ela traz). Use antes de começar uma tarefa que se encaixe numa skill; as ferramentas dela ficam disponíveis no passo seguinte.",
+    r#"{"type":"object","properties":{"skill":{"type":"string","description":"id da skill, como aparece no catálogo"}},"required":["skill"]}"#);
+
 /// Descrição e esquema no idioma do studio.
 fn text_of(d: &Def) -> (&'static str, &'static str) {
     if crate::i18n::en() {
@@ -127,7 +130,7 @@ fn text_of(d: &Def) -> (&'static str, &'static str) {
 }
 
 fn def(name: &str) -> Option<&'static Def> {
-    DEFS.iter().find(|d| d.name == name).or(if name == SKILL_TOOL.name { Some(&SKILL_TOOL) } else { None })
+    DEFS.iter().find(|d| d.name == name).or(if name == SKILL_TOOL.name { Some(&SKILL_TOOL) } else if name == USE_SKILL.name { Some(&USE_SKILL) } else { None })
 }
 
 fn safe_name(s: &str) -> String {
@@ -493,6 +496,19 @@ pub async fn call(app: &Arc<App>, ws: PathBuf, name: &str, args: Value, allow: &
         let c = app.config.read().unwrap();
         (c.compact_output, c.use_rtk)
     };
+    // ferramenta trazida por uma skill: vira um comando do terminal, com os argumentos no lugar
+    if name.starts_with("skill_") && def(name).is_none() {
+        let found = skills::list(app).into_iter().find_map(|sk| sk.tools.iter().find(|t| skill_tool_name(&sk.id, &t.name) == name).cloned().map(|t| (sk, t)));
+        let Some((sk, t)) = found else { return out(Err(LF!("A ferramenta {name} não existe mais (a skill foi alterada ou removida).", "The tool {name} no longer exists (the skill was changed or removed)."))) };
+        if app.cfg().sandbox.on_for(&ws) {
+            return out(Err(LF!("A ferramenta da skill {} roda no Windows e esta pasta está com o Linux isolado ligado. Desligue o isolamento para esta pasta (Configurações › Isolamento) ou faça o passo com run_command.", "The skill {} tool runs on Windows and this folder has isolated Linux on. Turn isolation off for this folder (Settings › Isolation) or do the step with run_command.", sk.name)));
+        }
+        let (command, file) = match skill_command(&t, &sk.dir, &ws, &args) { Ok(x) => x, Err(e) => return out(Err(e)) };
+        let res = crate::shell::run(&ws, &command, "", t.timeout.unwrap_or(120).clamp(5, 3600)).await;
+        let _ = std::fs::remove_file(&file);
+        let res = res.map(|t| if compact_on { crate::compact::compact(&t, &crate::compact::saidas_dir(app), &command, 12000).text } else { t });
+        return out(res.map(|t| (t, vec![])));
+    }
     if name == "run_command" {
         let timeout = args.get("timeout").and_then(Value::as_u64).unwrap_or(120);
         if let Some(msg) = connector_launch(app, s(&args, "command")) {
@@ -542,7 +558,19 @@ pub async fn call(app: &Arc<App>, ws: PathBuf, name: &str, args: Value, allow: &
         let allow: Vec<PathBuf> = allow.iter().map(PathBuf::from).collect();
         let app2 = app.clone();
         let name = name.to_string();
-        let r = tokio::task::spawn_blocking(move || run_builtin(&app2, &ws, &name, &args, &allow)).await;
+        let r = tokio::task::spawn_blocking(move || {
+            run_builtin(&app2, &ws, &name, &args, &allow).map_err(|err| {
+                // caminho que não existe: aponta os parecidos (o modelo costuma errar a pasta ou uma letra)
+                let p = s(&args, "path");
+                if matches!(name.as_str(), "read_file" | "list_directory" | "edit_file" | "search_files") && !p.is_empty() && !err.contains("Acesso negado") && !err.contains("Access denied") {
+                    let full = app::resolve(&ws, p);
+                    if !full.exists() {
+                        return format!("{err}{}", not_found_hint(&ws, &full));
+                    }
+                }
+                err
+            })
+        }).await;
         return out(r.map_err(|e| e.to_string()).and_then(|x| x).map(|t| (t, vec![])));
     }
     // confere os argumentos com o esquema do conector antes de chamar: com o catálogo sob demanda,
@@ -1009,7 +1037,7 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
                 return run_builtin(app, ws, "list_directory", &json!({"path": file.to_string_lossy()}), &al);
             }
             if md.len() > 20 * 1024 * 1024 {
-                return Err(LF!("Arquivo grande demais ({}).", "File too large ({}).", fmt_size(md.len())));
+                return Err(LF!("Arquivo grande demais ({}). Procure dentro dele com search_files (content=regex, path=o arquivo) ou use run_command para filtrar.", "File too large ({}). Search inside it with search_files (content=regex, path=the file) or use run_command to filter.", fmt_size(md.len())));
             }
             read_text(&file, md.len(), a)
         }
@@ -1073,6 +1101,7 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
             let all = a.get("replace_all").and_then(Value::as_bool).unwrap_or(false);
             let mut out = text.clone();
             let mut n = 0;
+            let mut fuzzy = false;
             for (i, (old, new)) in pairs.iter().enumerate() {
                 let tag = if pairs.len() > 1 { format!("Troca {}: ", i + 1) } else { String::new() };
                 if old.is_empty() {
@@ -1083,7 +1112,12 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
                 let new_f = if old_f != *old { new.replace('\n', "\r\n") } else { new.clone() };
                 let count = out.matches(old_f.as_str()).count();
                 if count == 0 {
-                    return Err(LF!("{tag}old_text não encontrado no arquivo. Leia o trecho de novo (offset/limit) e copie exato.{}", "{tag}old_text not found in the file. Read the part again (offset/limit) and copy it exactly.{}", if pairs.len() > 1 { L!(" Nada foi alterado.", " Nothing was changed.") } else { "" }));
+                    // o modelo errou espaços, tabulação ou indentação: acha o trecho comparando as linhas sem eles
+                    let nothing = if pairs.len() > 1 { L!(" Nada foi alterado.", " Nothing was changed.") } else { "" };
+                    match fuzzy_replace(&out, old, new, crlf) {
+                        Ok(v) => { out = v; n += 1; fuzzy = true; continue; }
+                        Err(why) => return Err(format!("{tag}{why}{nothing}")),
+                    }
                 }
                 if count > 1 && !all {
                     return Err(LF!("{tag}old_text aparece {count} vezes. Inclua mais contexto ou use replace_all.{}", "{tag}old_text appears {count} times. Include more context or use replace_all.{}", if pairs.len() > 1 { L!(" Nada foi alterado.", " Nothing was changed.") } else { "" }));
@@ -1092,7 +1126,8 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
             }
             std::fs::write(&file, &out).map_err(e)?;
             let big_old = pairs.iter().map(|(o, _)| o.lines().count()).max().unwrap_or(0) > 25;
-            Ok(LF!("Editado: {} ({n} substituição(ões)){}", "Edited: {} ({n} replacement(s)){}", rel_to(ws, &file), if big_old { L!("\n[dica: para trocar um bloco grande, use start_line/end_line com só o texto novo; não precisa repetir o antigo]", "\n[tip: to replace a large block, use start_line/end_line with only the new text; no need to repeat the old one]") } else { "" }))
+            let fz = if fuzzy { L!(" [o trecho foi achado ignorando diferenças de espaço e indentação; a indentação do arquivo foi mantida]", " [the text was found ignoring whitespace and indentation differences; the file's indentation was kept]") } else { "" };
+            Ok(LF!("Editado: {} ({n} substituição(ões)){fz}{}", "Edited: {} ({n} replacement(s)){fz}{}", rel_to(ws, &file), if big_old { L!("\n[dica: para trocar um bloco grande, use start_line/end_line com só o texto novo; não precisa repetir o antigo]", "\n[tip: to replace a large block, use start_line/end_line with only the new text; no need to repeat the old one]") } else { "" }))
         }
         "create_directory" => {
             let dir = resolve_write(ws, s(a, "path"))?;
@@ -1170,6 +1205,7 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
                 Ok(results.join("\n") + &if full { LF!("\n[limite de {SEARCH_MAX} resultados; refine a busca]", "\n[limit of {SEARCH_MAX} results; narrow the search]") } else { String::new() })
             }
         }
+        "use_skill" => use_skill(app, s(a, "skill")),
         "read_skill_file" => {
             let sk = skills::get(app, s(a, "skill")).ok_or_else(|| {
                 let ids: Vec<String> = skills::list(app).iter().map(|k| format!("{} ({})", k.id, k.name)).collect();
@@ -1268,4 +1304,320 @@ pub fn customize_ui(app: &App, theme: Option<String>, colors: Option<Value>, fon
     app.save_config();
 
     result
+}
+
+
+/// Espaços colapsados, sem as pontas: a forma de comparar linhas no edit_file tolerante.
+fn squash(l: &str) -> String {
+    l.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// edit_file quando o old_text não aparece exato: procura as mesmas linhas ignorando espaços e indentação. Uma
+/// ocorrência só: troca essas linhas pelo new_text, com a indentação do arquivo. Nenhuma: devolve o trecho mais
+/// parecido (com números de linha) para o modelo copiar certo.
+fn fuzzy_replace(text: &str, old: &str, new: &str, crlf: bool) -> Result<String, String> {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let olds: Vec<&str> = old.split('\n').map(|l| l.trim_end_matches('\r')).collect();
+    // linhas vazias nas pontas do old_text não contam
+    let a = olds.iter().position(|l| !l.trim().is_empty()).unwrap_or(0);
+    let b = olds.iter().rposition(|l| !l.trim().is_empty()).map(|x| x + 1).unwrap_or(olds.len());
+    let want: Vec<String> = olds[a..b].iter().map(|l| squash(l)).collect();
+    if want.is_empty() {
+        return Err(L!("old_text só tem espaços.", "old_text is only whitespace.").into());
+    }
+    let have: Vec<String> = lines.iter().map(|l| squash(l.trim_end_matches('\r'))).collect();
+    // linhas em branco no meio também não contam (o modelo costuma juntar ou separar blocos)
+    let want_nb: Vec<&String> = want.iter().filter(|l| !l.is_empty()).collect();
+    let mut hits = vec![];
+    for i in 0..have.len() {
+        if have[i].is_empty() || have[i] != *want_nb[0] {
+            continue;
+        }
+        let (mut j, mut k) = (i, 0);
+        while j < have.len() && k < want_nb.len() {
+            if have[j].is_empty() { j += 1; continue; }
+            if have[j] != *want_nb[k] { break; }
+            j += 1; k += 1;
+        }
+        if k == want_nb.len() {
+            hits.push((i, j));
+        }
+    }
+    if hits.len() > 1 {
+        let at: Vec<String> = hits.iter().take(6).map(|(i, _)| (i + 1).to_string()).collect();
+        return Err(LF!("old_text não aparece exato, e ignorando espaços aparece {} vezes (linhas {}). Inclua mais contexto.", "old_text does not appear exactly, and ignoring whitespace it appears {} times (lines {}). Include more context.", hits.len(), at.join(", ")));
+    }
+    if let Some(&(i, j)) = hits.first() {
+        // indentação: a do arquivo na primeira linha trocada, no lugar da que o modelo usou
+        let lead = |l: &str| l.len() - l.trim_start().len();
+        let file_ind: String = lines[i].trim_end_matches('\r')[..lead(lines[i])].to_string();
+        let first_old = olds[a..b].iter().find(|l| !l.trim().is_empty()).copied().unwrap_or("");
+        let old_ind = &first_old[..lead(first_old)];
+        let nl: Vec<String> = if new.is_empty() {
+            vec![]
+        } else {
+            new.split('\n').map(|l| {
+                let l = l.trim_end_matches('\r');
+                let body = if l.trim().is_empty() { String::new() } else if let Some(rest) = l.strip_prefix(old_ind) { format!("{file_ind}{rest}") } else if old_ind.is_empty() { format!("{file_ind}{l}") } else { l.to_string() };
+                if crlf { format!("{body}\r") } else { body }
+            }).collect()
+        };
+        let mut v: Vec<String> = lines[..i].iter().map(|s| s.to_string()).collect();
+        let tail_cr = j == lines.len() && !text.ends_with('\n');
+        let mut nl = nl;
+        if tail_cr { if let Some(last) = nl.last_mut() { *last = last.trim_end_matches('\r').to_string(); } }
+        v.extend(nl);
+        v.extend(lines[j..].iter().map(|s| s.to_string()));
+        return Ok(v.join("\n"));
+    }
+    // nada: o trecho mais parecido, para o modelo copiar de lá
+    let toks = |s: &str| s.split(|c: char| !c.is_alphanumeric() && c != '_').filter(|t| t.len() > 1).map(|t| t.to_string()).collect::<std::collections::HashSet<_>>();
+    let wt: Vec<_> = want_nb.iter().map(|l| toks(l)).collect();
+    let span = want.len().max(1);
+    let mut best = (0.0f32, 0usize);
+    if have.len() <= 40000 {
+        let lt: Vec<_> = have.iter().map(|l| toks(l)).collect();
+        for i in 0..have.len() {
+            let mut sc = 0.0;
+            for (k, w) in wt.iter().enumerate().take(40) {
+                let Some(t) = lt.get(i + k) else { break };
+                if w.is_empty() || t.is_empty() { continue; }
+                let inter = w.intersection(t).count() as f32;
+                sc += inter * 2.0 / (w.len() + t.len()) as f32;
+            }
+            if sc > best.0 { best = (sc, i); }
+        }
+    }
+    if best.0 < 0.5 {
+        return Err(L!("old_text não encontrado no arquivo (nem ignorando espaços). Leia o trecho de novo (offset/limit) e copie exato, ou use start_line/end_line.", "old_text not found in the file (not even ignoring whitespace). Read the part again (offset/limit) and copy it exactly, or use start_line/end_line.").into());
+    }
+    let from = best.1.saturating_sub(2);
+    let to = (best.1 + span + 2).min(lines.len()).min(from + 40);
+    let snip: Vec<String> = (from..to).map(|k| format!("{:>5}| {}", k + 1, cut(lines[k].trim_end_matches('\r'), 200))).collect();
+    Err(LF!("old_text não encontrado no arquivo. O trecho mais parecido está nas linhas {}-{} (como está agora):\n{}\nCopie o old_text exato daqui ou troque por linhas com start_line/end_line.", "old_text not found in the file. The closest part is at lines {}-{} (as it is now):\n{}\nCopy old_text exactly from here or replace by lines with start_line/end_line.", best.1 + 1, (best.1 + span).min(lines.len()), snip.join("\n")))
+}
+
+#[cfg(test)]
+mod fuzzy_t {
+    use super::fuzzy_replace;
+    #[test]
+    fn indentacao_diferente() {
+        let f = "fn a() {\n    let x = 1;\n    let y = 2;\n}\n";
+        let r = fuzzy_replace(f, "let x = 1;\nlet y =  2;", "let x = 10;\nlet y = 20;", false).unwrap();
+        assert_eq!(r, "fn a() {\n    let x = 10;\n    let y = 20;\n}\n");
+    }
+    #[test]
+    fn tab_no_modelo_espacos_no_arquivo() {
+        let f = "if a:\n        b()\n        c()\nd()\n";
+        let r = fuzzy_replace(f, "\tb()\n\tc()", "\tb()\n\tx()", false).unwrap();
+        assert_eq!(r, "if a:\n        b()\n        x()\nd()\n");
+    }
+    #[test]
+    fn crlf_e_linha_em_branco() {
+        let f = "a\r\n  b\r\n\r\n  c\r\nd";
+        let r = fuzzy_replace(f, "b\nc", "B\nC", true).unwrap();
+        assert_eq!(r, "a\r\n  B\r\n  C\r\nd");
+    }
+    #[test]
+    fn ambiguo_e_parecido() {
+        let f = "x()\n  y()\nx()\n y()\n";
+        assert!(fuzzy_replace(f, "x()\ny()", "z", false).unwrap_err().contains("2"));
+        let g = "fn main() {\n    let total = soma(a, b);\n    println!(\"{}\", total);\n}\n";
+        let e = fuzzy_replace(g, "let total = soma(a, c);\nprintln!(\"{}\", total)", "x", false).unwrap_err();
+        assert!(e.contains("    2| "), "{e}");
+    }
+}
+
+
+/// "Não existe": o que há de parecido. Primeiro a pasta pai (letra trocada, maiúsculas, extensão), depois o mesmo
+/// nome em outra pasta do projeto.
+fn not_found_hint(ws: &Path, full: &Path) -> String {
+    let want = full.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    if want.is_empty() {
+        return String::new();
+    }
+    let stem = |n: &str| n.rsplit_once('.').map(|(a, _)| a.to_string()).unwrap_or_else(|| n.to_string());
+    let close = |n: &str| {
+        let n = n.to_lowercase();
+        n == want || stem(&n) == stem(&want) || dist(&n, &want) <= 2 || (want.len() >= 5 && (n.contains(&want) || want.contains(&n) && n.len() >= 5))
+    };
+    // sobe até a primeira pasta que existe
+    let mut dir = full.parent().map(Path::to_path_buf);
+    while let Some(d) = &dir {
+        if d.is_dir() || !is_inside(ws, d) { break; }
+        dir = d.parent().map(Path::to_path_buf);
+    }
+    let mut out: Vec<String> = vec![];
+    if let Some(d) = dir.filter(|d| d.is_dir() && is_inside(ws, d)) {
+        if let Ok(rd) = std::fs::read_dir(&d) {
+            for en in rd.flatten().take(5000) {
+                let n = en.file_name().to_string_lossy().to_string();
+                if close(&n) { out.push(rel_to(ws, &en.path())); }
+            }
+        }
+        if out.is_empty() && d != full.parent().unwrap_or(ws) {
+            out.push(LF!("(a pasta {} existe; o resto do caminho não)", "(the folder {} exists; the rest of the path does not)", rel_to(ws, &d)));
+        }
+    }
+    if out.iter().filter(|x| !x.starts_with('(')).count() == 0 {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let walker = walkdir::WalkDir::new(ws).min_depth(1).max_depth(8).into_iter().filter_entry(|en| !(en.file_type().is_dir() && SKIP_DIRS.contains(&en.file_name().to_string_lossy().as_ref())));
+        for (i, en) in walker.flatten().enumerate() {
+            if out.len() >= 8 || i > 40000 || Instant::now() > deadline { break; }
+            let n = en.file_name().to_string_lossy().to_lowercase();
+            if n == want || (stem(&n) == stem(&want) && stem(&want).len() >= 3) { out.push(rel_to(ws, en.path())); }
+        }
+    }
+    out.truncate(8);
+    if out.is_empty() {
+        return L!("\n[Nada com nome parecido na pasta de trabalho. Use list_directory ou search_files (name) para achar.]", "\n[Nothing with a similar name in the workspace. Use list_directory or search_files (name) to find it.]").into();
+    }
+    LF!("\n[Não existe. Parecidos: {}]", "\n[It does not exist. Similar: {}]", out.join(", "))
+}
+
+fn dist(a: &str, b: &str) -> usize {
+    let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    if a.len().abs_diff(b.len()) > 3 { return 9; }
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for i in 1..=a.len() {
+        let mut cur = vec![i; b.len() + 1];
+        for j in 1..=b.len() {
+            cur[j] = (prev[j] + 1).min(cur[j - 1] + 1).min(prev[j - 1] + usize::from(a[i - 1] != b[j - 1]));
+        }
+        prev = cur;
+    }
+    prev[b.len()]
+}
+
+#[cfg(test)]
+mod hint_t {
+    #[test]
+    fn sugere_parecidos() {
+        let d = std::env::temp_dir().join(format!("ls-hint-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("src/sub")).unwrap();
+        std::fs::write(d.join("src/main.rs"), "").unwrap();
+        std::fs::write(d.join("src/sub/config.json"), "").unwrap();
+        let h = super::not_found_hint(&d, &d.join("src/mian.rs"));
+        assert!(h.contains("main.rs"), "{h}");
+        let h = super::not_found_hint(&d, &d.join("config.json"));
+        assert!(h.contains("config.json"), "{h}");
+        let h = super::not_found_hint(&d, &d.join("nada/x/zzzq.txt"));
+        assert!(h.contains("existe") || h.contains("exists"), "{h}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+}
+
+
+/* ---- skills: catálogo, use_skill e ferramentas que as skills trazem ---- */
+
+/// Nome da ferramenta de uma skill: skill_<id>_<nome> (até 64 caracteres, só [a-zA-Z0-9_-]).
+pub fn skill_tool_name(id: &str, name: &str) -> String {
+    let n = format!("skill_{}_{}", safe_name(&id.replace(':', "_")), safe_name(name));
+    n.chars().take(64).collect()
+}
+
+/// Acrescenta use_skill/read_skill_file (com catálogo) e as ferramentas das skills em `ids`.
+pub fn add_skill_tools(app: &App, built: &mut Value, catalog: bool, ids: &[String]) {
+    let all = skills::list(app);
+    let mut push = |name: String, desc: String, params: Value, info: Value| {
+        if built["meta"].get(&name).is_some() {
+            return;
+        }
+        if let Some(arr) = built["tools"].as_array_mut() {
+            arr.push(json!({"type":"function","function":{"name":name,"description":desc,"parameters":params}}));
+        }
+        built["meta"][name] = info;
+    };
+    if catalog && !all.is_empty() {
+        for d in [&USE_SKILL, &SKILL_TOOL] {
+            let (desc, params) = text_of(d);
+            push(d.name.into(), desc.into(), serde_json::from_str(params).unwrap(), json!({"source":"builtin","group":"read","label":d.name,"mutating":false}));
+        }
+    }
+    for id in ids {
+        let Some(sk) = all.iter().find(|s| &s.id == id) else { continue };
+        for t in &sk.tools {
+            let desc = format!("[{}] {}", sk.name, if t.description.is_empty() { &t.name } else { &t.description });
+            push(skill_tool_name(&sk.id, &t.name), cut(&desc, 700), t.parameters.clone(), json!({"source":"builtin","group":"skill","skill":sk.id,"label":format!("{} › {}", sk.name, t.name),"mutating":t.mutating}));
+        }
+    }
+}
+
+/// O catálogo das skills instaladas que não estão ativas: uma linha cada (nome, quando usar). O modelo carrega a
+/// que servir com use_skill.
+pub fn skill_catalog(app: &App, active: &[String]) -> String {
+    let lines: Vec<String> = skills::list(app).iter().filter(|s| !active.contains(&s.id)).take(60).map(|s| {
+        let trig = if s.triggers.is_empty() { String::new() } else { LF!(" (sinais: {})", " (cues: {})", cut(&s.triggers.join(", "), 120)) };
+        let tools = if s.tools.is_empty() { String::new() } else { LF!(" [traz ferramentas: {}]", " [brings tools: {}]", s.tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join(", ")) };
+        format!("- {}: {}{trig}{tools}", s.id, cut(s.description.trim(), 220))
+    }).collect();
+    if lines.is_empty() {
+        return String::new();
+    }
+    LF!("Skills instaladas (ainda não carregadas). Quando a tarefa se encaixar numa delas, chame use_skill(skill=id) antes de começar e siga as instruções que vierem; se nenhuma servir, siga sem.\n{}", "Installed skills (not loaded yet). When the task fits one of them, call use_skill(skill=id) before starting and follow the instructions it returns; if none fits, go on without.\n{}", lines.join("\n"))
+}
+
+/// use_skill: as instruções completas da skill, os arquivos e as ferramentas dela.
+fn use_skill(app: &App, id: &str) -> Result<String, String> {
+    let sk = skills::get(app, id).ok_or_else(|| {
+        let ids: Vec<String> = skills::list(app).iter().map(|k| k.id.clone()).collect();
+        LF!("Skill não encontrada: \"{id}\". Ids disponíveis: {}", "Skill not found: \"{id}\". Available ids: {}", ids.join(", "))
+    })?;
+    let text = std::fs::read_to_string(sk.dir.join("SKILL.md")).map_err(|e| e.to_string())?;
+    let (_, body) = skills::parse_frontmatter(&text);
+    let files = if sk.files.is_empty() { String::new() } else { LF!("Arquivos auxiliares (leia com read_skill_file): {}\n", "Helper files (read with read_skill_file): {}\n", sk.files.join(", ")) };
+    let tools = if sk.tools.is_empty() { String::new() } else {
+        LF!("Ferramentas desta skill (disponíveis a partir do próximo passo): {}\n", "This skill's tools (available from the next step): {}\n", sk.tools.iter().map(|t| skill_tool_name(&sk.id, &t.name)).collect::<Vec<_>>().join(", "))
+    };
+    Ok(format!("<skill id=\"{}\" name=\"{}\">\n{}\n{files}{tools}\n{}\n</skill>", sk.id, sk.name, LF!("Pasta da skill: {}", "Skill folder: {}", sk.dir.display()), body.trim()))
+}
+
+/// Aspas para o shell que roda o comando (PowerShell no Windows, sh nos outros).
+fn shell_quote(v: &str) -> String {
+    if app::IS_WIN { format!("'{}'", v.replace('\'', "''")) } else { format!("'{}'", v.replace('\'', "'\\''")) }
+}
+
+/// Monta o comando de uma ferramenta de skill com os argumentos. Devolve (comando, arquivo de argumentos).
+pub fn skill_command(t: &skills::SkillTool, dir: &Path, ws: &Path, args: &Value) -> Result<(String, PathBuf), String> {
+    let props = t.parameters.get("properties").and_then(Value::as_object).cloned().unwrap_or_default();
+    for r in t.parameters.get("required").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
+        if args.get(r).is_none_or(Value::is_null) {
+            return Err(LF!("Falta o parâmetro {r}.", "Missing parameter {r}."));
+        }
+    }
+    let file = std::env::temp_dir().join(format!("llama-studio-skill-{}-{}.json", std::process::id(), crate::app::now_ms()));
+    std::fs::write(&file, serde_json::to_vec_pretty(args).unwrap_or_default()).map_err(|e| e.to_string())?;
+    let mut cmd = t.command.replace("{skill_dir}", &dir.to_string_lossy()).replace("{ws}", &ws.to_string_lossy()).replace("{args_file}", &shell_quote(&file.to_string_lossy()));
+    for k in props.keys() {
+        let key = format!("{{{k}}}");
+        if !cmd.contains(&key) {
+            continue;
+        }
+        let val = match args.get(k) {
+            None | Some(Value::Null) => String::new(),
+            Some(Value::String(s)) => shell_quote(s),
+            Some(v @ (Value::Number(_) | Value::Bool(_))) => v.to_string(),
+            Some(v) => shell_quote(&v.to_string()),
+        };
+        cmd = cmd.replace(&key, &val);
+    }
+    Ok((cmd, file))
+}
+
+#[cfg(test)]
+mod skill_t {
+    use serde_json::json;
+    #[test]
+    fn monta_comando() {
+        let t = crate::skills::SkillTool { name: "conv".into(), description: String::new(), command: "python {skill_dir}/c.py {entrada} --n {n} {args_file}".into(), parameters: json!({"type":"object","properties":{"entrada":{"type":"string"},"n":{"type":"integer"}},"required":["entrada"]}), mutating: true, timeout: None };
+        let (c, f) = super::skill_command(&t, std::path::Path::new("/sk"), std::path::Path::new("/ws"), &json!({"entrada": "it's a.txt", "n": 3})).unwrap();
+        assert!(c.starts_with("python /sk/c.py "), "{c}");
+        assert!(c.contains("--n 3"), "{c}");
+        assert!(c.contains("it'\\''s a.txt") || c.contains("it''s a.txt"), "{c}");
+        assert!(f.is_file());
+        let _ = std::fs::remove_file(f);
+        assert!(super::skill_command(&t, std::path::Path::new("/sk"), std::path::Path::new("/ws"), &json!({})).is_err());
+        assert_eq!(super::skill_tool_name("pacote:minha skill", "conv"), "skill_pacote_minha_skill_conv");
+    }
 }

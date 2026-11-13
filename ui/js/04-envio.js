@@ -135,7 +135,9 @@ function routeExtras(text, skills, mcps, level = 'equilibrado') {
     const descHit = [...words(sk.description)].filter((w) => !nameWs.has(w) && ws.has(w)).length;
     // nome completo citado; ou parte do nome + assunto da descrição; ou três palavras do assunto
     const min = level === 'cauteloso' ? Infinity : level === 'liberal' ? 2 : 3;
-    const sc = low.includes(' ' + nameKey + ' ') || low.includes(' ' + nameKey + 's ') ? 10 : level !== 'cauteloso' && nameHit && descHit ? 5 + descHit : descHit >= min ? descHit : 0;
+    // sinais declarados pela skill (triggers): uma frase dessas no pedido já indica a skill
+    const trig = (sk.triggers || []).some((t) => { const k = norm(t).replace(/[^a-z0-9]+/g, ' ').trim(); return k.length >= 3 && low.includes(' ' + k + ' '); });
+    const sc = low.includes(' ' + nameKey + ' ') || low.includes(' ' + nameKey + 's ') ? 10 : trig && level !== 'cauteloso' ? 8 : level !== 'cauteloso' && nameHit && descHit ? 5 + descHit : descHit >= min ? descHit : 0;
     if (sc) out.push([sk.id, sc]);
   }
   return { mcp, skills: out.sort((a, b) => b[1] - a[1]).slice(0, 2).map((x) => x[0]) };
@@ -384,6 +386,8 @@ function validArgs(a, onBroken) {
   if (a == null || (typeof a === 'string' && !a.trim())) return '{}';
   if (typeof a === 'object') return JSON.stringify(a);
   try { const v = JSON.parse(a); if (v && typeof v === 'object' && !Array.isArray(v)) return a; } catch { /* inválido */ }
+  const r = repairJson(a);
+  if (r) return JSON.stringify(r);
   onBroken();
   return '{}';
 }
@@ -563,4 +567,198 @@ async function serverDiff(slot) {
   const show = (t) => t.replace(/\n/g, '⏎').replace(/\s+/g, ' ').trim();
   const [oa, ob = ''] = last[2].split(' | '); const [, nb = ''] = last[3].split(' | ');
   return L('o pedido divergiu do que o servidor tinha guardado logo depois de «{0}»: antes vinha «{1}», agora «{2}»', show(oa).slice(-60), show(ob).slice(0, 60) || '∅', show(nb).slice(0, 60) || '∅');
+}
+
+/* ============================================================ conserto das chamadas de ferramenta
+   Modelos (os locais principalmente) erram a forma da chamada: JSON quebrado ou cortado, caminho do Windows com
+   \ sem escapar, nome de parâmetro de outra ferramenta (cmd, file_path, old_string), número como texto, tudo
+   embrulhado em {"arguments": ...}. Antes de executar, o studio conserta o que dá para consertar com segurança
+   (pelo esquema da ferramenta) e avisa o modelo do que mudou; o que falta vira um erro que explica o esperado. */
+
+/** Tenta transformar um JSON quase válido num objeto. Devolve o objeto ou null. */
+function repairJson(src) {
+  if (src && typeof src === 'object') return Array.isArray(src) ? null : src;
+  let s = String(src ?? '').trim();
+  if (!s) return {};
+  try { const v = JSON.parse(s); if (v && typeof v === 'object' && !Array.isArray(v)) return v; if (typeof v === 'string') return repairJson(v); } catch { /* conserta abaixo */ }
+  s = s.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+  const a = s.indexOf('{');
+  if (a < 0) return null;
+  s = s.slice(a);
+  // uma passada: dentro de strings escapa quebras de linha e barras inválidas; fora, troca True/None/aspas
+  // simples e tira vírgulas sobrando; no fim fecha a string e as chaves que ficaram abertas (resposta cortada)
+  let out = '', inStr = false, q = '"';
+  const stack = [];
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) {
+      if (c === '\\') {
+        const n = s[i + 1];
+        if (n != null && '"\\/bfnrtu'.includes(n) && !(n === 'u' && !/^[0-9a-fA-F]{4}$/.test(s.slice(i + 2, i + 6)))) { out += c + n; i++; }
+        else if (n === "'" && q === "'") { out += "'"; i++; }
+        else out += '\\\\';
+        continue;
+      }
+      if (c === q) { inStr = false; out += '"'; continue; }
+      if (c === '"') { out += '\\"'; continue; } // aspas duplas dentro de string com aspas simples
+      if (c === '\n') { out += '\\n'; continue; }
+      if (c === '\r') { out += '\\r'; continue; }
+      if (c === '\t') { out += '\\t'; continue; }
+      out += c; continue;
+    }
+    if (c === '"' || c === "'") { inStr = true; q = c; out += '"'; continue; }
+    if (c === '{' || c === '[') { stack.push(c === '{' ? '}' : ']'); out += c; continue; }
+    if (c === '}' || c === ']') {
+      out = out.replace(/,\s*$/, '');
+      if (stack.length && stack[stack.length - 1] === c) stack.pop();
+      out += c;
+      if (!stack.length) break; // o resto é lixo depois do objeto
+      continue;
+    }
+    const word = /^(True|False|None|null|true|false)\b/.exec(s.slice(i));
+    if (word) { out += { True: 'true', False: 'false', None: 'null' }[word[1]] || word[1]; i += word[1].length - 1; continue; }
+    // chave sem aspas: {command: "x"}
+    const key = /^([A-Za-z_][A-Za-z0-9_]*)\s*:/.exec(s.slice(i));
+    if (key && /[{,]\s*$/.test(out)) { out += '"' + key[1] + '":'; i += key[0].length - 1; continue; }
+    out += c;
+  }
+  if (inStr) out += '"';
+  out = out.replace(/,\s*$/, '').replace(/:\s*$/, ':null');
+  while (stack.length) out += stack.pop();
+  try { const v = JSON.parse(out); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; }
+}
+
+// nomes que os modelos usam no lugar do certo (o certo é a chave)
+const ARG_ALIASES = {
+  command: ['cmd', 'commands', 'shell', 'script', 'command_line', 'commandline'],
+  path: ['file_path', 'filepath', 'file', 'filename', 'file_name', 'dir', 'directory', 'folder', 'target_file', 'pathname', 'relative_path'],
+  old_text: ['old_string', 'old', 'search', 'find', 'oldtext', 'old_str', 'original', 'from'],
+  new_text: ['new_string', 'new', 'replace', 'replacement', 'newtext', 'new_str', 'to'],
+  content: ['text', 'contents', 'data', 'body', 'file_content', 'file_text', 'pattern', 'regex', 'grep', 'query', 'search'],
+  name: ['glob', 'file_pattern', 'filename_pattern', 'include', 'mask'],
+  query: ['q', 'pattern', 'search', 'term', 'regex', 'keyword', 'keywords', 'search_query'],
+  code: ['source', 'script', 'js', 'javascript', 'program'],
+  url: ['href', 'link', 'uri', 'address'],
+  task: ['prompt', 'description', 'instructions', 'goal', 'objective'],
+  cwd: ['workdir', 'working_dir', 'working_directory', 'dir', 'directory'],
+  offset: ['start', 'start_line', 'line', 'from_line'],
+  limit: ['count', 'max_lines', 'lines', 'num_lines', 'n'],
+  names: ['tools', 'tool_names', 'name'],
+  skill: ['skill_id', 'skill_name', 'id', 'name'],
+};
+const snake = (k) => String(k).replace(/([a-z0-9])([A-Z])/g, '$1_$2').replace(/[-\s]+/g, '_').toLowerCase();
+
+/** Ajusta os argumentos ao esquema. Devolve { args, notes: [...], missing: [...] }. */
+function fitArgs(args, schema) {
+  const notes = [];
+  const props = schema?.properties || {};
+  const names = Object.keys(props);
+  if (!names.length) return { args, notes, missing: [] };
+  let a = { ...args };
+  // tudo embrulhado: {"arguments": {...}}, {"input": {...}}, {"parameters": "{...}"}
+  const keys0 = Object.keys(a);
+  if (keys0.length === 1 && !props[keys0[0]] && ['arguments', 'args', 'input', 'parameters', 'params', 'kwargs'].includes(keys0[0])) {
+    const inner = repairJson(a[keys0[0]]);
+    if (inner) { a = inner; notes.push(L('tirei o embrulho "{0}"', keys0[0])); }
+  }
+  const req = schema.required || [];
+  const unknown = () => Object.keys(a).filter((k) => !props[k]);
+  for (const k of unknown()) {
+    const sk = snake(k);
+    let to = props[sk] && a[sk] === undefined ? sk : null;
+    if (!to) to = names.find((n) => a[n] === undefined && (ARG_ALIASES[n] || []).includes(sk) && !(ARG_ALIASES[sk] && props[sk]));
+    if (to) { a[to] = a[k]; delete a[k]; notes.push(`${k} → ${to}`); }
+  }
+  // sobrou um nome desconhecido e falta exatamente um obrigatório: é ele
+  const miss0 = req.filter((n) => a[n] === undefined || a[n] === null);
+  const unk = unknown();
+  if (miss0.length === 1 && unk.length === 1) { a[miss0[0]] = a[unk[0]]; delete a[unk[0]]; notes.push(`${unk[0]} → ${miss0[0]}`); }
+  // tipos
+  for (const n of names) {
+    const v = a[n], p = props[n];
+    if (v === undefined || v === null || !p) continue;
+    const t = Array.isArray(p.type) ? p.type.find((x) => x !== 'null') : p.type;
+    let nv = v;
+    if ((t === 'integer' || t === 'number') && typeof v === 'string' && /^\s*-?\d+(\.\d+)?\s*$/.test(v)) nv = t === 'integer' ? parseInt(v, 10) : parseFloat(v);
+    else if (t === 'integer' && typeof v === 'number' && !Number.isInteger(v)) nv = Math.round(v);
+    else if (t === 'boolean' && typeof v === 'string' && /^(true|false|sim|não|nao|yes|no|1|0)$/i.test(v.trim())) nv = /^(true|sim|yes|1)$/i.test(v.trim());
+    else if (t === 'boolean' && typeof v === 'number') nv = v !== 0;
+    else if (t === 'array' && !Array.isArray(v)) {
+      if (typeof v === 'string' && v.trim().startsWith('[')) { try { nv = JSON.parse(v); } catch { const r = repairJson('{"x":' + v + '}'); nv = r?.x ?? [v]; } }
+      else if (typeof v === 'string' && p.items?.type === 'string' && /,/.test(v) && !/\s/.test(v.replace(/,\s+/g, ','))) nv = v.split(',').map((x) => x.trim()).filter(Boolean);
+      else nv = [v];
+    }
+    else if (t === 'object' && typeof v === 'string' && v.trim().startsWith('{')) nv = repairJson(v) ?? v;
+    else if (t === 'string' && typeof v === 'number') nv = String(v);
+    else if (t === 'string' && typeof v === 'boolean') nv = String(v);
+    else if (t === 'string' && Array.isArray(v) && v.every((x) => typeof x === 'string')) nv = v.join(n === 'command' ? ' ' : '\n');
+    else if (t === 'string' && v && typeof v === 'object' && n !== 'command') nv = JSON.stringify(v, null, 2);
+    if (p.enum && typeof nv === 'string' && !p.enum.includes(nv)) {
+      const e = p.enum.find((x) => String(x).toLowerCase() === nv.trim().toLowerCase());
+      if (e !== undefined) nv = e;
+    }
+    if (nv !== v) { a[n] = nv; notes.push(L('{0} convertido para {1}', n, t)); }
+  }
+  // "C:\temp\novo" sem escapar chega com tabulação e quebra de linha no lugar de \t e \n: em caminho, volta a ser barra
+  const unctl = (x) => (typeof x === 'string' && /^[A-Za-z]:|\\/.test(x) && /[\t\n\r\b\f\v]/.test(x) ? x.replace(/[\t\n\r\b\f\v]/g, (c) => '\\' + { '\t': 't', '\n': 'n', '\r': 'r', '\b': 'b', '\f': 'f', '\v': 'v' }[c]) : x);
+  for (const n of ['path', 'cwd', 'dir', 'where']) if (props[n] && unctl(a[n]) !== a[n]) { a[n] = unctl(a[n]); notes.push(L('barras do caminho em {0} consertadas', n)); }
+  if (Array.isArray(a.files)) a.files = a.files.map(unctl);
+  const missing = req.filter((n) => a[n] === undefined || a[n] === null || (props[n]?.type === 'string' && n !== 'new_text' && n !== 'content' && a[n] === ''));
+  return { args: a, notes, missing };
+}
+
+function editDist(a, b) {
+  if (Math.abs(a.length - b.length) > 3) return 9;
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+
+/** Nome da ferramenta: o certo, consertado (Functions.read_file, ReadFile, servidor.ferramenta) ou null. */
+function fixToolName(name, known) {
+  if (known.has(name)) return name;
+  const n0 = String(name || '').trim().replace(/^(functions?|tools?|default_api|api)[.:]/i, '').replace(/[<>"'`]/g, '');
+  const cands = [n0, snake(n0), n0.toLowerCase(), n0.replace('.', '__'), n0.replace(/^([a-z0-9-]+)_(?!_)/i, '$1__'), n0.replace(/-/g, '_')];
+  for (const c of cands) if (known.has(c)) return c;
+  const low = n0.toLowerCase();
+  const near = [...known].filter((k) => !k.includes('__') && editDist(k.toLowerCase(), low) <= 2);
+  return near.length === 1 ? near[0] : null;
+}
+
+/** Conserta as chamadas de um passo pelo esquema das ferramentas. Marca tc.fix (o que mudou) e tc.bad (erro). */
+function repairCalls(calls, tools) {
+  const by = new Map((tools || []).map((t) => [t.function?.name, t.function]));
+  const known = new Set(by.keys());
+  for (const tc of calls || []) {
+    const fix = [];
+    const raw = tc.function.arguments;
+    let args = parseArgs(raw);
+    if (!args || Array.isArray(args)) {
+      args = repairJson(raw);
+      if (args) fix.push(L('JSON dos argumentos consertado'));
+    }
+    const nm = fixToolName(tc.function.name, known);
+    if (nm && nm !== tc.function.name) { fix.push(L('ferramenta {0} → {1}', tc.function.name, nm)); tc.function.name = nm; }
+    if (!args) {
+      tc.bad = L('Os argumentos não são um JSON válido e não consegui consertar. Mande de novo como um objeto JSON (aspas duplas, \\\\ nos caminhos do Windows, \\n nas quebras de linha). Recebi: {0}', String(raw ?? '').slice(0, 300));
+      continue;
+    }
+    const fn = by.get(tc.function.name);
+    if (!fn && !tc.function.name.includes('__')) {
+      const sug = [...known].map((k) => [k, editDist(k.toLowerCase(), tc.function.name.toLowerCase())]).sort((x, y) => x[1] - y[1]).slice(0, 4).map((x) => x[0]);
+      tc.bad = L('A ferramenta "{0}" não existe aqui. Parecidas: {1}. Se for de um conector, procure com search_tools.', tc.function.name, sug.join(', '));
+      continue;
+    }
+    if (fn?.parameters) {
+      const r = fitArgs(args, fn.parameters);
+      args = r.args; fix.push(...r.notes);
+      if (r.missing.length) {
+        const p = fn.parameters.properties || {};
+        tc.bad = L('Faltou {0} em {1}. Parâmetros desta ferramenta:\n{2}', r.missing.join(', '), tc.function.name,
+          Object.entries(p).map(([k, v]) => `- ${k}${(fn.parameters.required || []).includes(k) ? L(' (obrigatório)') : ''}: ${v.type || ''}${v.description ? ' — ' + String(v.description).slice(0, 140) : ''}`).join('\n'));
+      }
+    }
+    if (fix.length) { tc.function.arguments = JSON.stringify(args); tc.fix = fix; }
+  }
 }

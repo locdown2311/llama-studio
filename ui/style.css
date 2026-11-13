@@ -623,6 +623,8 @@ code { font-size: .9em; }
 .skill-ico svg { width: 15px; height: 15px; }
 .skill-name { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .skill-desc { font-size: 13px; color: var(--text-2); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; min-height: 3.1em; }
+.skill-trig { display: flex; gap: 6px; align-items: center; margin-top: 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.skill-trig svg { width: 13px; height: 13px; flex: none; }
 .skill-foot { display: flex; align-items: center; gap: 4px; margin-top: 6px; font-size: 12px; color: var(--muted); }
 .skill-foot .spacer { flex: 1; }
 .empty-card { grid-column: 1 / -1; padding: 30px; text-align: center; color: var(--muted); border: 1px dashed var(--line-2); border-radius: 12px; background: var(--card); }

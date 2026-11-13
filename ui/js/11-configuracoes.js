@@ -51,7 +51,8 @@ function renderSettings() {
         field(L('Passos de cada subagente'), input('input.input', { value: st.explorerSteps, inputmode: 'numeric' }, (x) => put({ explorerSteps: Number(x.value) || 20 })))),
       h('div.row', null,
         field(L('Exploradores em paralelo'), input('input.input', { value: st.maxConcurrentExplorers ?? '', placeholder: '3', inputmode: 'numeric' }, (x) => put({ maxConcurrentExplorers: Number(x.value) || 0 })))),
-      sw(L('Subagentes podem escrever'), L('O modelo pode dar a um subagente arquivos ou pastas para criar e editar (só eles; dois subagentes não dividem arquivo). Cada alteração passa pelo auditor e pelas suas permissões, com ponto de restauração. Desligado, os subagentes só leem.'), st.subWrite !== false, (v) => put({ subWrite: v }))));
+      sw(L('Subagentes podem escrever'), L('O modelo pode dar a um subagente arquivos ou pastas para criar e editar (só eles; dois subagentes não dividem arquivo). Cada alteração passa pelo auditor e pelas suas permissões, com ponto de restauração. Desligado, os subagentes só leem.'), st.subWrite !== false, (v) => put({ subWrite: v })),
+      sw(L('Catálogo de skills'), L('O modelo vê uma linha de cada skill instalada (nome e quando usar) e carrega sozinho a que servir com use_skill, sem você precisar ativar. Desligado, só entram as skills que você ativa ou que o pedido cita.'), st.skillCatalog !== false, (v) => put({ skillCatalog: v }))));
 
   const autoCur = st.autoRoute === false ? 'desligado' : (st.autoLevel || 'equilibrado');
   const autoList = h('div.set-choices', null, AUTO_LEVELS.map(([v, l, d]) => {

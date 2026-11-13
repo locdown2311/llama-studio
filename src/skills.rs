@@ -16,6 +16,61 @@ pub struct Skill {
     pub description: String,
     pub size: usize,
     pub files: Vec<String>,
+    /// Palavras ou frases que indicam a skill (frontmatter `triggers:`, separadas por vírgula).
+    pub triggers: Vec<String>,
+    /// Ferramentas que a skill traz (tools.json): viram ferramentas de verdade quando a skill está em uso.
+    pub tools: Vec<SkillTool>,
+    /// Erro ao ler o tools.json (mostrado na página de skills).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools_error: Option<String>,
+}
+
+/// Uma ferramenta declarada por uma skill no tools.json:
+/// `[{"name": "converter", "description": "...", "command": "python \"{skill_dir}/conv.py\" {entrada}",
+///    "parameters": {"type": "object", "properties": {"entrada": {"type": "string"}}, "required": ["entrada"]},
+///    "mutating": true, "timeout": 120}]`
+/// No comando, `{param}` vira o valor (entre aspas para o shell), `{skill_dir}` a pasta da skill, `{ws}` a pasta de
+/// trabalho e `{args_file}` um arquivo JSON com todos os argumentos.
+#[derive(Serialize, Clone, serde::Deserialize)]
+pub struct SkillTool {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    pub command: String,
+    #[serde(default = "empty_params")]
+    pub parameters: serde_json::Value,
+    #[serde(default = "yes")]
+    pub mutating: bool,
+    #[serde(default)]
+    pub timeout: Option<u64>,
+}
+fn empty_params() -> serde_json::Value {
+    serde_json::json!({"type": "object", "properties": {}})
+}
+fn yes() -> bool {
+    true
+}
+
+/// Lê o tools.json de uma skill (sem arquivo: nenhuma ferramenta).
+pub fn load_tools(dir: &Path) -> Result<Vec<SkillTool>, String> {
+    let Ok(text) = std::fs::read_to_string(dir.join("tools.json")) else { return Ok(vec![]) };
+    let mut v: Vec<SkillTool> = serde_json::from_str(text.trim_start_matches('\u{feff}')).map_err(|e| LF!("tools.json inválido: {e}", "invalid tools.json: {e}"))?;
+    for t in &mut v {
+        t.name = t.name.trim().to_string();
+        if t.name.is_empty() || !t.name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+            return Err(LF!("tools.json: nome de ferramenta inválido \"{}\" (use letras, números, _ ou -)", "tools.json: invalid tool name \"{}\" (use letters, digits, _ or -)", t.name));
+        }
+        if t.command.trim().is_empty() {
+            return Err(LF!("tools.json: a ferramenta {} não tem command", "tools.json: tool {} has no command", t.name));
+        }
+        if t.parameters.get("type").is_none() {
+            t.parameters["type"] = serde_json::json!("object");
+        }
+        if t.parameters.get("properties").is_none() {
+            t.parameters["properties"] = serde_json::json!({});
+        }
+    }
+    Ok(v)
 }
 
 pub fn parse_frontmatter(text: &str) -> (HashMap<String, String>, String) {
@@ -83,7 +138,15 @@ pub fn list(app: &App) -> Vec<Skill> {
             let description = meta.get("description").cloned().filter(|s| !s.is_empty()).unwrap_or_else(|| {
                 body.lines().find(|l| !l.trim().is_empty() && !l.starts_with('#')).unwrap_or("").to_string()
             });
+            let (tools, tools_error) = match load_tools(&sdir) {
+                Ok(t) => (t, None),
+                Err(e) => (vec![], Some(e)),
+            };
+            let triggers = meta.get("triggers").map(|t| t.split(',').map(|x| x.trim().trim_matches(|c| c == '[' || c == ']' || c == '"' || c == '\'').to_string()).filter(|x| !x.is_empty()).collect()).unwrap_or_default();
             out.push(Skill {
+                triggers,
+                tools,
+                tools_error,
                 id,
                 editable: source == "studio",
                 name: meta.get("name").cloned().filter(|s| !s.is_empty()).unwrap_or(fname),
@@ -115,15 +178,46 @@ pub fn get(app: &App, id: &str) -> Option<Skill> {
 }
 
 pub fn write(app: &App, id: Option<&str>, name: &str, description: &str, body: &str) -> Result<String, String> {
+    write_full(app, id, name, description, body, None, None)
+}
+
+/// Grava a skill. `triggers` e `tools` (o texto do tools.json; vazio apaga) só mudam quando vêm. Outras chaves do
+/// frontmatter (version, license...) ficam como estavam.
+pub fn write_full(app: &App, id: Option<&str>, name: &str, description: &str, body: &str, triggers: Option<&str>, tools: Option<&str>) -> Result<String, String> {
     let folder = id.map(str::to_string).filter(|s| !s.is_empty()).unwrap_or_else(|| slug(name));
     let dir = app.skills_dir().join(&folder);
     if !is_inside(&app.skills_dir(), &dir) {
         return Err(L!("Nome inválido", "Invalid name").into());
     }
+    if let Some(t) = tools.filter(|t| !t.trim().is_empty()) {
+        // valida antes de gravar qualquer coisa
+        let tmp = std::env::temp_dir().join(format!("llama-studio-tools-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
+        std::fs::write(tmp.join("tools.json"), t).map_err(|e| e.to_string())?;
+        let r = load_tools(&tmp);
+        let _ = std::fs::remove_dir_all(&tmp);
+        r?;
+    }
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let old = std::fs::read_to_string(dir.join("SKILL.md")).map(|t| parse_frontmatter(&t).0).unwrap_or_default();
     let n = if name.is_empty() { folder.clone() } else { name.replace('\n', " ") };
-    let text = format!("---\nname: {n}\ndescription: {}\n---\n\n{}", description.replace('\n', " "), body.trim_start());
+    let mut head = format!("---\nname: {n}\ndescription: {}\n", description.replace('\n', " "));
+    let trig = triggers.map(|t| t.replace('\n', ", ")).or_else(|| old.get("triggers").cloned()).unwrap_or_default();
+    if !trig.trim().is_empty() {
+        head.push_str(&format!("triggers: {}\n", trig.trim()));
+    }
+    let mut keys: Vec<_> = old.iter().filter(|(k, v)| !matches!(k.as_str(), "name" | "description" | "triggers") && !v.is_empty()).collect();
+    keys.sort();
+    for (k, v) in keys {
+        head.push_str(&format!("{k}: {}\n", v.replace('\n', " ")));
+    }
+    let text = format!("{head}---\n\n{}", body.trim_start());
     std::fs::write(dir.join("SKILL.md"), text).map_err(|e| e.to_string())?;
+    match tools {
+        Some(t) if t.trim().is_empty() => { let _ = std::fs::remove_file(dir.join("tools.json")); }
+        Some(t) => std::fs::write(dir.join("tools.json"), t).map_err(|e| e.to_string())?,
+        None => {}
+    }
     Ok(folder)
 }
 

@@ -156,7 +156,21 @@ function recallHistory(args, conv) {
 }
 
 /** Executa JavaScript num Worker isolado; tool() chama as ferramentas de verdade. */
+const CODE_HINT = () => L('execute_code roda só JavaScript, num worker do navegador: sem Node (require, fs, process), sem import estático e sem Python. Arquivos e comandos passam pelas ferramentas: `await tool(\'read_file\', {path})`, `await tool(\'run_command\', {command})`. Para rodar Python ou Node de verdade, use run_command (python arquivo.py, node -e ...).');
+/** Antes de rodar: código que não é JavaScript de worker (Python, require, import) já volta com a explicação. */
+function codeProblem(code) {
+  const c = String(code || '');
+  if (!c.trim()) return L('Código vazio.');
+  const py = /^\s*(def \w+\(.*\)\s*:|from [\w.]+ import |import [\w.]+(\s+as \w+)?\s*$|elif\b|print\s+["'\w]|with open\(|if __name__\s*==)/m.test(c) && !/[{};]\s*$/m.test(c);
+  if (py) return L('Isto parece Python. ') + CODE_HINT();
+  if (/\brequire\s*\(\s*['"]/.test(c)) return L('require() não existe aqui. ') + CODE_HINT();
+  if (/^\s*import\s+[\w{*].*\sfrom\s+['"]|^\s*import\s+['"]/m.test(c)) return L('import estático não funciona aqui (use await import(url) para um módulo da web). ') + CODE_HINT();
+  return '';
+}
+
 function runCode(code, tctx, tmsg) {
+  const bad = codeProblem(code);
+  if (bad) return Promise.resolve({ content: bad, isError: true });
   const src = `
     const pending = new Map(); let seq = 0;
     self.tool = (name, args = {}) => new Promise((res, rej) => { const id = ++seq; pending.set(id, { res, rej }); postMessage({ t: 'call', id, name, args }); });
@@ -200,7 +214,12 @@ function runCode(code, tctx, tmsg) {
         }
         if (!done) w.postMessage({ t: 'result', id: m.id, content: r.content, error: r.isError ? r.content : null });
       } else if (m.t === 'done') finish([logText(), m.v != null ? '[retorno]\n' + m.v : ''].filter(Boolean).join('\n\n'), false);
-      else if (m.t === 'error') finish([logText(), '[erro]\n' + m.s].filter(Boolean).join('\n\n'), true);
+      else if (m.t === 'error') {
+        // tira o rastro do worker (blob:..., onmessage) e, nos erros típicos de ambiente, explica o porquê
+        const msg = String(m.s).split('\n').filter((l) => !/blob:|at onmessage|at new AsyncFunction|AsyncFunction \(/.test(l)).join('\n');
+        const env = /require is not defined|process is not defined|Cannot use import statement|__dirname|Buffer is not defined|document is not defined|window is not defined/.test(m.s);
+        finish([logText(), '[erro]\n' + msg, env ? CODE_HINT() : ''].filter(Boolean).join('\n\n'), true);
+      }
     };
     w.onerror = (e) => finish('[erro]\n' + (e.message || L('falha ao executar o código')), true);
     w.postMessage({ t: 'run', code });
@@ -384,6 +403,7 @@ async function runExplorer(args, tctx, tmsg, apiId, root = tmsg, who = '') {
     await teamStep(st, msgs, last ? [] : tools, m, tctx, tmsg);
     const calls = m.tool_calls.filter((t) => t && t.function?.name);
     calls.forEach((t) => { if (!t.id) t.id = 'call_' + uid(); });
+    repairCalls(calls, tools);
     const text = splitThink(m.content).text;
     if (!calls.length) {
       tmsg.sub = tmsg._sub.map((x) => ({ name: x.name, summary: x.summary, status: x.status }));
@@ -399,7 +419,7 @@ async function runExplorer(args, tctx, tmsg, apiId, root = tmsg, who = '') {
       const a = parseArgs(t.function.arguments) || {};
       const st = { name: t.function.name, summary: toolSummary(t.function.name, a), status: 'running' };
       tmsg._sub.push(st); scheduleRender();
-      const run = () => (!only.includes(t.function.name) ? Promise.resolve({ content: L('Ferramenta não disponível para o subagente. Use uma destas: {0}', only.join(', ')), isError: true })
+      const run = () => (t.bad ? Promise.resolve({ content: t.bad, isError: true }) : !only.includes(t.function.name) ? Promise.resolve({ content: L('Ferramenta não disponível para o subagente. Use uma destas: {0}', only.join(', ')), isError: true })
         : FILE_MUT.has(t.function.name) ? write(t.function.name, a)
         : execTool(t.function.name, a, mcpMeta[t.function.name] || {}, tctx, {}))
         .then((r) => { results[i] = r; st.status = r.isError ? 'error' : 'ok'; scheduleRender(); });

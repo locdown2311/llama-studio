@@ -22,6 +22,9 @@ async function renderSkillsPage() {
           return i;
         })(), h('span'))),
       h('div.skill-desc', null, s.description || L('Sem descrição.')),
+      s.triggers?.length ? h('div.skill-trig.small.muted', { title: L('Sinais que indicam a skill') }, ic('signpost'), s.triggers.join(', ')) : null,
+      s.tools?.length ? h('div.skill-trig.small', { title: L('Ferramentas que a skill traz (tools.json)') }, ic('wrench'), s.tools.map((t) => t.name).join(', ')) : null,
+      s.tools_error ? h('div.skill-trig.small.err', null, ic('alert'), s.tools_error) : null,
       h('div.skill-foot', null,
         h('span', null, s.files.length ? `${s.files.length} ${s.files.length === 1 ? L('arquivo extra') : L('arquivos extras')}` : L('só SKILL.md')),
         h('span.spacer'),
@@ -49,15 +52,24 @@ async function editSkill(id, prefill) {
   desc.style.minHeight = '60px';
   const body = h('textarea.textarea.mono', { rows: 14, value: (data.body || '').trim(), placeholder: L('# Instruções\n\nDescreva o passo a passo, regras de estilo, exemplos...') });
   body.style.minHeight = '280px';
+  const trig = h('input.input', { value: (data.triggers || []).join(', ') || data.meta?.triggers || '', placeholder: L('Ex.: relatório técnico, laudo, parecer') });
+  const toolsTpl = JSON.stringify([{ name: 'converter', description: L('Converte um arquivo para PDF'), command: 'python "{skill_dir}/converter.py" {entrada}', parameters: { type: 'object', properties: { entrada: { type: 'string', description: L('Caminho do arquivo') } }, required: ['entrada'] }, mutating: true }], null, 2);
+  const tools = h('textarea.textarea.mono', { rows: 8, value: data.toolsText || '', placeholder: toolsTpl });
+  const toolsBox = h('details.field', { open: !!data.toolsText }, h('summary', null, L('Ferramentas da skill (opcional)')),
+    h('small', null, L('Lista JSON. Cada ferramenta vira um comando do terminal: {param} recebe o valor (entre aspas), {skill_dir} a pasta da skill, {ws} a pasta de trabalho e {args_file} um JSON com todos os argumentos. mutating: false para as que só leem (não pedem permissão).')),
+    tools, h('button.link.small', { type: 'button', onclick: () => { if (!tools.value.trim()) tools.value = toolsTpl; } }, L('Usar o exemplo')));
   const m = modal({
     title: id ? L('Editar habilidade') : L('Nova habilidade'), wide: true,
     body: h('div.form', null,
       h('div.field', null, h('label', null, L('Nome')), name),
       h('div.field', null, h('label', null, L('Descrição')), desc, h('small', null, L('O modelo lê isto para entender quando aplicar a habilidade.'))),
-      h('div.field', null, h('label', null, L('Instruções (Markdown)')), body)),
+      h('div.field', null, h('label', null, L('Sinais (quando usar)')), trig, h('small', null, L('Palavras ou frases separadas por vírgula. Se o pedido tiver uma delas, a skill entra sozinha.'))),
+      h('div.field', null, h('label', null, L('Instruções (Markdown)')), body),
+      toolsBox),
     foot: [h('button.btn', { onclick: () => m.close() }, L('Cancelar')), h('button.btn.primary', { onclick: async () => {
       try {
-        const r = await api('/api/skills/save', { id, name: name.value.trim(), description: desc.value.trim(), body: body.value });
+        if (tools.value.trim()) { try { JSON.parse(tools.value); } catch (e) { throw new Error(L('Ferramentas: JSON inválido ({0})', e.message)); } }
+        const r = await api('/api/skills/save', { id, name: name.value.trim(), description: desc.value.trim(), body: body.value, triggers: trig.value.trim(), tools: tools.value });
         m.close(); toast(id ? L('Habilidade salva') : L('Habilidade criada'));
         if (!id) { S.sel.skills = [...new Set([...S.sel.skills, r.id])]; saveSel(); }
         renderSkillsPage();

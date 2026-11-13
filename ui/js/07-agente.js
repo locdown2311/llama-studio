@@ -343,7 +343,10 @@ async function runAgent(conv) {
       const { text } = await api('/api/context', { skillsOnly: true, skills: late, lazy });
       if (text) { askMsg.skillNote = text; askMsg.skillIds = late; }
     }
-    const fetchTools = () => api('/api/tools', { ...sel, apis: S.settings.apiTools === true, extra: conv.extraTools || [], lazy, eager: eagerList(sel.mcp, conv.auto?.eager || []), full: sel.mcp.filter((n) => mcpLoadOf(n) === 'eager') })
+    // skills: o catálogo das instaladas vai no prompt e o modelo carrega a que servir com use_skill; as ferramentas
+    // que uma skill traz (tools.json) entram quando ela está ativa ou foi carregada
+    const skillCat = S.settings.skillCatalog !== false && S.skills.length > 0;
+    const fetchTools = () => api('/api/tools', { ...sel, skillCatalog: skillCat, skillTools: [...new Set([...sel.skills, ...(conv.usedSkills || [])])], apis: S.settings.apiTools === true, extra: conv.extraTools || [], lazy, eager: eagerList(sel.mcp, conv.auto?.eager || []), full: sel.mcp.filter((n) => mcpLoadOf(n) === 'eager') })
       .then((r) => {
         // numa API, o explore aponta para o multi_explore (a descrição padrão manda chamar explore várias vezes)
         if (preferMulti(conv)) for (const t of r.tools || []) if (t.function?.name === 'explore') t.function.description = L('Um subagente explorador para UMA investigação pequena (só leitura, contexto próprio, devolve um relatório). Com mais de uma parte, use multi_explore: aqui ele é bem mais rápido.');
@@ -361,7 +364,7 @@ async function runAgent(conv) {
       fetchTools(),
       // o prompt de sistema precisa ficar idêntico entre mensagens para o llama-server reaproveitar o cache:
       // só a data (sem hora) e sem a lista de arquivos referenciados (eles já vão na própria mensagem)
-      (S.settings.projMap === true ? ensureMap(conv) : Promise.resolve()).then(() => api('/api/context', { ws: wsOf(conv), skills: base, groups, refs: [], lazy, map: S.settings.projMap === true, packs: packLevels(), now: new Date().toLocaleDateString(LOCALE, { dateStyle: 'full' }) })),
+      (S.settings.projMap === true ? ensureMap(conv) : Promise.resolve()).then(() => api('/api/context', { ws: wsOf(conv), skills: base, skillCatalog: skillCat, groups, refs: [], lazy, map: S.settings.projMap === true, packs: packLevels(), now: new Date().toLocaleDateString(LOCALE, { dateStyle: 'full' }) })),
     ]);
     // o catálogo dos conectores também fica congelado por conversa: conector ligado depois entra como nota
     // na mensagem; desligado continua listado (a chamada só falha) em vez de fazer o servidor reler tudo
@@ -434,6 +437,8 @@ async function runAgent(conv) {
         conv.updatedAt = Date.now(); saveConvs();
       }
       if (!msg.tool_calls?.length) break;
+      // JSON quebrado, nome de parâmetro trocado, número como texto...: conserta pelo esquema antes de executar
+      repairCalls(msg.tool_calls, tools);
 
       const parallel = [];
       const explores = [];
@@ -458,6 +463,9 @@ async function runAgent(conv) {
         const info = meta[tc.function.name] || { source: tc.function.name.includes('__') ? 'mcp' : 'builtin', mutating: true };
         const tmsg = { role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: '', status: 'pending', source: info.source, server: info.server };
         conv.messages.push(tmsg);
+        if (tc.fix) noteOn(tmsg, L('[Nota do studio: ajustei esta chamada ({0}). Da próxima vez use os nomes e tipos do esquema.]', tc.fix.join('; ')));
+        // chamada que não dá para executar como veio: o erro explica o que a ferramenta espera
+        if (tc.bad) { tmsg.status = 'error'; tmsg.isError = true; tmsg.content = tc.bad; saveConvs(); scheduleRender(); continue; }
         // leituras vão para a mesma fila paralela dos exploradores; o que altera algo espera elas terminarem
         if (PARALLEL_READS.has(tc.function.name) && !needsApproval(info, conv) && !shouldAudit(info, conv)) {
           tmsg.status = 'running'; scheduleRender();
@@ -515,6 +523,14 @@ async function runAgent(conv) {
         tmsg.content = r.content; tmsg.isError = r.isError; tmsg.status = r.isError ? 'error' : 'ok';
         if (r.images?.length) { tmsg._images = r.images; images.push({ name: tc.function.name, images: r.images }); }
         if (tc.function.name === 'search_tools') refetch = true;
+        // skill carregada: fica marcada na conversa e as ferramentas dela entram no próximo passo
+        if (tc.function.name === 'use_skill' && !r.isError) {
+          const id = /<skill id="([^"]+)"/.exec(r.content || '')?.[1];
+          if (id && !(conv.usedSkills || []).includes(id)) {
+            conv.usedSkills = [...(conv.usedSkills || []), id];
+            if (S.skills.find((x) => x.id === id)?.tools?.length) refetch = true;
+          }
+        }
         // ferramenta de conector chamada sem o esquema carregado: carrega para o próximo passo
         if (!meta[tc.function.name] && tc.function.name.includes('__') && !(conv.extraTools || []).includes(tc.function.name)) {
           conv.extraTools = [...(conv.extraTools || []), tc.function.name]; refetch = true;
