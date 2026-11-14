@@ -6,6 +6,7 @@
 
 #[macro_use]
 mod i18n;
+mod web;
 mod app;
 mod arrumar;
 mod bench;

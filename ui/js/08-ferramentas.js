@@ -3,7 +3,8 @@
 
 /* ============================================================ ferramentas internas */
 const TOOL_INFO = {
-  browser: { sec: L('Navegador'), title: L('Controlar o navegador'), short: 'navegador', desc: L('Abrir sites, ler páginas, clicar e preencher numa janela própria do Edge.') },
+  web: { sec: L('Busca'), title: L('Pesquisar na web'), short: L('pesquisa'), desc: L('Pesquisa e lê páginas pelo servidor, sem abrir navegador; os links aparecem na conversa.') },
+  browser: { sec: L('Navegador'), title: L('Controlar o navegador'), short: 'navegador', desc: L('Abrir sites, ler páginas, clicar e preencher numa janela própria do Edge. Para sites com login ou que dependem de JavaScript.') },
   computer: { sec: L('Computador'), title: L('Controlar o computador'), short: 'computador', desc: L('Ver janelas e elementos da tela, clicar, digitar e atalhos. Sempre pede permissão.') },
   read: { sec: L('Arquivos'), title: L('Ler arquivos'), short: 'ler', desc: L('Listar pastas, ler e procurar arquivos.') },
   edit: { sec: L('Arquivos'), title: L('Editar arquivos'), short: 'editar', desc: L('Trocar trechos de arquivos existentes.') },
@@ -31,7 +32,7 @@ function visionOn(conv) {
 /** Executa uma ferramenta: as da interface aqui, as outras no servidor. */
 const FILE_MUT = new Set(['write_file', 'edit_file', 'create_directory']);
 /** Ferramentas só de leitura que podem rodar ao mesmo tempo (no agente e nos exploradores). */
-const PARALLEL_READS = new Set(['read_file', 'list_directory', 'search_files', 'read_skill_file', 'recall_history']);
+const PARALLEL_READS = new Set(['read_file', 'list_directory', 'search_files', 'read_skill_file', 'recall_history', 'web_search', 'web_fetch']);
 
 /** Desfaz as alterações de arquivo das mensagens de ferramenta dadas (da mais nova para a mais antiga). */
 async function undoTools(conv, tmsgs) {
@@ -137,27 +138,49 @@ async function execTool(name, args, info, tctx, tmsg) {
 }
 
 function recallHistory(args, conv) {
-  const words = String(args.query || '').toLowerCase().split(/\s+/).filter((w) => w.length > 1);
-  if (!words.length) return { content: L('Informe o que procurar.'), isError: true };
-  const convs = (args.scope === 'atual' || args.scope === 'current') ? [conv] : S.convs;
+  // at=n: a mensagem n desta conversa, inteira (é o "arquivo" da compactação: nada se perde, só sai do contexto)
+  if (args.at != null && args.at !== '') {
+    const i = Number(args.at);
+    const m = conv.messages[i];
+    if (!m || m.hidden) return { content: L('Não existe a mensagem #{0} nesta conversa (vai de 0 a {1}).', args.at, conv.messages.length - 1), isError: true };
+    const who = m.role === 'tool' ? L('resultado de {0}', m.name || 'ferramenta') : m.role;
+    const body = m.role === 'user' ? userContent(m) : m.role === 'assistant'
+      ? [splitThink(m.content).text, ...(m.tool_calls || []).map((t) => `→ ${t.function.name}(${String(t.function.arguments).slice(0, 2000)})`)].filter(Boolean).join('\n')
+      : String(m.content || '');
+    const max = 16000;
+    return { content: `#${i} (${who}${m.ts ? ', ' + fmtStamp(m.ts) : ''})\n${body.slice(0, max)}${body.length > max ? L('\n[... cortado em {0} caracteres]', max) : ''}`, isError: false };
+  }
+  const q = String(args.query || '').trim();
+  const words = q.toLowerCase().split(/\s+/).filter((w) => w.length > 1);
+  if (!words.length) return { content: L('Informe o que procurar (ou at=n para ler uma mensagem).'), isError: true };
+  const here = args.scope === 'atual' || args.scope === 'current';
+  const convs = here ? [conv] : S.convs;
+  // endereço/hex/nome exato: procura a sequência inteira, não palavra por palavra
+  const exact = /^(0x)?[0-9a-f]{4,}$|^(sub|fun|loc|dat|lab)_[0-9a-f]+$/i.test(q) ? q.toLowerCase() : null;
   const hits = [];
   for (const c of convs) {
+    const cut = c.compactCut || 0;
     c.messages.forEach((m, i) => {
       if (m.hidden) return;
-      const text = m.role === 'user' ? m.content : m.role === 'assistant' ? splitThink(m.content).text : m.role === 'tool' ? m.content : '';
-      if (!text) return;
+      const text = m.role === 'user' ? m.content : m.role === 'assistant' ? [splitThink(m.content).text, ...(m.tool_calls || []).map((t) => `${t.function.name}(${t.function.arguments})`)].join('\n') : m.role === 'tool' ? m.content : '';
+      if (!text || typeof text !== 'string') return;
       const low = text.toLowerCase();
-      const score = words.filter((w) => low.includes(w)).length;
+      const score = exact ? (low.includes(exact) ? 5 : 0) : words.filter((w) => low.includes(w)).length;
       if (!score) return;
-      const at = Math.max(0, low.indexOf(words.find((w) => low.includes(w))) - 160);
-      hits.push({ score, c, i, role: m.role, t: m.ts || c.updatedAt, snip: (at ? '...' : '') + text.slice(at, at + 420).replace(/\s+/g, ' ') + (text.length > at + 420 ? '...' : '') });
+      const key = exact || words.find((w) => low.includes(w));
+      const at = Math.max(0, low.indexOf(key) - 200);
+      hits.push({ score, c, i, archived: c === conv && i < cut, role: m.role, name: m.name, t: m.ts || c.updatedAt, snip: (at ? '...' : '') + text.slice(at, at + 600).replace(/\s+/g, ' ') + (text.length > at + 600 ? '...' : '') });
     });
   }
   hits.sort((a, b) => b.score - a.score || b.t - a.t);
   const top = hits.slice(0, Math.min(20, Number(args.limit) || 8));
   if (!top.length) return { content: L('Nada encontrado no histórico.'), isError: false };
   const role = { user: L('usuário'), assistant: 'assistente', tool: 'ferramenta' };
-  return { content: top.map((h) => `### ${h.c.title} (${fmtStamp(h.t)}, ${role[h.role]})\n${h.snip}`).join('\n\n'), isError: false };
+  return {
+    content: top.map((h) => `### ${h.c === conv ? `#${h.i}` : h.c.title} (${fmtStamp(h.t)}, ${h.role === 'tool' && h.name ? h.name : role[h.role]}${h.archived ? L(', arquivada') : ''})\n${h.snip}`).join('\n\n')
+      + (top.some((h) => h.c === conv) ? L('\n\nPara ler uma mensagem desta conversa inteira: recall_history com at=número.') : ''),
+    isError: false,
+  };
 }
 
 /** Executa JavaScript num Worker isolado; tool() chama as ferramentas de verdade. */
@@ -341,6 +364,7 @@ async function subGate(name, args, info, tctx, root, who) {
    root: a mensagem da ferramenta que o chamou (onde aparecem os pedidos de permissão e os pontos de restauração). */
 async function runExplorer(args, tctx, tmsg, apiId, root = tmsg, who = '') {
   const only = ['list_directory', 'read_file', 'search_files'];
+  if (tctx.groups.includes('web')) only.push('web_search', 'web_fetch');
   if (tctx.groups.includes('browser')) only.push('browser_navigate', 'browser_read', 'browser_click', 'browser_back');
   if (tctx.groups.includes('history')) only.push('recall_history');
   const asked = writeScope(args);
@@ -350,7 +374,7 @@ async function runExplorer(args, tctx, tmsg, apiId, root = tmsg, who = '') {
     if (tctx.groups.includes('write')) only.push('write_file', 'create_directory');
     if (tctx.groups.includes('edit')) only.push('edit_file');
   }
-  const { tools } = await api('/api/tools', { groups: ['read', 'browser', 'history', ...(writer ? ['write', 'edit'] : [])], mcp: [], skills: [], only });
+  const { tools } = await api('/api/tools', { groups: ['read', 'web', 'browser', 'history', ...(writer ? ['write', 'edit'] : [])], mcp: [], skills: [], only });
   // conectores da conversa (decompilador, debugger...): o explorador usa as ferramentas que só leem
   const mcpMeta = {};
   if (tctx.mcp?.length) {

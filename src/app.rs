@@ -54,6 +54,19 @@ pub struct Config {
     pub api_providers: Vec<ApiProvider>,
     /// Comandos dos agentes num Linux isolado (WSL) por pasta de trabalho.
     pub sandbox: crate::sandbox::SandboxCfg,
+    /// Buscador do web_search (vazio = DuckDuckGo, com o Bing de reserva).
+    pub web_search: WebSearchCfg,
+}
+
+#[derive(Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct WebSearchCfg {
+    /// "" (DuckDuckGo), "brave" ou "searxng".
+    pub provider: String,
+    /// Chave do Brave Search.
+    pub key: String,
+    /// Endereço do SearXNG.
+    pub url: String,
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -82,6 +95,10 @@ pub struct ApiProvider {
     /// Limite de pedidos por dia da conta (0 = sem).
     #[serde(default)]
     pub rpd: u32,
+    /// Raciocínio preservado: o raciocínio de todas as respostas anteriores volta para o modelo, não só o do pedido
+    /// atual (Qwen 3.8, GLM 5.3 e outros são treinados assim; custa mais tokens).
+    #[serde(default)]
+    pub preserve_thinking: bool,
 
     #[serde(default)]
     pub params: HashMap<String, serde_json::Value>,
@@ -112,6 +129,7 @@ impl Default for Config {
             api_model: String::new(),
             api_providers: vec![],
             sandbox: Default::default(),
+            web_search: Default::default(),
             ui_settings: json!({
                 "theme": "dark",
                 "colors": {

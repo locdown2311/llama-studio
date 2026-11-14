@@ -279,6 +279,21 @@ async function streamApi(messages, tools, msg, signal, onDelta, extra = {}) {
   }
 }
 
+/** O texto está repetindo? O mesmo trecho final (300 caracteres) aparece 3 vezes ou mais. */
+function looping(t) {
+  if (!t || t.length < 3000) return false;
+  const tail = t.slice(-300);
+  if (tail.trim().length < 120) return false;
+  let n = 0, i = -1;
+  while ((i = t.indexOf(tail, i + 1)) !== -1) if (++n >= 3) return true;
+  // também pega repetição de parágrafo com uma variação no fim: compara um trecho um pouco antes
+  const mid = t.slice(-900, -600);
+  if (mid.trim().length < 120) return false;
+  n = 0; i = -1;
+  while ((i = t.indexOf(mid, i + 1)) !== -1) if (++n >= 3) return true;
+  return false;
+}
+
 async function streamRaw(messages, tools, msg, signal, onDelta, extra = {}) {
   const { _fixed, _remote, _p, _think, _bg, ...rest } = extra;
   // return_progress: o llama-server conta quanto do prompt já leu (barra de progresso antes da 1ª palavra)
@@ -349,10 +364,25 @@ async function streamRaw(messages, tools, msg, signal, onDelta, extra = {}) {
       if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
       if (j.prompt_progress) { msg._pp = j.prompt_progress; onDelta?.(); }
       const d = j.choices?.[0]?.delta;
+      const fr = j.choices?.[0]?.finish_reason;
+      if (fr) msg.finish = fr;
       if (d) {
+        // monitor: tempo até o primeiro sinal (raciocínio, texto ou chamada)
+        if (!msg.ttft && (d.reasoning_content || d.reasoning || d.content || d.tool_calls)) msg.ttft = Date.now() - msg._t0;
         if (d.reasoning_content) msg.reasoning += d.reasoning_content;
         else if (typeof d.reasoning === 'string') msg.reasoning += d.reasoning; // OpenRouter, Groq
         if (d.content) msg.content += d.content;
+        // raciocínio (ou texto) repetindo o mesmo trecho: corta já, em vez de deixar girar até o limite
+        const grow = msg.reasoning.length + msg.content.length;
+        if (grow - (msg._loopAt || 0) > 1200) {
+          msg._loopAt = grow;
+          if (looping(msg.reasoning) || looping(msg.content)) {
+            try { reader.cancel(); } catch { /* já fechado */ }
+            const e = new Error(L('O raciocínio entrou em repetição.'));
+            e.code = 'LOOP';
+            throw e;
+          }
+        }
         for (const tc of d.tool_calls || []) {
           const idx = tc.index ?? 0;
           const slot = msg.tool_calls[idx] || (msg.tool_calls[idx] = { id: '', type: 'function', function: { name: '', arguments: '' } });

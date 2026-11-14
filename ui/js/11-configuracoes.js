@@ -27,7 +27,7 @@ function renderSettings() {
 
   // ferramentas
   const groupsBySec = {};
-  for (const g of ['browser', 'computer', 'read', 'edit', 'write', 'shell', 'code', 'history', 'toolsearch', 'explore', 'todo', 'notebook', 'interface']) (groupsBySec[TOOL_INFO[g].sec] ||= []).push(g);
+  for (const g of ['web', 'browser', 'computer', 'read', 'edit', 'write', 'shell', 'code', 'history', 'toolsearch', 'explore', 'todo', 'notebook', 'interface']) (groupsBySec[TOOL_INFO[g].sec] ||= []).push(g);
   const toolGrid = h('div.tgrid', null, Object.values(groupsBySec).flat().map((g) => sw(TOOL_INFO[g].title, TOOL_INFO[g].desc, S.settings.tools[g], (v) => { S.settings.tools[g] = v; store.set('settings', S.settings); saveKit(); updatePickers(); saved(); })));
 
   section('model', L('Modelo'), 'cpu', L('Como o modelo responde em todas as conversas.'),
@@ -43,8 +43,25 @@ function renderSettings() {
     sw(L('Comparar respostas de vez em quando'), L('Com outra API pronta, 1 em cada ~15 respostas sem ferramentas também é gerada por ela e você escolhe a melhor (no máximo uma vez a cada 10 minutos). O placar fica no menu da conversa.'), st.abAuto !== false, (v) => put({ abAuto: v })),
     field(L('Enviar imagens ao modelo'), seg([['auto', L('Automático ({0})', S.vision ? L('tem visão') : L('sem visão'))], ['on', L('Sempre')], ['off', L('Nunca')]], st.vision, (v) => put({ vision: v })), L('Capturas de tela e imagens coladas na mensagem.')));
 
+  // buscador da pesquisa na web
+  const ws0 = S.info.webSearch || {};
+  const wsSave = async (patch) => { try { await api('/api/config', { webSearch: patch }); S.info = await api('/api/state'); saved(); } catch (e) { toast(e.message, 'err'); } };
+  const wsKey = h('input.input.mono', { type: 'password', placeholder: ws0.hasKey ? L('(chave guardada; digite para trocar)') : L('chave da API do Brave Search'), autocomplete: 'off' });
+  wsKey.addEventListener('change', () => wsSave({ key: wsKey.value.trim() }));
+  const wsUrl = h('input.input.mono', { value: ws0.url || '', placeholder: 'http://localhost:8888' });
+  wsUrl.addEventListener('change', () => wsSave({ url: wsUrl.value.trim() }));
+  const wsKeyF = field(L('Chave do Brave Search'), wsKey, L('Grátis até 2.000 pesquisas por mês em api-dashboard.search.brave.com. Mais estável que o DuckDuckGo.'));
+  const wsUrlF = field(L('Endereço do SearXNG'), wsUrl, L('Um SearXNG seu, com format=json ligado no settings.yml.'));
+  const wsShow = (p) => { wsKeyF.hidden = p !== 'brave'; wsUrlF.hidden = p !== 'searxng'; };
+  wsShow(ws0.provider || '');
+  const webGroup = group(L('Pesquisa na web'),
+    field(L('Buscador'), seg([['', L('DuckDuckGo (sem chave)')], ['brave', 'Brave Search'], ['searxng', 'SearXNG']], ws0.provider || '', (v) => { wsShow(v); wsSave({ provider: v }); }), L('Se o buscador escolhido falhar, o studio tenta o DuckDuckGo e depois o Bing.')),
+    wsKeyF, wsUrlF,
+    sw(L('Conferir as afirmações da pesquisa'), L('Depois de uma resposta que usou a web, outro modelo confere cada afirmação contra as páginas lidas e aponta o que ficou sem fonte. Usa a API do auditor (ou o modelo da conversa).'), st.verifyClaims !== false, (v) => put({ verifyClaims: v })));
+
   section('tools', L('Ferramentas'), 'hammer', L('O que o modelo pode usar. Também dá para ligar e desligar pela barra do chat.'),
     toolGrid,
+    webGroup,
     group(L('Limites'),
       h('div.row', null,
         field(L('Passos com ferramentas por resposta'), input('input.input', { value: st.maxSteps, inputmode: 'numeric' }, (x) => put({ maxSteps: Number(x.value) || 40 })), L('Limite base. Se a tarefa está avançando (lista de tarefas, arquivos alterados), o studio dá mais passos sozinho, até 3 vezes isso. Repetições sem resultado novo são interrompidas antes.')),
@@ -89,7 +106,7 @@ function renderSettings() {
     sw(L('Usar a placa de vídeo para desenhar a janela'), L('Desligado, a janela não ocupa VRAM do modelo. Vale na próxima vez que a janela abrir.'), S.info.windowGpu, async (v) => { await api('/api/config', { windowGpu: v }); S.info.windowGpu = v; saved(); }),
     sw(L('Fechar a janela deixa o studio na bandeja'), L('A janela é destruída e a memória dela volta para o sistema.'), S.info.closeToTray !== false, async (v) => { await api('/api/config', { closeToTray: v }); S.info.closeToTray = v; saved(); }));
 
-  section('api', L('API externa'), 'globe', L('Provedores de IA na internet para tirar trabalho do modelo local, cada função no que você escolher. Auditor e exploradores pela API não ocupam slot do llama-server, então a conversa nunca perde o cache por causa deles. Se a API falhar (sem internet, limite do plano grátis), volta para o modelo local.'), apiSection(put, field, saved));
+  section('api', L('API externa'), 'globe', L('Provedores de IA na internet para tirar trabalho do modelo local, cada função no que você escolher. Auditor e exploradores pela API não ocupam slot do llama-server, então a conversa nunca perde o cache por causa deles. Se a API falhar (sem internet, limite do plano grátis), volta para o modelo local.'), h('div.api-stats-row', null, h('button.btn.sm', { type: 'button', onclick: () => showModelStats() }, ic('scale'), L('Desempenho dos modelos')), h('small.muted', null, L('Erros nas ferramentas, respostas vazias, repetições e tempo de cada modelo, pelas suas conversas.'))), apiSection(put, field, saved));
 
   const sb = h('div.backup-box', null, h('div.muted', null, L('Carregando...')));
   drawSandbox(sb);
@@ -193,6 +210,45 @@ const CF_MODELS = ['@cf/moonshotai/kimi-k2.6', '@cf/zai-org/glm-4.7-flash', '@cf
 const presetOf = (base) => CF_RE.test(base || '') ? API_PRESETS.find((p) => p[0] === 'cloudflare') : API_PRESETS.find((p) => p[2] && base && base.replace(/\/+$/, '') === p[2]);
 const apiLabel = (a) => a.name || presetOf(a.base)?.[1] || a.base || L('API');
 
+/* ---- parâmetros recomendados por modelo ----
+   Como a Unsloth faz: sem parâmetros definidos, cada modelo usa os valores para os quais foi calibrado. O perfil
+   aqui é o "preciso": um pouco mais conservador que o do fabricante nos modelos que raciocinam (0.8 / 0.9),
+   sem chegar na faixa em que o raciocínio entra em loop. think: como ligar e desligar o raciocínio naquele lugar. */
+const NIM_THINK = { on: { chat_template_kwargs: { enable_thinking: true } }, eco: { chat_template_kwargs: { enable_thinking: true } }, off: { chat_template_kwargs: { enable_thinking: false } } };
+const ALI_THINK = { on: { enable_thinking: true }, eco: { enable_thinking: true, thinking_budget: 4096 }, off: { enable_thinking: false } };
+const REC_PARAMS = [
+  // [teste pelo modelo e endereço, parâmetros, nota, raciocínio, contexto]
+  [(m) => /gemini/.test(m), { temperature: 1.0 }, 'O Google pede para não mexer na temperatura do Gemini 3 (abaixo de 1.0 ele piora).'],
+  [(m) => /gpt-oss/.test(m), { temperature: 1.0, top_p: 1.0 }, 'Recomendação da OpenAI para o gpt-oss.'],
+  [(m) => /nemotron.*bolt/.test(m), { temperature: 0.5, top_p: 0.9 }, 'Modelo pequeno e rápido: temperatura baixa ajuda (NVIDIA: 1.0 / 0.95).', (b) => /nvidia\.com/.test(b) ? NIM_THINK : null, 65536],
+  [(m) => /nemotron/.test(m), { temperature: 0.8, top_p: 0.9 }, 'NVIDIA recomenda 1.0 / 0.95 (0.6 só para imagens).', (b) => /nvidia\.com/.test(b) ? NIM_THINK : null],
+  [(m) => /gemma/.test(m), { temperature: 0.8, top_p: 0.9 }, 'Google recomenda 1.0 / 0.95 / top_k 64.', (b) => /nvidia\.com/.test(b) ? NIM_THINK : null],
+  [(m) => /qwen/.test(m), { temperature: 0.8, top_p: 0.9 }, 'Qwen recomenda 1.0 / 0.95 com raciocínio (0.7 / 0.8 sem).', (b) => /aliyuncs|dashscope/.test(b) ? ALI_THINK : /nvidia\.com/.test(b) ? NIM_THINK : null],
+  [(m) => /minimax/.test(m), { temperature: 0.8, top_p: 0.9 }, 'MiniMax recomenda 1.0 / 0.95; abaixo de ~0.6 o raciocínio entra em loop.'],
+  [(m) => /deepseek/.test(m), { temperature: 0.8, top_p: 0.9 }, 'DeepSeek recomenda 1.0 / 0.95 para agentes.'],
+  [(m) => /step-?\d|stepfun/.test(m), { temperature: 0.8, top_p: 0.9 }, 'StepFun recomenda 1.0 / 0.95.'],
+  [(m) => /mistral-(large|medium)/.test(m), { temperature: 0.7, top_p: 0.9, reasoning_effort: 'high' }, 'A Mistral recomenda raciocínio alto para a melhor qualidade.'],
+  [(m) => /mistral|magistral|devstral|codestral/.test(m), { temperature: 0.7, top_p: 0.9 }, ''],
+];
+function recFor(a) {
+  const m = String(a.model || '').toLowerCase();
+  const r = m && REC_PARAMS.find(([t]) => t(m));
+  if (!r) return null;
+  // Qwen 3.8 e GLM 5.3 são treinados com o raciocínio anterior presente (Fireworks: "Preserved" por padrão)
+  return { params: r[1], note: r[2], think: r[3]?.(a.base || '') || null, context: r[4] || 0, preserve: /qwen3\.?8|glm-?5/.test(m) };
+}
+/** Aplica o recomendado: troca temperatura/top_p (e o que mais a tabela tiver), mantém o resto dos parâmetros. */
+function recApply(a, rec) {
+  const params = { ...(a.params || {}) };
+  delete params.temperature; delete params.top_p;
+  Object.assign(params, rec.params);
+  const patch = { id: a.id, params };
+  if (rec.think && !Object.keys(a.thinkParams || {}).length) patch.thinkParams = rec.think;
+  if (rec.context && !a.contextSet) patch.context = rec.context;
+  if (rec.preserve && !a.preserveThinking) patch.preserveThinking = true;
+  return patch;
+}
+
 function apiSection(put, field, saved) {
   const box = h('div');
   const save = async (patch) => {
@@ -208,7 +264,13 @@ function apiSection(put, field, saved) {
     nome.addEventListener('change', () => save({ apiProvider: { id: a.id, name: nome.value.trim() } }));
     const dl = h('datalist', { id: 'api-models-' + a.id });
     const model = h('input.input.mono', { value: a.model || '', placeholder: L('ex.: o id do modelo'), list: 'api-models-' + a.id });
-    model.addEventListener('change', () => save({ apiProvider: { id: a.id, model: model.value.trim() } }));
+    model.addEventListener('change', () => {
+      const m = model.value.trim();
+      // modelo novo sem parâmetros: entra com os recomendados para ele
+      const rec = !Object.keys(a.params || {}).length && recFor({ ...a, model: m });
+      if (rec) toast(L('Usei os parâmetros recomendados para {0}.', m));
+      save({ apiProvider: rec ? { ...recApply({ ...a, model: m }, rec), model: m } : { id: a.id, model: m } });
+    });
     const fallbackModel = h('input.input.mono', { value: a.fallbackModel || '', placeholder: L('ex.: modelo reserva se o principal falhar'), list: 'api-models-' + a.id });
     fallbackModel.addEventListener('change', () => save({ apiProvider: { id: a.id, fallbackModel: fallbackModel.value.trim() } }));
     const retries = h('input.input.mono', { type: 'number', min: '0', max: '10', value: a.retries != null ? a.retries : '', placeholder: L('1 (padrão)') });
@@ -293,8 +355,15 @@ function apiSection(put, field, saved) {
     });
     const saveParams = () => save({ apiProvider: { id: a.id, params: prm } });
     const nParams = Object.keys(prm).length;
+    const rec = recFor(a);
+    const recSame = rec && Object.entries(rec.params).every(([k, v]) => prm[k] === v) && (prm.top_p == null || 'top_p' in rec.params)
+      && (!rec.preserve || a.preserveThinking) && (!rec.think || Object.keys(a.thinkParams || {}).length > 0);
+    const recRow = rec ? h('div.api-rec.small', null, ic(recSame ? 'check' : 'sparkles'),
+      h('span', null, L('Recomendado para este modelo: {0}', Object.entries(rec.params).map(([k, v]) => `${k} ${v}`).join(', ')), rec.think ? L(' + botão Pensar mapeado') : '', rec.preserve ? L(' + raciocínio preservado') : '', rec.note ? h('span.muted', null, ' — ' + L(rec.note)) : null),
+      recSame ? h('span.muted', null, L('(em uso)')) : h('button.btn.sm', { type: 'button', onclick: () => save({ apiProvider: recApply(a, rec) }) }, L('Aplicar'))) : null;
     const params = h('details.api-params', nParams ? { open: true } : null,
       h('summary', null, L('Parâmetros') + (nParams ? ` (${nParams})` : '')),
+      recRow,
       h('div.api-params-row', null,
         field(L('Temperatura'), num('temperature', L('do studio'), '0.05')),
         field(L('Top P'), num('top_p', L('do studio'), '0.01')),
@@ -355,6 +424,9 @@ function apiSection(put, field, saved) {
         h('label.tcard.wrap', null, h('span.tc-main', null, h('span.tc-title', null, L('Aceita imagens')),
           h('span.tc-desc', null, L('Marque se o modelo enxerga imagens (Gemini, GPT-4o, Llama 4, Qwen-VL...). Aí ele recebe fotos anexadas, capturas de tela e os quadros dos vídeos.'))),
           h('span.switch', null, h('input', { type: 'checkbox', checked: a.vision === true, onchange: (e) => save({ apiProvider: { id: a.id, vision: e.target.checked } }) }), h('span'))),
+        h('label.tcard.wrap', null, h('span.tc-main', null, h('span.tc-title', null, L('Raciocínio preservado')),
+          h('span.tc-desc', null, L('O raciocínio de todas as respostas anteriores volta para o modelo, não só o do pedido atual. Deixa conversas longas mais coerentes nos modelos treinados assim (Qwen 3.8, GLM 5.3); gasta mais tokens. Nos outros, deixe desligado.'))),
+          h('span.switch', null, h('input', { type: 'checkbox', checked: a.preserveThinking === true, onchange: (e) => save({ apiProvider: { id: a.id, preserveThinking: e.target.checked } }) }), h('span'))),
         params,
         h('small.muted', null, L('Hoje: {0} pedidos, {1} tokens, {2} falhas (voltaram para o modelo local).', u.calls, u.tokens.toLocaleString(LOCALE), u.fails))));
   };

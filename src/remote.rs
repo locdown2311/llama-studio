@@ -111,6 +111,7 @@ pub fn public(app: &App) -> Value {
         "nim": is_nim(p),
         "rpm": p.rpm,
         "rpd": p.rpd,
+        "preserveThinking": p.preserve_thinking,
         "limited": crate::limits::rule(&app.cfg(), p).is_some(),
 
         "params": p.params,

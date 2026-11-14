@@ -141,3 +141,165 @@ function showAbStats() {
     foot: [st.length ? h('button.btn', { onclick: async () => { if (await confirmBox(L('Zerar o placar?'), L('Zerar'), true)) { store.set('abStats', {}); m.close(); } } }, L('Zerar')) : null, h('span.spacer'), h('button.btn', { onclick: () => m.close() }, L('Fechar'))],
   });
 }
+
+/* ============================================================ verificação das afirmações (pesquisa na web) */
+// Depois de uma resposta que usou web_search/web_fetch, outro modelo confere cada afirmação factual contra o texto
+// das páginas lidas (e os trechos dos resultados) e marca o que ficou sem fonte ou contradiz a fonte. Fica num
+// painel embaixo da resposta; "Pedir correção" manda o modelo pesquisar de novo só o que faltou.
+
+const VERIFY_RUNS = new Map();
+
+function webToolsOf(b) {
+  return b.msgs.filter((m) => m.role === 'tool' && (m.name === 'web_search' || m.name === 'web_fetch') && !m.isError);
+}
+
+function maybeVerify(conv) {
+  if (S.settings.verifyClaims === false) return;
+  const blocks = blocksOf(conv);
+  const b = blocks[blocks.length - 1];
+  if (!b || b.type !== 'ai' || !webToolsOf(b).length) return;
+  const last = abLastAssistant(b);
+  if (!last || last.verify || splitThink(last.content || '').text.trim().length < 150) return;
+  verifyClaims(conv, b);
+}
+
+async function verifyClaims(conv, b) {
+  const last = abLastAssistant(b);
+  if (!last || VERIFY_RUNS.has(last)) return;
+  const web = webToolsOf(b);
+  const urls = [...new Set(web.filter((m) => m.name === 'web_fetch').map((m) => m.data?.url).filter(Boolean))];
+  const snippets = web.filter((m) => m.name === 'web_search').flatMap((m) => m.data?.results || []).map((r) => `- ${r.title} (${r.url}): ${r.snippet}`);
+  const ac = new AbortController();
+  VERIFY_RUNS.set(last, ac);
+  last.verify = { status: 'running' };
+  scheduleRender();
+  try {
+    const { sources } = await api('/api/web/sources', { urls }, { signal: ac.signal });
+    let budget = 60000;
+    const docs = [];
+    sources.forEach((s, i) => { const t = s.text.slice(0, Math.max(0, Math.min(14000, budget))); budget -= t.length; if (t) docs.push(`[F${i + 1}] ${s.url}\n${t}`); });
+    if (snippets.length) docs.push(L('[Trechos dos resultados de busca]\n') + snippets.slice(0, 30).join('\n'));
+    if (!docs.length) throw new Error(L('nenhuma página lida para conferir'));
+    const answer = splitThink(last.content || '').text;
+    const sys = L('Você confere respostas contra fontes. Liste as afirmações factuais verificáveis da RESPOSTA (números, datas, nomes, versões, comportamentos; ignore opiniões e conselhos). Para cada uma, diga se as FONTES apoiam: "ok" (apoiada), "parcial" (só em parte), "sem_fonte" (as fontes não falam disso) ou "contradiz" (as fontes dizem outra coisa). Use só as fontes dadas, nunca o seu conhecimento. Responda só JSON: {"claims":[{"claim":"...","status":"ok|parcial|sem_fonte|contradiz","source":"URL ou vazio","note":"curto, só quando não for ok"}]}. No máximo 15 afirmações, as mais importantes.');
+    const user = L('RESPOSTA:\n{0}\n\nFONTES:\n{1}', answer.slice(0, 12000), docs.join('\n\n'));
+    const msgs = [{ role: 'system', content: sys }, { role: 'user', content: user }];
+    const schema = { type: 'object', properties: { claims: { type: 'array', items: { type: 'object', properties: { claim: { type: 'string' }, status: { enum: ['ok', 'parcial', 'sem_fonte', 'contradiz'] }, source: { type: 'string' }, note: { type: 'string' } }, required: ['claim', 'status'] } } }, required: ['claims'] };
+    let m = { content: '', reasoning: '', tool_calls: [] };
+    const p = apiFor('auditor') || mainApiForChat(conv)?.id;
+    const ex = { temperature: 0, max_tokens: 3000, _timeout: 90000, _fixed: true };
+    if (p) {
+      try { await streamApi(msgs, [], m, ac.signal, null, { ...ex, _p: p, response_format: { type: 'json_schema', json_schema: { name: 'verificacao', schema } } }); }
+      catch (e) {
+        if (ac.signal.aborted || !/response_format|json_schema|schema|400|422/i.test(e.message)) throw e;
+        m = { content: '', reasoning: '', tool_calls: [] };
+        await streamApi(msgs, [], m, ac.signal, null, { ...ex, _p: p });
+      }
+    } else {
+      await sideRun(conv, ex, () => streamRaw(msgs, [], m, ac.signal, null, ex));
+    }
+    const text = splitThink(m.content || '').text;
+    let v = null;
+    for (const t of (text.match(/\{[\s\S]*\}/g) || []).reverse()) { try { v = JSON.parse(t); break; } catch { /* outro */ } }
+    if (!Array.isArray(v?.claims)) throw new Error(L('o verificador não devolveu a lista'));
+    const claims = v.claims.filter((c) => c && c.claim).slice(0, 20).map((c) => ({ claim: String(c.claim), status: ['ok', 'parcial', 'sem_fonte', 'contradiz'].includes(c.status) ? c.status : 'sem_fonte', source: String(c.source || ''), note: String(c.note || '') }));
+    last.verify = { status: 'done', claims, by: m.via || '', at: Date.now() };
+  } catch (e) {
+    if (ac.signal.aborted) delete last.verify;
+    else last.verify = { status: 'error', err: e.message || String(e) };
+  } finally {
+    VERIFY_RUNS.delete(last);
+    saveConvs(); scheduleRender();
+  }
+}
+
+/** Manda um pedido do studio como mensagem do usuário (aparece na conversa) e roda a resposta. */
+function sendFollowup(conv, text) {
+  if (running(conv)) return;
+  submit(conv, { content: text, parts: [{ t: 'text', v: text }], refs: [] });
+}
+
+const VERIFY_LABEL = () => ({ ok: L('com fonte'), parcial: L('em parte'), sem_fonte: L('sem fonte'), contradiz: L('contradiz a fonte') });
+
+function verifyPanel(conv, b) {
+  const last = abLastAssistant(b);
+  const v = last?.verify;
+  if (!v) return null;
+  if (v.status === 'running') return h('div.verify.small.muted', null, h('span', { html: svg('loader', 'spin') }), L('Conferindo as afirmações contra as páginas lidas...'),
+    h('button.link.small', { onclick: () => VERIFY_RUNS.get(last)?.abort() }, L('Cancelar')));
+  if (v.status === 'error') return h('div.verify.small.muted', null, ic('alert'), L('Não deu para conferir: {0}', v.err),
+    h('button.link.small', { onclick: () => { delete last.verify; verifyClaims(conv, b); } }, L('Tentar de novo')),
+    h('button.link.small', { onclick: () => { delete last.verify; saveConvs(); scheduleRender(); } }, L('Ocultar')));
+  const n = (s) => v.claims.filter((c) => c.status === s).length;
+  const bad = v.claims.filter((c) => c.status === 'sem_fonte' || c.status === 'contradiz');
+  const lab = VERIFY_LABEL();
+  const sum = [n('ok') && L('{0} com fonte', n('ok')), n('parcial') && L('{0} em parte', n('parcial')), n('sem_fonte') && L('{0} sem fonte', n('sem_fonte')), n('contradiz') && L('{0} contradiz', n('contradiz'))].filter(Boolean).join(' · ');
+  const fix = () => {
+    const list = v.claims.filter((c) => c.status !== 'ok').map((c) => `- ${c.claim} (${lab[c.status]}${c.note ? ': ' + c.note : ''})`).join('\n');
+    sendFollowup(conv, L('A verificação contra as páginas lidas apontou estas afirmações da sua última resposta:\n{0}\n\nPesquise e leia fontes para cada uma. Corrija ou remova o que não se confirmar e cite a fonte do que ficar. Reescreva a resposta inteira já corrigida.', list));
+  };
+  return h('details.verify' + (bad.length ? '.warn' : '.good'), { open: bad.length > 0 },
+    h('summary', null, ic(bad.length ? 'alert' : 'check'), h('b', null, L('Verificação')), h('span.muted', null, ` ${sum || L('nenhuma afirmação verificável')}`)),
+    h('ul.verify-list', null, v.claims.map((c) => h('li.v-' + c.status, null, h('span.v-tag', null, lab[c.status]), h('span', null, c.claim),
+      c.note ? h('small.muted', null, ' — ' + c.note) : null,
+      c.source && /^https?:/.test(c.source) ? h('a.small', { href: c.source, target: '_blank', rel: 'noopener' }, ' ↗') : null))),
+    h('div.verify-acts', null,
+      v.claims.some((c) => c.status !== 'ok') ? h('button.btn.sm', { onclick: fix, disabled: running(conv) }, L('Pedir correção')) : null,
+      h('small.muted', null, v.by ? L('conferido por {0}', v.by) : ''),
+      h('span.spacer'),
+      h('button.link.small', { onclick: () => { delete last.verify; verifyClaims(conv, b); } }, L('Conferir de novo'))));
+}
+
+/* ============================================================ desempenho por modelo */
+// Tirado das conversas: quantas respostas, chamadas de ferramenta e quantas deram erro (fora cancelamento e
+// permissão negada), respostas vazias, repetições cortadas, respostas cortadas por limite e tempos. Serve para
+// decidir qual API fica com cada função.
+function modelStats() {
+  const st = new Map();
+  for (const c of S.convs) {
+    const by = new Map();
+    for (const m of c.messages || []) {
+      if (m.role === 'assistant') {
+        const v = m.via || (c.modelId ? (convModel(c)?.name || c.modelId) : L('modelo local'));
+        const s = st.get(v) || { by: v, resp: 0, calls: 0, errs: 0, empty: 0, loops: 0, cut: 0, ms: 0, msN: 0, ttft: 0, ttftN: 0 };
+        st.set(v, s);
+        s.resp++;
+        const calls = (m.tool_calls || []).filter((t) => t.function?.name);
+        s.calls += calls.length;
+        for (const t of calls) by.set(t.id, s);
+        const text = typeof m.content === 'string' ? splitThink(m.content).text : '';
+        if (!text.trim() && !calls.length && !m.looped) s.empty++;
+        if (m.looped || (m.reasoning && looping(m.reasoning))) s.loops++;
+        if (m.finish === 'length') s.cut++;
+        if (m.t0 && m.t1 && m.t1 > m.t0) { s.ms += m.t1 - m.t0; s.msN++; }
+        if (m.ttft) { s.ttft += m.ttft; s.ttftN++; }
+      } else if (m.role === 'tool' && m.isError) {
+        const s = by.get(m.tool_call_id);
+        const t = String(m.content || '');
+        if (s && !/Cancelad|Cancelled|negou|denied|Parada forçada|Forced stop/i.test(t)) s.errs++;
+      }
+    }
+  }
+  return [...st.values()].filter((s) => s.resp >= 3).sort((a, b) => b.resp - a.resp);
+}
+
+function showModelStats() {
+  const rows = modelStats();
+  const pct = (a, b) => (b ? Math.round((100 * a) / b) + '%' : '—');
+  const sec = (ms, n) => (n ? fmtMs(ms / n) : '—');
+  const best = rows.filter((r) => r.calls >= 20).sort((a, b) => a.errs / a.calls - b.errs / b.calls)[0];
+  const m = modal({
+    title: L('Desempenho dos modelos'),
+    body: h('div', null,
+      rows.length ? h('div.mstats-wrap', null, h('table.ab-table.mstats', null,
+        h('tr', null, [L('Modelo'), L('Respostas'), L('Chamadas'), L('Erros'), L('Vazias'), L('Repetição'), L('Cortadas'), L('Tempo médio'), L('1º sinal')].map((t) => h('th', null, t))),
+        rows.map((r) => h('tr', r === best ? { class: 'best' } : null,
+          h('td', { title: r.by }, r.by), h('td', null, String(r.resp)), h('td', null, String(r.calls)),
+          h('td', { class: r.calls >= 10 && r.errs / r.calls > 0.08 ? 'bad' : '' }, pct(r.errs, r.calls)),
+          h('td', null, String(r.empty)), h('td', { class: r.loops ? 'bad' : '' }, String(r.loops)), h('td', { class: r.cut ? 'bad' : '' }, String(r.cut)),
+          h('td', null, sec(r.ms, r.msN)), h('td', null, sec(r.ttft, r.ttftN))))))
+        : h('p.muted', null, L('Ainda não há respostas suficientes para comparar.')),
+      h('small.muted', null, L('Erros = chamadas de ferramenta que falharam (sem contar cancelamentos e permissões negadas). Destacado: o que menos erra entre os que fizeram 20+ chamadas. O 1º sinal só existe nas respostas desta versão em diante.'))),
+    foot: [h('span.spacer'), h('button.btn', { onclick: () => m.close() }, L('Fechar'))],
+  });
+}

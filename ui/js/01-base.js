@@ -416,7 +416,7 @@ document.addEventListener('click', (e) => {
 });
 
 /* ============================================================ estado */
-const TOOL_GROUPS = ['read', 'write', 'edit', 'shell', 'code', 'browser', 'computer', 'history', 'toolsearch', 'explore', 'todo', 'notebook', 'interface', 'video'];
+const TOOL_GROUPS = ['read', 'write', 'edit', 'shell', 'code', 'web', 'browser', 'computer', 'history', 'toolsearch', 'explore', 'todo', 'notebook', 'interface', 'video'];
 const CONV_SAVED = new Map(); // id -> JSON da última versão gravada
 const DEFAULT_SETTINGS = { systemPrompt: '', temperature: '', topP: '', maxTokens: '', maxSteps: 40, approval: 'writes', auditor: false, auditMax: 'baixo', auditMcp: false, auditPolicy: '', theme: 'light', showThinking: true, vision: 'auto', explorerSteps: 20, maxConcurrentExplorers: 0, autoCompact: true, compactAt: 75, compactMode: 'meio', lazyLoad: true, autoRoute: true, autoLevel: 'equilibrado', projMap: false, projSummary: false, tools: Object.fromEntries(TOOL_GROUPS.map((g) => [g, g !== 'interface'])) };
 const S = {

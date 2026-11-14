@@ -93,6 +93,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/skills/delete", post(skills_delete))
         .route("/api/skills/test-tool", post(skills_test_tool))
         .route("/api/tools/stop", post(tools_stop))
+        .route("/api/web/sources", post(web_sources))
         .route("/api/skills/import-path", post(skills_import_path))
         .route("/api/skills/import-zip", post(skills_import_zip))
         .route("/api/skills/open", post(skills_open))
@@ -654,6 +655,7 @@ async fn state(State(app): S) -> Res {
         "useRtk": c.use_rtk,
         "lang": c.lang,
         "apis": crate::remote::public(&app),
+        "webSearch": { "provider": c.web_search.provider, "url": c.web_search.url, "hasKey": !c.web_search.key.is_empty() },
     }))
 }
 
@@ -679,6 +681,18 @@ async fn set_config(State(app): S, b: Bytes) -> Res {
         if let Some(g) = v.get("useRtk").and_then(Value::as_bool) {
             c.use_rtk = g;
         }
+        // {"webSearch": {"provider", "url", "key"?}}: a chave só troca quando vem
+        if let Some(w) = v.get("webSearch").filter(|w| w.is_object()) {
+            if let Some(p) = w.get("provider").and_then(Value::as_str) {
+                c.web_search.provider = if matches!(p, "brave" | "searxng") { p.to_string() } else { String::new() };
+            }
+            if let Some(u) = w.get("url").and_then(Value::as_str) {
+                c.web_search.url = u.trim().trim_end_matches('/').to_string();
+            }
+            if let Some(k) = w.get("key").and_then(Value::as_str) {
+                c.web_search.key = k.trim().to_string();
+            }
+        }
         // {"apiProvider": {"id", "name"?, "base"?, "model"?, "key"?}}: cria ou atualiza (chave só troca quando vem)
         if let Some(p) = v.get("apiProvider").filter(|p| p.is_object()) {
             let id = p["id"].as_str().unwrap_or("").trim().to_string();
@@ -698,6 +712,9 @@ async fn set_config(State(app): S, b: Bytes) -> Res {
                 }
                 if let Some(x) = p.get("vision").and_then(Value::as_bool) {
                     e.vision = x;
+                }
+                if let Some(x) = p.get("preserveThinking").and_then(Value::as_bool) {
+                    e.preserve_thinking = x;
                 }
                 if let Some(x) = p.get("context") {
                     e.context = x.as_u64().map(|n| n.min(4_000_000) as u32).unwrap_or(0);
@@ -1340,7 +1357,11 @@ async fn tools_call(State(app): S, b: Bytes) -> Res {
     // o dono dos comandos (a conversa): o Parar encerra os processos dela
     let owner = st(&v, "run").to_string();
     let r = crate::shell::OWNER.scope(owner, tools::call(&app, ws, name, args, &strs(&v, "allow"))).await;
-    ok(json!({"content": r.content, "isError": r.is_error, "images": r.images}))
+    let mut o = json!({"content": r.content, "isError": r.is_error, "images": r.images});
+    if let Some(d) = r.data {
+        o["data"] = d;
+    }
+    ok(o)
 }
 
 // ---------------------------------------------------------------- llama-server
@@ -1740,4 +1761,11 @@ async fn tools_stop(b: Bytes) -> Res {
         return Err(bad(L!("Falta a conversa.", "Missing the chat.")));
     }
     ok(json!({ "stopped": crate::shell::stop(run) }))
+}
+
+/// O texto das páginas que o web_fetch leu (para a verificação das afirmações).
+async fn web_sources(b: Bytes) -> Res {
+    let v = body(&b);
+    let list: Vec<Value> = strs(&v, "urls").iter().take(20).filter_map(|u| crate::web::cached(u).map(|t| json!({"url": u, "text": t}))).collect();
+    ok(json!({ "sources": list }))
 }

@@ -49,6 +49,10 @@ const DEFS: &[Def] = &[
     d("execute_code", "code", true, true, "Executa JavaScript (assíncrono, num worker do navegador: sem Node, require, import estático nem Python) para orquestrar várias ferramentas de uma vez, sem encher o contexto com resultados intermediários. Dentro do código: `await tool('nome_da_ferramenta', {argumentos})` devolve o texto do resultado (lança erro se a ferramenta falhar); `console.log(...)` registra; `return valor` devolve o resultado final. Ex.: laços sobre arquivos, filtrar resultados, chamar várias ferramentas e resumir.",
       r#"{"type":"object","properties":{"code":{"type":"string","description":"Corpo de uma função async em JavaScript"}},"required":["code"]}"#),
     // ---------------- navegador
+    d("web_search", "web", false, false, "Pesquisa na web (sem abrir navegador) e devolve os resultados numerados com título, link e trecho. Use para fatos atuais, documentação, versões, erros conhecidos. Depois leia as páginas que importam com web_fetch.",
+        r#"{"type":"object","properties":{"query":{"type":"string","description":"O que pesquisar (palavras-chave; inclua o ano para coisas recentes)"},"count":{"type":"integer","description":"Quantos resultados (padrão 8, até 15)"}},"required":["query"]}"#),
+    d("web_fetch", "web", false, false, "Lê o texto de uma página da web (sem abrir navegador): títulos, parágrafos, listas e código. Páginas longas vêm em pedaços (use offset). Para páginas que exigem login ou JavaScript, use o navegador.",
+        r#"{"type":"object","properties":{"url":{"type":"string","description":"Endereço da página"},"offset":{"type":"integer","description":"De qual caractere continuar (o resultado anterior diz)"},"max_chars":{"type":"integer","description":"Tamanho do pedaço (padrão 12000)"}},"required":["url"]}"#),
     d("browser_navigate", "browser", false, false, "Abre uma URL na janela de navegador controlada pelo studio e devolve o texto da página e os elementos interativos numerados.",
       r#"{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}"#),
     d("browser_read", "browser", false, false, "Lê a página atual do navegador: título, URL, texto e elementos interativos numerados.", r#"{"type":"object","properties":{}}"#),
@@ -81,8 +85,8 @@ const DEFS: &[Def] = &[
     d("customize_ui", "interface", true, false, "Personalização da interface: temas (cores, fontes), layouts e widgets customizados. Cria e aplica configurações de visualização.",
       r#"{"type":"object","properties":{"theme":{"type":"string","description":"Nome do tema (light, dark, custom)"}, "colors":{"type":"object","description":"Cores personalizadas: background, foreground, accent, primary, secondary, warning, error, success"}, "fonts":{"type":"object","description":"Fontes: body, monospace, header"}, "layout":{"type":"string","description":"Layout: compact, spacious, grid, list"}, "widgets":{"type":"array","items":{"type":"string","description":"Widgets: statusbar, toolbar, sidebar, panels, tabs"}}},"required":[]}"#),
     // ---------------- busca
-    d("recall_history", "history", false, true, "Procura nas conversas anteriores (ou só na atual) trechos sobre um assunto. Use quando o usuário se referir a algo já conversado.",
-      r#"{"type":"object","properties":{"query":{"type":"string"},"scope":{"type":"string","enum":["todas","atual"]},"limit":{"type":"integer"}},"required":["query"]}"#),
+    d("recall_history", "history", false, true, "Procura nas conversas anteriores (ou só na atual, incluindo a parte arquivada pela compactação) trechos sobre um assunto. Cada achado vem com o número da mensagem (#n): chame de novo com at=n para ler aquela mensagem inteira, exata (endereços, saídas de ferramenta). Use quando o usuário se referir a algo já conversado ou quando o resumo não tiver o detalhe exato.",
+      r#"{"type":"object","properties":{"query":{"type":"string","description":"Palavras, nome de função, endereço (0x...)"},"scope":{"type":"string","enum":["todas","atual"]},"at":{"type":"integer","description":"Número da mensagem (#n) desta conversa para ler inteira"},"limit":{"type":"integer"}}}"#),
     d("notebook", "notebook", false, true, "Caderno do projeto com achados duradouros. list (query opcional), get (id), add (title), update (id + campos), remove (id).",
       r#"{"type":"object","properties":{"action":{"type":"string","enum":["list","get","add","update","remove"]},"query":{"type":"string"},"id":{"type":"integer"},"title":{"type":"string"},"kind":{"type":"string","description":"função, endereço, string, hipótese..."},"addr":{"type":"string","description":"ex.: 0x401000"},"status":{"type":"string","enum":["hipótese","confirmado","descartado"]},"text":{"type":"string"}},"required":["action"]}"#),
     d("update_todos", "todo", false, true, "Mantém a lista de tarefas desta conversa, visível para o usuário. Use em tarefas com 3 ou mais passos: crie a lista no começo e atualize ao começar (in_progress) e terminar (done) cada item. Mande sempre a lista inteira; só um item in_progress por vez.",
@@ -472,17 +476,26 @@ pub struct ToolOut {
     pub content: String,
     pub is_error: bool,
     pub images: Vec<String>,
+    /// Dados para a interface desenhar (resultados de pesquisa como cartões de link).
+    pub data: Option<Value>,
 }
 
 fn out(r: Result<(String, Vec<String>), String>) -> ToolOut {
     match r {
-        Ok((c, images)) => ToolOut { content: app::truncate(c, 40000), is_error: false, images },
-        Err(e) => ToolOut { content: LF!("Erro: {e}", "Error: {e}"), is_error: true, images: vec![] },
+        Ok((c, images)) => ToolOut { content: app::truncate(c, 40000), is_error: false, images, data: None },
+        Err(e) => ToolOut { content: LF!("Erro: {e}", "Error: {e}"), is_error: true, images: vec![], data: None },
     }
 }
 
 /// Executa uma ferramenta do servidor (arquivos, shell, navegador, computador ou MCP).
 pub async fn call(app: &Arc<App>, ws: PathBuf, name: &str, args: Value, allow: &[String]) -> ToolOut {
+    if name == "web_search" || name == "web_fetch" {
+        let r = if name == "web_search" { crate::web::search(app, &args).await } else { crate::web::fetch(app, &args).await };
+        return match r {
+            Ok((text, data)) => { let mut o = out(Ok((text, vec![]))); o.data = Some(data); o }
+            Err(e) => out(Err(e)),
+        };
+    }
     if name.starts_with("browser_") && def(name).is_some() {
         return out(app.browser.tool(&app.http, &ws, name, &args).await);
     }
@@ -580,15 +593,15 @@ pub async fn call(app: &Arc<App>, ws: PathBuf, name: &str, args: Value, allow: &
     if let Some(schema) = mcp_schema(app, name) {
         match fit_args(&schema, &mut args) {
             Ok(()) => {}
-            Err(msg) => return ToolOut { content: LF!("Erro: argumentos inválidos para {name}. {msg}\n{}", "Error: invalid arguments for {name}. {msg}\n{}", describe_params(&schema)), is_error: true, images: vec![] },
+            Err(msg) => return ToolOut { content: LF!("Erro: argumentos inválidos para {name}. {msg}\n{}", "Error: invalid arguments for {name}. {msg}\n{}", describe_params(&schema)), is_error: true, images: vec![], data: None },
         }
     }
     match app.mcp.call_by_tool(name, args).await {
         Ok((text, is_err, images)) => {
             let content = if compact_on { crate::compact::compact(&text, &crate::compact::saidas_dir(app), name, 12000).text } else { app::truncate(text, 24000) };
-            ToolOut { content, is_error: is_err, images }
+            ToolOut { content, is_error: is_err, images, data: None }
         }
-        Err(e) => ToolOut { content: LF!("Erro: {e}", "Error: {e}"), is_error: true, images: vec![] },
+        Err(e) => ToolOut { content: LF!("Erro: {e}", "Error: {e}"), is_error: true, images: vec![], data: None },
     }
 }
 

@@ -2706,6 +2706,10 @@ function renderAI(b, conv, isLast) {
         h("span", null, L("Duração")),
         h("b", null, fmtMs(t1 - t0)),
         last?.tps ? h("span.muted", null, `${last.tps.toFixed(1)} tok/s`) : null,
+        // monitor: primeiro sinal da primeira resposta do bloco, cortes por limite e repetições
+        (() => { const f = b.msgs.find((m) => m.role === "assistant" && m.ttft); return f ? h("span.muted", { title: L("Tempo até o primeiro sinal do modelo") }, L("1º sinal {0}", fmtMs(f.ttft))) : null; })(),
+        b.msgs.some((m) => m.role === "assistant" && m.finish === "length") ? h("span.warn-chip", { title: L("O modelo bateu no limite de tokens da resposta (ou do contexto): o texto ou a chamada de ferramenta podem ter ficado pela metade. Aumente o máximo de tokens ou compacte a conversa.") }, ic("alert"), L("resposta cortada")) : null,
+        b.msgs.some((m) => m.looped) ? h("span.warn-chip", { title: L("O raciocínio repetiu o mesmo trecho e o studio cortou.") }, ic("refresh"), L("repetição cortada")) : null,
         cacheInfo(b)
       )
     );
@@ -2988,6 +2992,8 @@ function renderAI(b, conv, isLast) {
 
     !live ? abPanel(conv, b) : null,
 
+    !live ? verifyPanel(conv, b) : null,
+
     !live
       ? h(
           "div.chips",
@@ -3109,6 +3115,8 @@ const TOOL_ICON = {
   edit_file: "edit",
   create_directory: "folderPlus",
   search_files: "search",
+  web_search: "globe",
+  web_fetch: "globe",
   read_skill_file: "book",
   use_skill: "sparkles",
   run_command: "terminal",
@@ -3934,9 +3942,26 @@ function renderTool(tc, res, live) {
         h("button.btn.sm.primary", { onclick: () => answer("allow") }, L("Permitir"))));
   }
 
-  el.append(h("div.tool-card", null, head, bodyEl));
+  // pesquisa na web: os resultados viram links (abrem no navegador do sistema, só se você clicar)
+  const web = webCards(name, res);
+  el.append(h("div.tool-card", null, head, web, bodyEl));
 
   return el;
+}
+
+/** Cartões de link do web_search (e a página lida pelo web_fetch). */
+function webCards(name, res) {
+  const d = res?.data;
+  if (!d || res.isError) return null;
+  const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return u; } };
+  const fav = (u) => h("img.web-fav", { src: `https://icons.duckduckgo.com/ip3/${host(u)}.ico`, alt: "", loading: "lazy", onerror: (e) => e.target.remove() });
+  if (name === "web_fetch" && d.url) {
+    return h("div.web-cards.one", null, h("a.web-card", { href: d.url, target: "_blank", rel: "noopener", title: d.url }, fav(d.url),
+      h("span.web-t", null, d.title || host(d.url)), h("span.web-h", null, host(d.url))));
+  }
+  if (name !== "web_search" || !d.results?.length) return null;
+  return h("div.web-cards", null, d.results.map((r, i) => h("a.web-card", { href: r.url, target: "_blank", rel: "noopener", title: r.snippet || r.url },
+    h("span.web-n", null, String(i + 1)), fav(r.url), h("span.web-t", null, r.title || host(r.url)), h("span.web-h", null, host(r.url)))));
 }
 
 /* ------------------------------------------------------------ ramificar (fork) */

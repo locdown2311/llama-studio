@@ -428,7 +428,16 @@ async function runAgent(conv) {
         if (msg.tool_calls.some((t) => t?.function?.name === 'explore' || t?.function?.name === 'multi_explore')) apiWarm(warmExp);
       }, 250) : null;
       try {
-        await streamCompletion(conv, system, tools, msg, ac.signal);
+        try {
+          await streamCompletion(conv, system, tools, msg, ac.signal);
+        } catch (e) {
+          // raciocínio em loop: corta o trecho repetido, avisa o modelo e segue no próximo passo (duas vezes no máximo)
+          if (e.code !== 'LOOP' || ac.signal.aborted || (g.loops = (g.loops || 0) + 1) > 2) throw e;
+          msg.reasoning = msg.reasoning.slice(0, 1500) + L('\n\n[... repetição cortada pelo studio]');
+          msg.content = ''; msg.tool_calls = []; msg.looped = true;
+          conv.messages.push({ role: 'user', hidden: true, note: true, content: L('(Nota do studio: seu raciocínio entrou em repetição e foi interrompido. Não repita o que já pensou: decida o próximo passo e aja direto, com uma ferramenta ou com a resposta.)') });
+          toast(L('O modelo entrou em repetição; cortei e pedi para seguir direto.'));
+        }
       } finally {
         if (warmT) clearInterval(warmT);
         msg.t1 = Date.now();
@@ -438,6 +447,7 @@ async function runAgent(conv) {
         conv.updatedAt = Date.now(); saveConvs();
       }
       if (ac.dead) return;
+      if (msg.looped) continue;
       if (!msg.tool_calls?.length) break;
       // JSON quebrado, nome de parâmetro trocado, número como texto...: conserta pelo esquema antes de executar
       repairCalls(msg.tool_calls, tools);
@@ -473,7 +483,7 @@ async function runAgent(conv) {
           tmsg.status = 'running'; scheduleRender();
           const ts = performance.now();
           reads.push(execTool(tc.function.name, parseArgs(tc.function.arguments) ?? tc.function.arguments, info, tctx, tmsg).then((r) => {
-            if (ac.dead) return; tmsg.ms = performance.now() - ts; tmsg.content = r.content; tmsg.isError = r.isError; tmsg.status = r.isError ? 'error' : 'ok'; saveConvs(); scheduleRender();
+            if (ac.dead) return; tmsg.ms = performance.now() - ts; tmsg.content = r.content; tmsg.isError = r.isError; if (r.data) tmsg.data = r.data; tmsg.status = r.isError ? 'error' : 'ok'; saveConvs(); scheduleRender();
           }));
           continue;
         }
@@ -487,7 +497,7 @@ async function runAgent(conv) {
           tmsg.status = 'running'; scheduleRender();
           const ts = performance.now();
           parallel.push(runMultiExplore(parseArgs(tc.function.arguments) || {}, tctx, tmsg).then((r) => {
-            if (ac.dead) return; tmsg.ms = performance.now() - ts; tmsg.content = r.content; tmsg.isError = r.isError; tmsg.status = r.isError ? 'error' : 'ok'; saveConvs(); scheduleRender();
+            if (ac.dead) return; tmsg.ms = performance.now() - ts; tmsg.content = r.content; tmsg.isError = r.isError; if (r.data) tmsg.data = r.data; tmsg.status = r.isError ? 'error' : 'ok'; saveConvs(); scheduleRender();
           }));
           continue;
         }
@@ -523,7 +533,7 @@ async function runAgent(conv) {
         const r = await execTool(tc.function.name, parseArgs(tc.function.arguments) ?? tc.function.arguments, info, tctx, tmsg);
         if (ac.dead) return;
         tmsg.ms = performance.now() - ts;
-        tmsg.content = r.content; tmsg.isError = r.isError; tmsg.status = r.isError ? 'error' : 'ok';
+        tmsg.content = r.content; tmsg.isError = r.isError; if (r.data) tmsg.data = r.data; tmsg.status = r.isError ? 'error' : 'ok';
         if (r.images?.length) { tmsg._images = r.images; images.push({ name: tc.function.name, images: r.images }); }
         if (tc.function.name === 'search_tools') refetch = true;
         // skill carregada: fica marcada na conversa e as ferramentas dela entram no próximo passo
@@ -545,7 +555,7 @@ async function runAgent(conv) {
         saveConvs(); scheduleRender();
       }
       if (explores.length) {
-        const done = (e, r) => { if (ac.dead) return; e.tmsg.ms = performance.now() - e.ts; e.tmsg.content = r.content; e.tmsg.isError = r.isError; e.tmsg.status = r.isError ? 'error' : 'ok'; saveConvs(); scheduleRender(); };
+        const done = (e, r) => { if (ac.dead) return; e.tmsg.ms = performance.now() - e.ts; e.tmsg.content = r.content; e.tmsg.isError = r.isError; if (r.data) e.tmsg.data = r.data; e.tmsg.status = r.isError ? 'error' : 'ok'; saveConvs(); scheduleRender(); };
         const run = (e, apiId) => runExplorer(e.args, tctx, e.tmsg, apiId).catch((err) => { if (ac.signal.aborted) throw err; return { content: String(err.message || err), isError: true }; }).then((r) => done(e, r));
         // um só: como antes (a primeira API da equipe, ou o modelo local); vários: cada API pega o próximo ao terminar
         // subagentes que escrevem não dividem arquivos
@@ -624,13 +634,39 @@ function finishRun(conv, ac, forced) {
     const last2 = conv.messages[conv.messages.length - 1];
     nextInQueue(conv, ac.signal.aborted || last2?.role === 'error');
     if (!ac.signal.aborted && last2?.role === 'assistant' && !conv.queue?.length) maybeAskAB(conv);
+    if (!ac.signal.aborted && !forced && last2?.role === 'assistant') maybeVerify(conv);
   }
 }
 
 /* ============================================================ compactação automática */
 const SUMMARY_PROMPT = L('Você resume conversas de trabalho para que um assistente continue a tarefa sem o histórico completo. ')
   + L('Escreva em português, em tópicos curtos: objetivo do usuário; decisões e preferências; arquivos, pastas, URLs e comandos importantes (com caminhos exatos); ')
-  + L('o que já foi feito e o resultado; estado atual e próximos passos pendentes. Não invente nada. Seja completo nos fatos e breve no texto.');
+  + L('o que já foi feito e o resultado; estado atual e próximos passos pendentes. Não invente nada. Seja completo nos fatos e breve no texto. ')
+  + L('Copie EXATOS, sem arredondar nem parafrasear: endereços e offsets (0x...), nomes de funções e símbolos, assinaturas, tamanhos de structs, valores, versões, mensagens de erro e comandos. ')
+  + L('Separe o que foi confirmado por ferramenta do que ainda é hipótese.');
+
+/** Fatos exatos da parte arquivada (endereços, funções, offsets), tirados do texto sem modelo nenhum: o resumo pode
+   perder um número; este índice não. Cada linha diz em que mensagem está (recall_history at=n lê inteira). */
+function factIndex(msgs, from, cut, max = 60) {
+  const re = /\b(0x[0-9a-fA-F]{4,}|(?:sub|FUN|fun|loc|DAT|dat|LAB)_[0-9a-fA-F]{4,}|[A-Za-z_][\w:~]{2,}::[A-Za-z_~][\w]*)\b/;
+  const seen = new Set(); const out = [];
+  for (let i = cut - 1; i >= from && out.length < max; i--) {
+    const m = msgs[i];
+    if (m.hidden || !(m.role === 'tool' || m.role === 'assistant')) continue;
+    const text = m.role === 'assistant' ? splitThink(m.content || '').text : String(m.content || '');
+    for (const line of text.split('\n')) {
+      const k = re.exec(line);
+      if (!k) continue;
+      const l = line.trim().replace(/\s+/g, ' ').slice(0, 150);
+      const key = k[1].toLowerCase();
+      if (l.length < 8 || seen.has(key)) continue;
+      seen.add(key);
+      out.push(`#${i} ${l}`);
+      if (out.length >= max) break;
+    }
+  }
+  return out.reverse();
+}
 
 function estimateTokens(conv, system, tools) {
   return Math.ceil((JSON.stringify(apiMessages(conv, system)).length + JSON.stringify(tools || []).length) / 3.2);
@@ -698,8 +734,15 @@ async function maybeCompact(conv, system, tools, signal, force = false) {
       catch (e) { if (signal?.aborted) throw e; m = { content: '', reasoning: '', tool_calls: [] }; }
     }
     if (!done) await streamRaw(sm, [], m, signal, null);
-    const summary = splitThink(m.content).text.trim();
+    let summary = splitThink(m.content).text.trim();
     if (!summary) return false;
+    // o arquivo: as mensagens antigas continuam na conversa (só saem do contexto); o índice de fatos exatos e o
+    // aviso de como recuperar vão junto do resumo
+    // compactação anterior: os fatos do índice dela continuam (o resumo novo pode não repeti-los)
+    const old = (conv.summary || '').split('\n').filter((l) => /^#\d+ /.test(l));
+    const facts = [...new Set([...old, ...factIndex(msgs, from, cut)])].slice(-90);
+    if (facts.length) summary += L('\n\nÍNDICE DE FATOS EXATOS (copiados do histórico arquivado; #n = mensagem):\n') + facts.join('\n');
+    summary += L('\n\n[As mensagens #{0} a #{1} estão arquivadas e completas. Para um detalhe exato que não esteja aqui, use recall_history (scope="atual", query=...) e depois at=n para ler a mensagem inteira.]', from, cut - 1);
     conv.summary = summary;
     conv.compactCut = cut;
     conv.compactHead = head;

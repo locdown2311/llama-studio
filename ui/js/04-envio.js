@@ -411,6 +411,7 @@ function validArgs(a, onBroken) {
 }
 
 function apiMessages(conv, system) {
+  const keepThink = !!mainApiForChat(conv)?.preserveThinking;
   const out = [];
   if (system) out.push({ role: 'system', content: system });
   const msgs = conv.messages;
@@ -456,7 +457,8 @@ function apiMessages(conv, system) {
       const o = { role: 'assistant', content: text };
       // raciocínio dos passos deste pedido volta para o modelo: ele continua o plano em vez de
       // recomeçar a cada passo (os templates descartam o de pedidos anteriores)
-      if (m.__i > lastUserIdx && m.reasoning?.trim()) o.reasoning_content = m.reasoning;
+      // raciocínio preservado (opção da API): o de todas as respostas anteriores também volta
+      if ((m.__i > lastUserIdx || keepThink) && m.reasoning?.trim()) o.reasoning_content = m.reasoning;
       // argumentos cortados (resposta interrompida no meio da chamada) ou JSON inválido do próprio modelo:
       // o llama-server recusa o pedido inteiro (erro 500), então vão como {} com um aviso no resultado
       const broken = new Set();
