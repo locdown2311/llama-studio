@@ -130,9 +130,15 @@ async function assignSlot(conv) {
 }
 
 /* ============================================================ medidor de contexto */
+/** Tokens por caractere. 1/3.2 é o palpite para texto comum; código e JSON de ferramenta tokenizam
+   mais denso, e o erro sempre cai para o mesmo lado (compactar cedo, perdendo conversa). Cada
+   conversa aprende a razão real do seu modelo na primeira resposta medida (ver 04-envio.js). */
+const TOK_R = 1 / 3.2;
+const tokR = (conv) => (conv?.tokR >= 0.1 && conv.tokR <= 1 ? conv.tokR : TOK_R);
+
 /** De onde vêm os tokens fixos de cada pedido (instruções, ferramentas por origem). */
-function ctxBreakdown(system, ctxText, catalog, tools, meta) {
-  const tk = (x) => Math.ceil((typeof x === 'string' ? x.length : JSON.stringify(x).length) / 3.2);
+function ctxBreakdown(system, ctxText, catalog, tools, meta, conv) {
+  const tk = (x) => Math.ceil((typeof x === 'string' ? x.length : JSON.stringify(x).length) * tokR(conv));
   const parts = {};
   const add = (k, n) => { parts[k] = (parts[k] || 0) + n; };
   // o texto vem do programa, no idioma escolhido
@@ -152,7 +158,7 @@ function ctxUsage(conv) {
   const nCtx = ctxLimit(conv);
   if (!conv) return { used: 0, nCtx, exact: false };
   const m = conv.ctx;
-  const est = (from) => Math.ceil(JSON.stringify(conv.messages.slice(from).map((x) => [x.content, x.tool_calls])).length / 3.2);
+  const est = (from) => Math.ceil(JSON.stringify(conv.messages.slice(from).map((x) => [x.content, x.tool_calls])).length * tokR(conv));
   if (m && m.cut === (conv.compactCut || 0) && m.n <= conv.messages.length) {
     const extra = m.n < conv.messages.length ? est(m.n) : 0;
     return { used: m.tokens + extra, nCtx, exact: !extra };

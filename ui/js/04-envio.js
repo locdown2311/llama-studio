@@ -533,7 +533,7 @@ async function streamCompletion(conv, system, tools, msg, signal) {
   const print = reqPrint(conv, system, tools, msgs);
   msg._why = cacheWhy(conv._req, print).why;
   conv._req = print;
-  conv.ctxSys = Math.ceil(((system || '').length + JSON.stringify(tools || []).length) / 3.2);
+  conv.ctxSys = Math.ceil(((system || '').length + JSON.stringify(tools || []).length) * tokR(conv));
   // várias ferramentas no mesmo passo (dois explore em paralelo, ler e editar...): o llama-server só aceita
   // mais de uma chamada por resposta quando o pedido diz; sem isso vale o que ele acha do template
   const extra = requestExtras(conv);
@@ -559,7 +559,18 @@ async function streamCompletion(conv, system, tools, msg, signal) {
     msg.via = msg._fallbackModel || mainApi.model || '';
   }
   // medida real do servidor: prompt (com o que veio do cache) + resposta
-  if (msg.ctxTokens) { conv.ctx = { tokens: msg.ctxTokens, n: conv.messages.length, cut: conv.compactCut || 0 }; drawCtxMeter(); }
+  if (msg.ctxTokens) {
+    conv.ctx = { tokens: msg.ctxTokens, n: conv.messages.length, cut: conv.compactCut || 0 };
+    // razão real tokens/caractere deste modelo, medida no que foi enviado — a resposta fica de fora,
+    // porque ela não está no texto que estimamos. Pedido curto ou com imagem não serve de amostra.
+    const chars = JSON.stringify(msgs).length + JSON.stringify(tools || []).length;
+    const sent = (msg.promptN || 0) + (msg.cacheN || 0);
+    if (chars > 4000 && sent > 0 && !msgs.some((m) => Array.isArray(m.content))) {
+      const r = sent / chars;
+      if (r > 0.1 && r < 1) conv.tokR = r;
+    }
+    drawCtxMeter();
+  }
   // quanto veio do cache no último pedido, e por que o resto foi relido
   if (msg._pp?.total) {
     const read = Math.max(0, msg._pp.total - msg._pp.cache);

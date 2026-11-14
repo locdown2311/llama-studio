@@ -425,7 +425,7 @@ async function runAgent(conv) {
       catalogSys,
     ].filter(Boolean).join('\n\n');
     conv._sys = system; // a comparação A/B usa o mesmo prompt de sistema
-    conv.ctxParts = ctxBreakdown(system, ctx.text, catalogSys, tools, meta);
+    conv.ctxParts = ctxBreakdown(system, ctx.text, catalogSys, tools, meta, conv);
     const g = stepGuard(Math.max(1, Number(S.settings.maxSteps) || 40));
     const lastAsk = [...conv.messages].reverse().find((m) => m.role === 'user' && !m.hidden);
     const planTurn = !!lastAsk?.plan;
@@ -635,7 +635,7 @@ async function runAgent(conv) {
       if (urgent.length) { saveConvs(); scheduleRender(); g.stop = ''; g.seen.clear(); g.errs.clear(); g.warned.clear(); }
       if (g.stop) { conv.messages.push({ role: 'error', loop: true, content: L('Parei: {0}. Diga como prefere seguir, ou continue mesmo assim.', g.stop) }); break; }
       guardBudget(conv, msg, g, step);
-      if (refetch) { ({ tools, meta } = await fetchTools()); conv.ctxParts = ctxBreakdown(system, ctx.text, catalogSys, tools, meta); }
+      if (refetch) { ({ tools, meta } = await fetchTools()); conv.ctxParts = ctxBreakdown(system, ctx.text, catalogSys, tools, meta, conv); }
       if (step === g.limit - 1) conv.messages.push({ role: 'error', limit: true, content: g.limit > g.base ? L('Parei depois de {0} passos com ferramentas (o limite de {1} foi esticado porque a tarefa estava avançando).', g.limit, g.base) : L('Parei depois de {0} passos com ferramentas.', g.limit) });
     }
   } catch (e) {
@@ -710,7 +710,7 @@ function factIndex(msgs, from, cut, max = 60) {
 }
 
 function estimateTokens(conv, system, tools) {
-  return Math.ceil((JSON.stringify(apiMessages(conv, system)).length + JSON.stringify(tools || []).length) / 3.2);
+  return Math.ceil((JSON.stringify(apiMessages(conv, system)).length + JSON.stringify(tools || []).length) * tokR(conv));
 }
 
 /** Mantém a conversa abaixo do limite: 1) encurta resultados antigos; 2) resume o começo. */
@@ -731,10 +731,10 @@ async function maybeCompact(conv, system, tools, signal, force = false) {
   let head = conv.compactHead || 0;
   if (!conv.compactCut && S.settings.compactMode !== 'inicio') {
     const fu = msgs.findIndex((m) => m.role === 'user' && !m.hidden);
-    if (fu >= 0 && userContent(msgs[fu]).length < limit * 0.25 * 3.2) head = fu + 1;
+    if (fu >= 0 && userContent(msgs[fu]).length < limit * 0.25 / tokR(conv)) head = fu + 1;
   }
   const from = Math.max(conv.compactCut || 0, head);
-  const budget = limit * 0.35 * 3.2;
+  const budget = limit * 0.35 / tokR(conv);
   let acc = 0; let cut = msgs.length;
   for (let i = msgs.length - 1; i > from; i--) {
     acc += JSON.stringify(msgs[i]).length;
@@ -760,7 +760,7 @@ async function maybeCompact(conv, system, tools, signal, force = false) {
     } else if (m.role === 'tool') lines.push('RESULTADO: ' + String(m.content || '').slice(0, 1200));
   }
   let transcript = lines.join('\n\n');
-  const maxChars = Math.floor(nCtx * 0.6 * 3.2);
+  const maxChars = Math.floor(nCtx * 0.6 / tokR(conv));
   if (transcript.length > maxChars) transcript = transcript.slice(0, maxChars * 0.3) + L('\n\n[... trecho do meio omitido ...]\n\n') + transcript.slice(-maxChars * 0.7);
 
   toast(L('Compactando a conversa para caber no contexto...'));
