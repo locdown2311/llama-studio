@@ -30,7 +30,7 @@ function visionOn(conv) {
 }
 
 /** Executa uma ferramenta: as da interface aqui, as outras no servidor. */
-const FILE_MUT = new Set(['write_file', 'edit_file', 'create_directory']);
+const FILE_MUT = new Set(['write_file', 'edit_file', 'create_directory', 'apply_edit']);
 /** Ferramentas só de leitura que podem rodar ao mesmo tempo (no agente e nos exploradores). */
 const PARALLEL_READS = new Set(['read_file', 'list_directory', 'search_files', 'read_skill_file', 'recall_history', 'web_search', 'web_fetch']);
 
@@ -83,7 +83,7 @@ function outlineGiven(conv, path, self) {
 
 async function execTool(name, args, info, tctx, tmsg) {
   try {
-    if (['write_file', 'edit_file', 'create_directory'].includes(name) && args?.path && tctx.conv) {
+    if (['write_file', 'edit_file', 'create_directory', 'apply_edit'].includes(name) && args?.path && tctx.conv) {
       const why = busyBlock(tctx.conv, tmsg?.tool_call_id, joinPath(tctx.ws, args.path));
       if (why) return { content: why, isError: true };
     }
@@ -96,6 +96,7 @@ async function execTool(name, args, info, tctx, tmsg) {
       return { ...r, content: L('[O sumário deste arquivo já está mais acima. Seguem as linhas a partir da {0}, que você ainda não leu; continue com offset para o resto.]\n', next) + r.content };
     }
     if (name === 'execute_code') return await runCode(args?.code ?? '', tctx, tmsg);
+    if (name === 'apply_edit') return await runApplyEdit(args || {}, tctx, tmsg);
     if (name === 'video_scenes') return await runVideoScenes(args || {}, tctx, tmsg);
     if (name === 'video_look') return await runVideoLook(args || {}, tctx, tmsg);
     if (name === 'analyze_image') return await runAnalyzeImage(args || {}, tctx, tmsg);
@@ -372,7 +373,7 @@ async function runExplorer(args, tctx, tmsg, apiId, root = tmsg, who = '') {
   const writer = scope.length > 0;
   if (writer) {
     if (tctx.groups.includes('write')) only.push('write_file', 'create_directory');
-    if (tctx.groups.includes('edit')) only.push('edit_file');
+    if (tctx.groups.includes('edit')) only.push('edit_file', 'apply_edit');
   }
   const { tools } = await api('/api/tools', { groups: ['read', 'web', 'browser', 'history', ...(writer ? ['write', 'edit'] : [])], mcp: [], skills: [], only });
   // conectores da conversa (decompilador, debugger...): o explorador usa as ferramentas que só leem
@@ -502,4 +503,92 @@ async function runMultiExplore(args, tctx, tmsg) {
     content: `# Pesquisa: ${task}\n\n${sections}\n\n---\n\nResponda ao usuário com um relatório consolidado citando achados de cada agente. Se algum agente falhou, mencione e peça se deve reenviar.`,
     isError: false,
   };
+}
+
+/* ============================================================ edição por rascunho (fast apply) */
+// O modelo escreve só o que muda, com marcadores "... código existente ..." no lugar do resto. O studio acha onde
+// o rascunho encaixa pelas linhas de contexto; se cada pedaço começa e termina em linhas que existem no arquivo, a
+// troca é direta. Senão, um modelo rápido (função "Aplicar edições", ou a de tarefas de fundo) junta o rascunho só
+// no trecho do arquivo onde ele cai, e o resultado é gravado como write_file (com ponto de restauração).
+const APPLY_MARK = /^\s*(?:\/\/|#|--|;+|\/\*+|<!--|\*|')?\s*(?:\.\.\.|…)\s*(?:(?:existing|rest|unchanged|same|keep|other|código|codigo|resto|o resto|mantém|mantem|sem mudança)[^\n]*)?(?:\*\/|-->)?\s*$/i;
+const sq = (l) => l.trim().replace(/\s+/g, ' ');
+
+function applySketch(orig, sketch) {
+  const crlf = orig.includes('\r\n');
+  const lines = orig.replace(/\r\n/g, '\n').split('\n');
+  const sk = sketch.replace(/\r\n/g, '\n').replace(/^```[\w-]*\n|\n```\s*$/g, '').split('\n');
+  // pedaços entre marcadores
+  const chunks = [];
+  let curC = [];
+  for (const l of sk) { if (APPLY_MARK.test(l)) { if (curC.length) chunks.push(curC); curC = []; } else curC.push(l); }
+  if (curC.length) chunks.push(curC);
+  const trimC = chunks.map((c) => { let a = 0, b = c.length; while (a < b && !c[a].trim()) a++; while (b > a && !c[b - 1].trim()) b--; return c.slice(a, b); }).filter((c) => c.length);
+  if (!trimC.length) return { err: L('O rascunho está vazio.') };
+  const find = (l, from, min = 4) => { const k = sq(l); if (k.length < min) return -1; for (let i = from; i < lines.length; i++) if (sq(lines[i]) === k) return i; return -1; };
+  // onde o rascunho cai: as linhas dele que existem no arquivo, em ordem
+  let pos = -1; const hits = [];
+  for (const c of trimC) for (const l of c) { const i = find(l, pos + 1); if (i >= 0) { hits.push(i); pos = i; } }
+  if (!hits.length) return { err: L('Não achei onde o rascunho encaixa: nenhuma linha dele existe no arquivo. Inclua algumas linhas existentes antes e depois da mudança (sem alterar), com marcadores "// ... código existente ..." no lugar do resto.') };
+  // troca direta: cada pedaço começa e termina em linhas do arquivo (em ordem e sem ambiguidade)
+  let direct = true; const repl = []; pos = -1;
+  for (const c of trimC) {
+    // começo: linha existente e sem outra igual antes do fim do pedaço; fim: a primeira ocorrência depois das linhas
+    // do meio que existem no arquivo (um "}" curto vale, desde que venha depois delas)
+    const a = find(c[0], pos + 1, 1);
+    if (a < 0) { direct = false; break; }
+    let mid = a;
+    for (const l of c.slice(1, -1)) { const i = find(l, mid + 1); if (i >= 0) mid = i; }
+    const b = c.length === 1 ? a : find(c[c.length - 1], mid + 1, 1);
+    const again = find(c[0], a + 1, 1);
+    if (b < 0 || (again >= 0 && again <= b)) { direct = false; break; }
+    repl.push([a, b, c]); pos = b;
+  }
+  if (direct) {
+    const out = [...lines];
+    for (const [a, b, c] of repl.reverse()) out.splice(a, b - a + 1, ...c);
+    return { text: out.join(crlf ? '\r\n' : '\n'), from: repl[repl.length - 1][0] + 1, to: repl[0][1] + 1, how: 'direto' };
+  }
+  const lo = Math.max(0, Math.min(...hits) - 25); const hi = Math.min(lines.length - 1, Math.max(...hits) + 25);
+  if (hi - lo > 700) return { err: L('O rascunho cobre um trecho grande demais do arquivo (linhas {0}–{1}). Divida em edições menores.', lo + 1, hi + 1) };
+  return { window: { lo, hi, text: lines.slice(lo, hi + 1).join('\n') }, lines, crlf, sketch: trimC.map((c) => c.join('\n')).join('\n// ... código existente ...\n') };
+}
+
+async function runApplyEdit(args, tctx, tmsg) {
+  const path = String(args.path || '').trim();
+  const edit = String(args.edit ?? args.code ?? args.content ?? '');
+  if (!path || !edit.trim()) return { content: L('apply_edit precisa de path e edit (o rascunho com os marcadores).'), isError: true };
+  const f = await api(`/api/ws/read?ws=${encodeURIComponent(tctx.ws)}&path=${encodeURIComponent(path)}`, undefined, { signal: tctx.signal }).catch((e) => ({ err: e.message }));
+  if (f.err) return { content: L('Não consegui ler {0}: {1}. Para criar um arquivo novo use write_file.', path, f.err), isError: true };
+  if (f.binary || f.tooBig) return { content: L('{0} é binário ou grande demais para apply_edit; use edit_file.', path), isError: true };
+  const plan = applySketch(f.text || '', edit);
+  if (plan.err) return { content: plan.err, isError: true };
+  let text = plan.text, from = plan.from, to = plan.to, how = L('troca direta');
+  if (!text) {
+    // junta com um modelo rápido, só no trecho onde o rascunho cai
+    const w = plan.window;
+    const sys = L('Você aplica edições em código. Recebe um TRECHO de um arquivo e uma EDIÇÃO em rascunho, em que linhas como "// ... código existente ..." significam "o que já existe aqui, sem mudança". Devolva o TRECHO inteiro com a edição aplicada: mantenha exatamente igual (inclusive espaços e indentação) tudo o que a edição não muda. Responda só com um bloco ``` contendo o trecho final, sem marcadores e sem comentários seus.');
+    const user = L('TRECHO (linhas {0}–{1} de {2}):\n```\n{3}\n```\n\nEDIÇÃO:\n```\n{4}\n```', w.lo + 1, w.hi + 1, path, w.text, plan.sketch);
+    const msgs = [{ role: 'system', content: sys }, { role: 'user', content: user }];
+    const m = { content: '', reasoning: '', tool_calls: [] };
+    const ex = { temperature: 0, max_tokens: Math.min(32000, Math.ceil((w.text.length + plan.sketch.length) / 2.5) + 800), _fixed: true, chat_template_kwargs: { enable_thinking: false }, _think: 'off' };
+    const p = apiFor('apply') || apiFor('background') || mainApiForChat(tctx.conv)?.id;
+    try {
+      if (p) await streamApi(msgs, [], m, tctx.signal, null, { ...ex, _p: p, _timeout: 180000 });
+      else await sideRun(tctx.conv, ex, () => streamRaw(msgs, [], m, tctx.signal, null, ex));
+    } catch (e) { return { content: L('O modelo que aplica a edição falhou: {0}. Use edit_file.', e.message), isError: true }; }
+    const out = splitThink(m.content || '').text;
+    const block = /```[\w-]*\n([\s\S]*?)\n?```/.exec(out)?.[1] ?? out.trim();
+    if (!block.trim() || block.split('\n').some((l) => APPLY_MARK.test(l) && /exist|resto|código|codigo|unchanged|rest/i.test(l))) return { content: L('A junção não saiu limpa (sobrou marcador ou veio vazia). Use edit_file para esta mudança.'), isError: true };
+    const ratio = block.length / Math.max(1, w.text.length);
+    if (ratio < 0.3 && w.text.length > 400) return { content: L('A junção encolheu demais o trecho ({0}% do original); não gravei para não perder código. Use edit_file.', Math.round(ratio * 100)), isError: true };
+    const all = [...plan.lines.slice(0, w.lo), ...block.split('\n'), ...plan.lines.slice(w.hi + 1)];
+    text = all.join(plan.crlf ? '\r\n' : '\n');
+    from = w.lo + 1; to = w.hi + 1; how = L('juntado por {0}', m.via || L('modelo local'));
+  }
+  if (text === f.text) return { content: L('O rascunho não muda nada em {0}.', path), isError: true };
+  const r = await execTool('write_file', { path, content: text }, { source: 'builtin', mutating: true }, tctx, tmsg);
+  if (r.isError) return r;
+  const a = (f.text || '').split('\n').length, b = text.split('\n').length;
+  if (tctx.ws === S.ws?.path) markFresh(path);
+  return { content: L('Aplicado em {0} ({1}; trecho das linhas {2}–{3}; o arquivo foi de {4} para {5} linhas).', path, how, from, to, a, b), isError: false };
 }

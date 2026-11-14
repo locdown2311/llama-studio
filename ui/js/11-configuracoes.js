@@ -38,7 +38,7 @@ function renderSettings() {
         field(L('Top P'), input('input.input', { value: st.topP, placeholder: L('padrão do servidor'), inputmode: 'decimal' }, (x) => put({ topP: x.value.trim() }))),
         field(L('Máximo de tokens'), input('input.input', { value: st.maxTokens, placeholder: L('sem limite'), inputmode: 'numeric' }, (x) => put({ maxTokens: x.value.trim() }))))),
     group(L('Economia de tokens'),
-      field(L('Raciocínio nas conversas novas'), (() => { const x = h('select.select', null, THINK_OPTS.map(([v, l]) => h('option', { value: v }, l))); x.value = thinkDefault(); x.addEventListener('change', () => { put({ thinkDefault: x.value }); updatePickers(); }); return x; })(), L('Econômico: o modelo pensa no começo de cada pedido e quando algo falha; nos passos seguintes (ler, editar, rodar) age direto. Cada conversa pode mudar pelo botão de raciocínio.')),
+      field(L('Raciocínio nas conversas novas'), (() => { const x = h('select.select', null, THINK_OPTS.map(([v, l]) => h('option', { value: v }, l))); x.value = thinkDefault(); x.addEventListener('change', () => { put({ thinkDefault: x.value }); updatePickers(); }); return x; })(), L('Econômico: o modelo pensa no começo de cada pedido, quando algo falha e na conferência final; nos passos seguintes (ler, editar, rodar) age direto. Sanduíche: igual, mas com um pouco de raciocínio no meio. Cada conversa pode mudar pelo botão de raciocínio.')),
       sw(L('Respostas enxutas'), L('Pede ao modelo para ir direto ao ponto, sem repetir o pedido nem resumir no fim o que já está na conversa.'), st.concise !== false, (v) => put({ concise: v }))),
     sw(L('Comparar respostas de vez em quando'), L('Com outra API pronta, 1 em cada ~15 respostas sem ferramentas também é gerada por ela e você escolhe a melhor (no máximo uma vez a cada 10 minutos). O placar fica no menu da conversa.'), st.abAuto !== false, (v) => put({ abAuto: v })),
     field(L('Enviar imagens ao modelo'), seg([['auto', L('Automático ({0})', S.vision ? L('tem visão') : L('sem visão'))], ['on', L('Sempre')], ['off', L('Nunca')]], st.vision, (v) => put({ vision: v })), L('Capturas de tela e imagens coladas na mensagem.')));
@@ -68,6 +68,7 @@ function renderSettings() {
         field(L('Passos de cada subagente'), input('input.input', { value: st.explorerSteps, inputmode: 'numeric' }, (x) => put({ explorerSteps: Number(x.value) || 20 })))),
       h('div.row', null,
         field(L('Exploradores em paralelo'), input('input.input', { value: st.maxConcurrentExplorers ?? '', placeholder: '3', inputmode: 'numeric' }, (x) => put({ maxConcurrentExplorers: Number(x.value) || 0 })))),
+      sw(L('Conferir antes de concluir'), L('Se a resposta mudou arquivos e nada rodou depois, o modelo recebe uma lista para conferir (rodar build/testes, comparar com o pedido) antes de dar a resposta final. Uma vez por resposta.'), st.checkBeforeDone !== false, (v) => put({ checkBeforeDone: v })),
       sw(L('Subagentes podem escrever'), L('O modelo pode dar a um subagente arquivos ou pastas para criar e editar (só eles; dois subagentes não dividem arquivo). Cada alteração passa pelo auditor e pelas suas permissões, com ponto de restauração. Desligado, os subagentes só leem.'), st.subWrite !== false, (v) => put({ subWrite: v })),
       sw(L('Catálogo de skills'), L('O modelo vê uma linha de cada skill instalada (nome e quando usar) e carrega sozinho a que servir com use_skill, sem você precisar ativar. Desligado, só entram as skills que você ativa ou que o pedido cita.'), st.skillCatalog !== false, (v) => put({ skillCatalog: v }))));
 
@@ -200,10 +201,11 @@ const API_ROLES = [
   ['explorer', L('Subagentes exploradores'), L('Manda a tarefa e o que eles leem: trechos de arquivos e páginas.')],
   ['background', L('Tarefas de fundo'), L('Resumo do mapa da pasta, regras aprendidas, habilidades geradas, regras de arrumar pastas e temas de posts.')],
   ['compact', L('Resumo da compactação'), L('Manda a conversa inteira para resumir. Rápido, mas é o que mais expõe e mais gasta.')],
+  ['apply', L('Aplicar edições (rascunho)'), L('Junta o rascunho do apply_edit no trecho do arquivo. Prefira um modelo rápido (Bolt, Nemo Light, Flash). Vazio: usa a das tarefas de fundo. Manda o trecho do arquivo e o rascunho.')],
 ];
 /** Cartões de API abertos (o resto fica numa linha só). */
 const API_OPEN = new Set(store.get('apiOpen', []));
-const API_ROLE_SHORT = { auditor: L('Auditor'), explorer: L('Exploradores'), background: L('Fundo'), compact: L('Resumo') };
+const API_ROLE_SHORT = { auditor: L('Auditor'), explorer: L('Exploradores'), background: L('Fundo'), compact: L('Resumo'), apply: L('Aplicar') };
 /** Cloudflare: o endereço leva o ID da conta (https://api.cloudflare.com/client/v4/accounts/<ID>/ai/v1). */
 const CF_RE = /^https:\/\/api\.cloudflare\.com\/client\/v4\/accounts\/([^/]*)\/ai\/v1\/?$/;
 const CF_MODELS = ['@cf/moonshotai/kimi-k2.6', '@cf/zai-org/glm-4.7-flash', '@cf/meta/llama-3.1-8b-instruct'];

@@ -3,7 +3,8 @@
 
 /* ============================================================ raciocínio por conversa e slot */
 const THINK_OPTS = [
-  ['eco', L('Econômico'), L('Pensa no começo de cada pedido e quando algo falha; nos outros passos age direto. Gasta bem menos tokens.')],
+  ['eco', L('Econômico'), L('Pensa no começo de cada pedido, quando algo falha e na conferência final; nos outros passos age direto. Gasta bem menos tokens.')],
+  ['sand', L('Sanduíche'), L('Pensa forte no planejamento e na conferência final e pouco no meio (APIs: esforço baixo nos passos de execução). Melhor equilíbrio para tarefas longas.')],
   ['auto', L('Padrão do modelo'), L('O modelo decide (como vem no template dele).')],
   ['on', L('Pensar'), L('Raciocina antes de responder. Melhor para tarefas difíceis.')],
   ['off', L('Responder direto'), L('Sem raciocínio: bem mais rápido para pedidos simples.')],
@@ -39,15 +40,18 @@ function thinkOf(c) { return (c ? c.think || c.autoThink : S.draftThink) || thin
    Só muda o fim do prompt (a abertura da resposta), então não estraga o cache. */
 function thinkNow(conv) {
   const t = thinkOf(conv);
-  if (t !== 'eco') return t;
-  return !conv._step || conv._thinkNext ? 'on' : 'off';
+  if (t !== 'eco' && t !== 'sand') return t;
+  // planejamento, depois de erro/aviso e na conferência final: pensa forte; no meio, direto (eco) ou pouco (sanduíche)
+  if (!conv._step || conv._thinkNext) return 'on';
+  return t === 'sand' ? 'eco' : 'off';
 }
 function requestExtras(conv) {
   const x = {};
   const t = thinkNow(conv);
   x._think = t;
+  // eco (sanduíche no meio): API recebe esforço baixo; no modelo local é o mesmo que direto
   if (t !== 'auto') x.chat_template_kwargs = { enable_thinking: t === 'on' };
-  if (t === 'off') x.reasoning_budget = 0;
+  if (t === 'off' || (t === 'eco' && !mainApiForChat(conv))) x.reasoning_budget = 0;
   if (conv._slot != null) x.id_slot = conv._slot;
   return x;
 }

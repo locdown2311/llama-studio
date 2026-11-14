@@ -3118,6 +3118,7 @@ const TOOL_ICON = {
   read_file: "eye",
   write_file: "filePen",
   edit_file: "edit",
+  apply_edit: "edit",
   create_directory: "folderPlus",
   search_files: "search",
   web_search: "globe",

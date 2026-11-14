@@ -247,7 +247,23 @@ const CONCISE_NOTE = L('Seja direto e econômico: responda só o que foi pedido,
    e, quando a tarefa está andando (lista de tarefas avança, arquivos são alterados), o limite estica. */
 const LOOP_WARN = 3, LOOP_STOP = 4, ERR_WARN = 3, ERR_STOP = 5;
 function stepGuard(base) {
-  return { base, limit: base, cap: base * 3, seen: new Map(), errs: new Map(), warned: new Set(), lastWarn: -99, writes: 0, mark: { done: 0, writes: 0 }, stop: '' };
+  return { base, limit: base, cap: base * 3, seen: new Map(), errs: new Map(), warned: new Set(), lastWarn: -99, writes: 0, mark: { done: 0, writes: 0 }, stop: '',
+    files: new Map(), lastWrite: -1, lastRun: -1, checked: false };
+}
+// mesmo arquivo editado tantas vezes numa resposta: o modelo provavelmente está consertando em pedaços o que quebrou
+const EDIT_WARN = 5;
+const RUN_TOOLS = new Set(['run_command', 'execute_code']);
+
+/** Checagem antes de concluir: a resposta mudou arquivos e nada rodou depois da última mudança. Em vez de
+   terminar, o modelo recebe uma lista do que conferir (uma vez por resposta). Inspirado no
+   PreCompletionChecklist da LangChain, que subiu 13,7 pontos no Terminal Bench só mudando o harness. */
+function needsCheck(conv, g) {
+  if (S.settings.checkBeforeDone === false || g.checked || g.writes === 0 || conv.plan) return false;
+  return g.lastWrite > g.lastRun;
+}
+function checkNote(conv, g) {
+  const files = [...g.files.keys()].slice(0, 12);
+  return L('(Nota do studio — antes de concluir, confira o trabalho.)\n1. Releia o pedido original do usuário e liste cada coisa que ele pediu.\n2. Se há algo para rodar (build, testes, o script, o programa), rode agora e leia a saída. Se não há, releia os arquivos alterados ({0}) e confira que estão completos e coerentes.\n3. Corrija o que não estiver certo. Só então responda com o resumo final: o que foi feito, como você conferiu e o que ficou pendente.', files.join(', ') || L('os que você mudou'));
 }
 function todosDone(conv) { return (conv.todos || []).filter((t) => t.status === 'done').length; }
 function noteOn(r, text) { r.studioNote = (r.studioNote ? r.studioNote + '\n' : '') + text; }
@@ -258,7 +274,20 @@ function guardStep(conv, msg, meta, g, step) {
     const r = conv.messages.find((m) => m.role === 'tool' && m.tool_call_id === tc.id);
     if (!r || r.status === 'denied') continue;
     const name = tc.function.name;
-    if (r.status === 'ok' && meta[name]?.mutating) g.writes++;
+    if (r.status === 'ok' && meta[name]?.mutating) { g.writes++; if (!RUN_TOOLS.has(name)) g.lastWrite = step; }
+    if (RUN_TOOLS.has(name) && r.status !== 'denied') g.lastRun = step;
+    // o mesmo arquivo editado várias vezes: pede para parar e repensar (uma vez por arquivo)
+    if (r.status === 'ok' && FILE_MUT.has(name)) {
+      const path = String(parseArgs(tc.function.arguments)?.path || '').replace(/\\/g, '/').toLowerCase();
+      if (path) {
+        const n = (g.files.get(path) || 0) + 1; g.files.set(path, n);
+        if (n === EDIT_WARN || n === EDIT_WARN * 2) {
+          warned = true;
+          noteOn(r, L('[Nota do studio: você já mudou {0} {1} vezes nesta resposta. Antes de mexer de novo, releia o arquivo inteiro e repense a abordagem: editar em pedaços pode estar quebrando o que já foi feito. Se for mais simples, reescreva a parte inteira de uma vez.]', path, n));
+          conv.messages.push({ role: 'notice', icon: 'refresh', content: L('{0} foi alterado {1} vezes nesta resposta; o modelo foi avisado para repensar.', path, n) });
+        }
+      }
+    }
     // mesma chamada, mesmos argumentos, mesmo resultado: não trouxe nada novo
     const sig = name + ' ' + normArgs(tc.function.arguments) + ' => ' + strHash(String(r.content || ''));
     const n = (g.seen.get(sig) || 0) + 1; g.seen.set(sig, n);
@@ -448,7 +477,19 @@ async function runAgent(conv) {
       }
       if (ac.dead) return;
       if (msg.looped) continue;
-      if (!msg.tool_calls?.length) break;
+      if (!msg.tool_calls?.length) {
+        // ia terminar, mas mudou arquivos e não conferiu: pede a checagem (pensando, no econômico/sanduíche)
+        if (needsCheck(conv, g) && step < g.limit - 2) {
+          g.checked = true;
+          msg.precheck = true;
+          conv.messages.push({ role: 'user', hidden: true, note: true, content: checkNote(conv, g) });
+          conv.messages.push({ role: 'notice', icon: 'check', content: L('Antes de concluir, o modelo vai conferir o trabalho (rodar o que der e comparar com o pedido).') });
+          conv._thinkNext = true;
+          saveConvs(); scheduleRender();
+          continue;
+        }
+        break;
+      }
       // JSON quebrado, nome de parâmetro trocado, número como texto...: conserta pelo esquema antes de executar
       repairCalls(msg.tool_calls, tools);
 

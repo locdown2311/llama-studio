@@ -300,6 +300,72 @@ function showModelStats() {
           h('td', null, sec(r.ms, r.msN)), h('td', null, sec(r.ttft, r.ttftN))))))
         : h('p.muted', null, L('Ainda não há respostas suficientes para comparar.')),
       h('small.muted', null, L('Erros = chamadas de ferramenta que falharam (sem contar cancelamentos e permissões negadas). Destacado: o que menos erra entre os que fizeram 20+ chamadas. O 1º sinal só existe nas respostas desta versão em diante.'))),
-    foot: [h('span.spacer'), h('button.btn', { onclick: () => m.close() }, L('Fechar'))],
+    foot: [h('button.btn', { onclick: () => { m.close(); analyzeFailures(); } }, ic('sparkles'), L('Analisar falhas')), h('span.spacer'), h('button.btn', { onclick: () => m.close() }, L('Fechar'))],
   });
+}
+
+/* ============================================================ analisador de falhas */
+// Junta as falhas recentes das conversas (erros de ferramenta agrupados pelo tipo, repetições, respostas cortadas,
+// vazias, avisos do studio) e pede a um modelo os padrões e o que mudar: regra na persona, skill, parâmetro,
+// ferramenta, qual modelo para quê. É o "trace analyzer" que a LangChain usou para melhorar o harness.
+function collectFailures(maxConvs = 40) {
+  const convs = [...S.convs].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, maxConvs);
+  const groups = new Map();
+  const add = (kind, key, ex, by) => {
+    const g = groups.get(kind + '|' + key) || { kind, key, n: 0, ex: [], by: new Map() };
+    groups.set(kind + '|' + key, g);
+    g.n++;
+    if (g.ex.length < 3 && ex) g.ex.push(ex);
+    if (by) g.by.set(by, (g.by.get(by) || 0) + 1);
+  };
+  for (const c of convs) {
+    const calls = new Map();
+    let via = '';
+    for (const m of c.messages || []) {
+      if (m.role === 'assistant') {
+        via = m.via || via;
+        for (const t of m.tool_calls || []) calls.set(t.id, { t, via: m.via || via });
+        if (m.looped) add('loop', L('raciocínio em repetição'), splitThink(m.reasoning || '').text?.slice(0, 200) || '', m.via);
+        if (m.finish === 'length') add('cut', L('resposta cortada no limite de tokens'), '', m.via);
+        if (m.precheck) add('check', L('quis concluir sem conferir'), '', m.via);
+      } else if (m.role === 'tool' && m.isError) {
+        const t = String(m.content || '');
+        if (/Cancelad|Cancelled|negou|denied|Parada forçada|Forced stop/i.test(t)) continue;
+        const ct = calls.get(m.tool_call_id);
+        const name = m.name || ct?.t.function.name || '?';
+        // a assinatura do erro: sem números, caminhos e aspas, para juntar os parecidos
+        const sig = t.replace(/^Erro:\s*|^Error:\s*/, '').replace(/"[^"]*"|'[^']*'|[A-Za-z]:\\[^\s,)]+|\/[\w./-]+|0x[0-9a-f]+|\d+/gi, '…').slice(0, 120);
+        add('tool', `${name}: ${sig}`, `${String(ct?.t.function.arguments || '').slice(0, 220)} → ${t.slice(0, 260)}`, ct?.via);
+      } else if (m.role === 'notice' && /Repetição|Repetition|alterado|changed/.test(String(m.content))) {
+        add('notice', String(m.content).replace(/\d+/g, '…').slice(0, 120), '', '');
+      }
+    }
+  }
+  return [...groups.values()].sort((a, b) => b.n - a.n).slice(0, 30);
+}
+
+async function analyzeFailures() {
+  const groups = collectFailures();
+  if (!groups.length) { toast(L('Não achei falhas recentes para analisar.')); return; }
+  const out = h('div.md.fa-out', { html: md(L('_Analisando {0} tipos de falha..._', groups.length)) });
+  const ac = new AbortController();
+  const m = modal({
+    title: L('Análise das falhas recentes'),
+    body: h('div', null, h('small.muted', null, L('{0} tipos de falha das últimas conversas (erros de ferramenta, repetições, respostas cortadas).', groups.length)), out),
+    foot: [h('button.btn', { onclick: () => navigator.clipboard?.writeText(out.innerText).then(() => toast(L('Copiado'))) }, L('Copiar')), h('span.spacer'), h('button.btn', { onclick: () => { ac.abort(); m.close(); } }, L('Fechar'))],
+  });
+  const persona = (S.personas || []).find((p) => p.id === (S.settings.defaultPersona || ''))?.prompt || '';
+  const text = groups.map((g, i) => `${i + 1}. [${g.kind}] ${g.key} — ${g.n}x${g.by.size ? ' (' + [...g.by].map(([k, v]) => `${k}: ${v}`).join(', ') + ')' : ''}${g.ex.length ? '\n   ex.: ' + g.ex.join('\n   ex.: ') : ''}`).join('\n');
+  const sys = L('Você analisa falhas de um agente de IA (o llama studio) para melhorar o harness, não o modelo. Agrupe as falhas em padrões, diga a causa provável de cada um e proponha correções concretas que o usuário pode aplicar no studio: uma regra curta para a persona (escreva a regra pronta), uma skill a criar (nome, quando usar, o que diz), um parâmetro de API, uma ferramenta a ligar/desligar, ou qual modelo usar para quê. Seja específico e curto, em português, em markdown. Ordene pelo que mais resolve. Não invente falhas que não estão na lista.');
+  const user = L('FALHAS (mais frequentes primeiro):\n{0}\n\nPERSONA PADRÃO ATUAL:\n{1}', text, persona.slice(0, 4000) || L('(nenhuma)'));
+  const msg = { content: '', reasoning: '', tool_calls: [] };
+  const p = apiFor('auditor') || apiFor('background') || mainApiForChat(cur())?.id;
+  const draw = () => { out.innerHTML = md(splitThink(msg.content).text || L('_Analisando..._')); };
+  try {
+    const msgs = [{ role: 'system', content: sys }, { role: 'user', content: user }];
+    if (p) await streamApi(msgs, [], msg, ac.signal, draw, { _p: p, temperature: 0.3, max_tokens: 4000, _timeout: 180000 });
+    else await streamRaw(msgs, [], msg, ac.signal, draw, { temperature: 0.3, max_tokens: 4000, _fixed: true });
+    draw();
+    if (msg.via) out.append(h('small.muted', null, L('Análise feita por {0}.', msg.via)));
+  } catch (e) { if (!ac.signal.aborted) out.innerHTML = md(L('A análise falhou: {0}', e.message)); }
 }
