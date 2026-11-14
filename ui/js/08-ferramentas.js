@@ -365,8 +365,11 @@ async function subGate(name, args, info, tctx, root, who) {
    root: a mensagem da ferramenta que o chamou (onde aparecem os pedidos de permissão e os pontos de restauração). */
 async function runExplorer(args, tctx, tmsg, apiId, root = tmsg, who = '') {
   const only = ['list_directory', 'read_file', 'search_files'];
-  if (tctx.groups.includes('web')) only.push('web_search', 'web_fetch');
-  if (tctx.groups.includes('browser')) only.push('browser_navigate', 'browser_read', 'browser_click', 'browser_back');
+  // subagente pesquisa pelo servidor (web_search/web_fetch), sem abrir janela; o navegador só entra se a pesquisa
+  // na web estiver desligada (ou se o usuário ligar "Subagentes podem abrir o navegador")
+  const web = tctx.groups.includes('web');
+  if (web) only.push('web_search', 'web_fetch');
+  if (tctx.groups.includes('browser') && (!web || S.settings.explorerBrowser === true)) only.push('browser_navigate', 'browser_read', 'browser_click', 'browser_back');
   if (tctx.groups.includes('history')) only.push('recall_history');
   const asked = writeScope(args);
   const scope = asked.length && subWriteOn(tctx) ? asked.map((p) => normPath(tctx.ws, p)) : [];

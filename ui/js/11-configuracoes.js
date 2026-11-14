@@ -69,6 +69,7 @@ function renderSettings() {
       h('div.row', null,
         field(L('Exploradores em paralelo'), input('input.input', { value: st.maxConcurrentExplorers ?? '', placeholder: '3', inputmode: 'numeric' }, (x) => put({ maxConcurrentExplorers: Number(x.value) || 0 })))),
       sw(L('Conferir antes de concluir'), L('Se a resposta mudou arquivos e nada rodou depois, o modelo recebe uma lista para conferir (rodar build/testes, comparar com o pedido) antes de dar a resposta final. Uma vez por resposta.'), st.checkBeforeDone !== false, (v) => put({ checkBeforeDone: v })),
+      sw(L('Subagentes podem abrir o navegador'), L('Desligado, os subagentes pesquisam e leem páginas pelo servidor (web_search/web_fetch), sem abrir janela. Ligue se eles precisarem de sites com login ou que dependem de JavaScript.'), st.explorerBrowser === true, (v) => put({ explorerBrowser: v })),
       sw(L('Subagentes podem escrever'), L('O modelo pode dar a um subagente arquivos ou pastas para criar e editar (só eles; dois subagentes não dividem arquivo). Cada alteração passa pelo auditor e pelas suas permissões, com ponto de restauração. Desligado, os subagentes só leem.'), st.subWrite !== false, (v) => put({ subWrite: v })),
       sw(L('Catálogo de skills'), L('O modelo vê uma linha de cada skill instalada (nome e quando usar) e carrega sozinho a que servir com use_skill, sem você precisar ativar. Desligado, só entram as skills que você ativa ou que o pedido cita.'), st.skillCatalog !== false, (v) => put({ skillCatalog: v }))));
 

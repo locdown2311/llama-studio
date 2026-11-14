@@ -2202,4 +2202,6 @@ const I18N_EN = {
   "_Analisando..._": "_Analyzing..._",
   "Análise feita por {0}.": "Analysis by {0}.",
   "A análise falhou: {0}": "The analysis failed: {0}",
+  "Subagentes podem abrir o navegador": "Subagents can open the browser",
+  "Desligado, os subagentes pesquisam e leem páginas pelo servidor (web_search/web_fetch), sem abrir janela. Ligue se eles precisarem de sites com login ou que dependem de JavaScript.": "Off, subagents search and read pages through the server (web_search/web_fetch), without opening a window. Turn it on if they need sites with login or that depend on JavaScript.",
 };
