@@ -1610,7 +1610,7 @@ mod skill_t {
     use serde_json::json;
     #[test]
     fn monta_comando() {
-        let t = crate::skills::SkillTool { name: "conv".into(), description: String::new(), command: "python {skill_dir}/c.py {entrada} --n {n} {args_file}".into(), parameters: json!({"type":"object","properties":{"entrada":{"type":"string"},"n":{"type":"integer"}},"required":["entrada"]}), mutating: true, timeout: None };
+        let t = crate::skills::SkillTool { name: "conv".into(), description: String::new(), command: "python {skill_dir}/c.py {entrada} --n {n} {args_file}".into(), parameters: json!({"type":"object","properties":{"entrada":{"type":"string"},"n":{"type":"integer"}},"required":["entrada"]}), mutating: true, timeout: None, script: None };
         let (c, f) = super::skill_command(&t, std::path::Path::new("/sk"), std::path::Path::new("/ws"), &json!({"entrada": "it's a.txt", "n": 3})).unwrap();
         assert!(c.starts_with("python /sk/c.py "), "{c}");
         assert!(c.contains("--n 3"), "{c}");

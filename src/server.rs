@@ -91,6 +91,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/limit-status", get(nim_status_handler))
         .route("/api/skills/save", post(skills_save))
         .route("/api/skills/delete", post(skills_delete))
+        .route("/api/skills/test-tool", post(skills_test_tool))
         .route("/api/skills/import-path", post(skills_import_path))
         .route("/api/skills/import-zip", post(skills_import_zip))
         .route("/api/skills/open", post(skills_open))
@@ -1003,6 +1004,16 @@ async fn skills_get(State(app): S, Query(qs): Q) -> Res {
     v["body"] = json!(b);
     v["meta"] = json!(meta);
     v["toolsText"] = json!(std::fs::read_to_string(s.dir.join("tools.json")).unwrap_or_default());
+    // os scripts das ferramentas, para o editor mostrar junto
+    let mut scripts = serde_json::Map::new();
+    for t in &s.tools {
+        let Some(sc) = t.script.as_deref() else { continue };
+        let f = s.dir.join(sc);
+        if crate::app::is_inside(&s.dir, &f) && std::fs::metadata(&f).is_ok_and(|m| m.len() < 512 * 1024) {
+            scripts.insert(sc.to_string(), json!(std::fs::read_to_string(&f).unwrap_or_default()));
+        }
+    }
+    v["scripts"] = Value::Object(scripts);
     ok(v)
 }
 
@@ -1029,7 +1040,36 @@ async fn skills_save(State(app): S, b: Bytes) -> Res {
         return Err(bad(L!("Essa habilidade fica fora da pasta do studio; importe-a para editar.", "That skill is outside the studio folder; import it to edit it.")));
     }
     let id = skills::write_full(&app, (!id.is_empty()).then_some(id), st(&v, "name").trim(), st(&v, "description").trim(), st(&v, "body"), v.get("triggers").and_then(Value::as_str), v.get("tools").and_then(Value::as_str)).map_err(bad)?;
+    // scripts das ferramentas (caminho relativo à pasta da skill -> conteúdo; null apaga)
+    if let (Some(sc), Some(sk)) = (v.get("scripts").and_then(Value::as_object), skills::get(&app, &id)) {
+        for (rel, text) in sc {
+            let rel = rel.replace('\\', "/");
+            let f = sk.dir.join(&rel);
+            if rel.is_empty() || rel.contains("..") || !crate::app::is_inside(&sk.dir, &f) || rel.eq_ignore_ascii_case("SKILL.md") || rel.eq_ignore_ascii_case("tools.json") {
+                return Err(bad(LF!("Caminho de script inválido: {rel}", "Invalid script path: {rel}")));
+            }
+            match text.as_str() {
+                Some(t) => {
+                    if let Some(d) = f.parent() { std::fs::create_dir_all(d).map_err(|e| bad(e.to_string()))?; }
+                    std::fs::write(&f, t).map_err(|e| bad(e.to_string()))?;
+                }
+                None => { let _ = std::fs::remove_file(&f); }
+            }
+        }
+    }
     ok(json!({"id": id}))
+}
+
+/// Roda uma ferramenta de skill pelo editor (o botão Testar), com os argumentos de exemplo, na pasta de trabalho.
+async fn skills_test_tool(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let sk = skills::get(&app, st(&v, "id")).ok_or_else(|| bad(L!("Salve a skill antes de testar.", "Save the skill before testing.")))?;
+    let name = tools::skill_tool_name(&sk.id, st(&v, "name"));
+    let ws = ws_of(&app, st(&v, "ws"))?;
+    let args = v.get("args").cloned().unwrap_or(json!({}));
+    let t0 = std::time::Instant::now();
+    let r = tools::call(&app, ws, &name, args, &[]).await;
+    ok(json!({"content": r.content, "isError": r.is_error, "ms": t0.elapsed().as_millis() as u64}))
 }
 
 async fn skills_delete(State(app): S, b: Bytes) -> Res {

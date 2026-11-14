@@ -43,6 +43,9 @@ pub struct SkillTool {
     pub mutating: bool,
     #[serde(default)]
     pub timeout: Option<u64>,
+    /// Script da ferramenta dentro da pasta da skill (ex.: scripts/converter.py), para o editor abrir junto.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script: Option<String>,
 }
 fn empty_params() -> serde_json::Value {
     serde_json::json!({"type": "object", "properties": {}})
