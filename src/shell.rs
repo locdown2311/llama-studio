@@ -100,11 +100,6 @@ pub fn stop(owner: &str) -> usize {
     list.len()
 }
 
-/// Comandos rodando agora (para mostrar no Parar).
-pub fn running(owner: &str) -> usize {
-    PROCS.lock().unwrap().iter().filter(|p| owner.is_empty() || p.owner == owner).count()
-}
-
 pub async fn run(ws: &Path, command: &str, cwd: &str, timeout_s: u64) -> Result<String, String> {
     if command.trim().is_empty() {
         return Err("Comando vazio.".into());
