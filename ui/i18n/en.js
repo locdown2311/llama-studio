@@ -2157,4 +2157,7 @@ const I18N_EN = {
   "DeepSeek recomenda 1.0 / 0.95 para agentes.": "DeepSeek recommends 1.0 / 0.95 for agents.",
   "StepFun recomenda 1.0 / 0.95.": "StepFun recommends 1.0 / 0.95.",
   "A Mistral recomenda raciocínio alto para a melhor qualidade.": "Mistral recommends high reasoning for the best quality.",
+  "{0} {1}/{2} · recusou, {3}s": "{0} {1}/{2} · refused, {3}s",
+  "Há {0}s o provedor recusou o modelo {1} com 429 (com {2} pedidos seus no minuto, abaixo do limite). Isso costuma ser o modelo sobrecarregado do lado de lá ou uma cota própria dele, não o seu limite de {3}/min. O studio espera só esse modelo; os outros da mesma conta seguem. Se repetir muito, ponha um modelo reserva nesta API ou troque de modelo.": "{0}s ago the provider refused model {1} with 429 (with {2} of your requests in the minute, below the limit). This is usually the model overloaded on their side or its own quota, not your {3}/min limit. The studio waits only for that model; the others on the same account go on. If it happens a lot, set a fallback model on this API or switch models.",
+  "O provedor disse: {0}": "The provider said: {0}",
 };

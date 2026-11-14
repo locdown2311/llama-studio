@@ -221,6 +221,8 @@ svg { display: block; flex: none; width: 16px; height: 16px; }
 .nim-meter.hi { color: #c43c30; }
 .nim-meter.full { color: #c43c30; background: color-mix(in srgb, #dc4a3d 12%, transparent); }
 .nim-meter.full i { background: #dc4a3d; }
+.nim-meter.refused { color: var(--warn); background: var(--warn-soft); }
+.nim-meter.refused i { background: var(--warn); }
 
 .messages { flex: 1; overflow-y: auto; padding: 26px 28px 16px; overflow-anchor: none; }
 .msg { max-width: var(--chat-w); margin: 0 auto 26px; }

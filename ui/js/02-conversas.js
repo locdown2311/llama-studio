@@ -1983,11 +1983,15 @@ function drawNimMeter() {
   const perMin = d.max > 0;
   const budget = d.budget || d.max || 1;
   const pct = dayOut ? 100 : perMin ? Math.min(100, (d.used / budget) * 100) : Math.min(100, (d.day / d.rpd) * 100);
-  const lvl = dayOut || wait > 0 || (perMin && d.used >= budget) ? "full" : pct >= 80 ? "hi" : pct >= 50 ? "mid" : "lo";
+  // 429 do provedor para este modelo com a fila folgada: não é a sua cota, é o modelo (sobrecarregado ou com limite próprio)
+  const rf = d.refused;
+  const rfWait = rf ? Math.max(0, (rf.wait || 0) - age) : 0;
+  const lvl = dayOut || wait > 0 || (perMin && d.used >= budget) ? "full" : rfWait > 0 ? "refused" : pct >= 80 ? "hi" : pct >= 50 ? "mid" : "lo";
   el.hidden = false;
   el.className = "nim-meter " + lvl;
   const day = d.rpd > 0 ? L(" · hoje {0}/{1}", d.day, d.rpd) : "";
   const txt = dayOut ? L("{0}: limite do dia", name)
+    : rfWait > 0 && wait === 0 ? L("{0} {1}/{2} · recusou, {3}s", name, d.used, d.max, rfWait)
     : !perMin ? L("{0} hoje {1}/{2}", name, d.day, d.rpd)
     : wait > 0 ? L("{0} {1}/{2} · {3}s", name, d.used, d.max, wait) + day
     : L("{0} {1}/{2}", name, d.used, d.max) + day;
@@ -1999,7 +2003,8 @@ function drawNimMeter() {
     ? L("{0}: limite de {1} pedidos por minuto atingido. Os pedidos ficam na fila e saem sozinhos em {2}s.", full, d.max, wait)
     : L("{0}: {1} de {2} pedidos no último minuto. O studio usa até {3} e guarda {4} para a conversa (exploradores e tarefas de fundo esperam antes).", full, d.used, d.max, budget, d.reserve || 0))
     + (d.rpd > 0 && !dayOut && perMin ? " " + L("Hoje: {0} de {1}.", d.day, d.rpd) : "")
-    + (d.waiting ? " " + L("{0} na fila agora.", d.waiting) : "");
+    + (d.waiting ? " " + L("{0} na fila agora.", d.waiting) : "")
+    + (rf ? "\n\n" + L("Há {0}s o provedor recusou o modelo {1} com 429 (com {2} pedidos seus no minuto, abaixo do limite). Isso costuma ser o modelo sobrecarregado do lado de lá ou uma cota própria dele, não o seu limite de {3}/min. O studio espera só esse modelo; os outros da mesma conta seguem. Se repetir muito, ponha um modelo reserva nesta API ou troque de modelo.", rf.ago, rf.model, rf.used, d.max) + (rf.why ? "\n" + L("O provedor disse: {0}", rf.why) : "") : "");
 }
 
 /* ------------------------------------------------------------ chat */

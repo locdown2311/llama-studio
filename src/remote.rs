@@ -28,6 +28,8 @@ pub(crate) fn is_nim(c: &ApiProvider) -> bool {
 enum SendErr {
     /// Segundos para esperar antes de tentar de novo.
     Limit(u64, String),
+    /// O provedor recusou com 429 (segundos, quem, o que ele disse).
+    Refused(u64, String, String),
     /// Acabou o limite do dia (o número é o limite).
     Daily(u32, String),
     Net(reqwest::Error),
@@ -38,12 +40,13 @@ impl SendErr {
         match self {
             SendErr::Limit(s, n) => LF!("Limite de pedidos por minuto de {n}: fila cheia. Tente de novo em {s}s.", "{n} requests-per-minute limit: queue full. Retry in {s}s."),
             SendErr::Daily(d, n) => LF!("{n} já fez os {d} pedidos do dia (o limite renova à meia-noite UTC).", "{n} already made its {d} requests for today (the limit resets at midnight UTC)."),
+            SendErr::Refused(s, n, why) => LF!("{n} recusou o pedido (429{}). Tente de novo em {s}s.", "{n} refused the request (429{}). Retry in {s}s.", if why.is_empty() { String::new() } else { format!(": {why}") }),
             SendErr::Net(e) => chain(e),
         }
     }
     fn wait(&self) -> Option<u64> {
         match self {
-            SendErr::Limit(s, _) => Some(*s),
+            SendErr::Limit(s, _) | SendErr::Refused(s, _, _) => Some(*s),
             SendErr::Daily(..) => Some(3600),
             SendErr::Net(_) => None,
         }
@@ -143,11 +146,21 @@ fn client() -> &'static reqwest::Client {
     })
 }
 /// `side`: pedido que não é a conversa (explorador, auditor, tarefa de fundo); na fila do NIM ele cede a vez.
-async fn send_with_retries(app: &App, c: &ApiProvider, body_str: &str, max_retries: u32, side: bool) -> Result<reqwest::Response, SendErr> {
+async fn send_with_retries(app: &App, c: &ApiProvider, model: &str, body_str: &str, max_retries: u32, side: bool) -> Result<reqwest::Response, SendErr> {
     let mut attempt = 0u32;
     let limited = crate::limits::rule(&app.cfg(), c).is_some();
 
     loop {
+        // este modelo levou 429 há pouco: espera ele (os outros modelos da mesma conta seguem normais)
+        if limited {
+            let w = app.limits.model_wait(app, c, model);
+            if !w.is_zero() {
+                if side && w.as_secs() > 20 {
+                    return Err(SendErr::Limit(w.as_secs() + 1, label(c)));
+                }
+                tokio::time::sleep(w).await;
+            }
+        }
         // API com limite (NIM ou configurado): espera uma vaga na janela de 60 s em vez de bater no limite
         // (as novas tentativas também contam); o limite do dia recusa na hora
         if limited {
@@ -181,11 +194,19 @@ async fn send_with_retries(app: &App, c: &ApiProvider, body_str: &str, max_retri
 
             // a API recusou mesmo com a fila (outro programa na mesma chave): fecha a porta pelo tempo que ela
             // pedir; a próxima tentativa espera na fila em vez de insistir e gastar mais pedidos
+            // a API recusou com 429 mesmo com a fila: é o modelo (sobrecarregado no provedor, cota própria) ou a conta
+            // (outro programa na mesma chave). Bloqueia só esse modelo pelo tempo pedido e guarda o motivo para o
+            // medidor mostrar; a próxima tentativa espera em vez de insistir e gastar mais pedidos
             Ok(r) if limited && r.status().as_u16() == 429 => {
                 let secs = r.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(15);
-                app.limits.block(app, c, secs);
+                let body = r.text().await.unwrap_or_default();
+                let why = serde_json::from_str::<Value>(&body).ok()
+                    .and_then(|v| v["error"]["message"].as_str().or(v["detail"].as_str()).or(v["message"].as_str()).or(v["title"].as_str()).map(str::to_string))
+                    .unwrap_or_else(|| body.chars().take(200).collect());
+                let why: String = why.trim().chars().take(200).collect();
+                app.limits.refused(app, c, model, secs, &why);
                 if attempt >= max_retries.max(1) {
-                    return Ok(r);
+                    return Err(SendErr::Refused(secs, format!("{} ({model})", label(c)), why));
                 }
                 attempt += 1;
             }
@@ -212,7 +233,7 @@ pub async fn call_provider_direct(app: &App, provider_id: &str, prompt: &str) ->
     });
 
     let max_retries = c.retries.unwrap_or(1).min(10);
-    let sent = send_with_retries(app, &c, &body.to_string(), max_retries, true).await;
+    let sent = send_with_retries(app, &c, c.model.trim(), &body.to_string(), max_retries, true).await;
 
     match sent {
         Ok(resp) => {
@@ -306,18 +327,20 @@ pub async fn chat(app: &App, id: &str, body: Bytes, side: bool) -> Response {
     };
 
     let max_retries = c.retries.unwrap_or(1).min(10);
-    let mut sent = send_with_retries(app, &c, &prep_body(&c.model), max_retries, side).await;
+    let mut sent = send_with_retries(app, &c, c.model.trim(), &prep_body(&c.model), max_retries, side).await;
     let mut used_fallback = false;
 
     let has_fallback = !c.fallback_model.trim().is_empty() && c.fallback_model.trim() != c.model.trim();
     if has_fallback {
         let needs_fallback = match &sent {
             Err(SendErr::Limit(..) | SendErr::Daily(..)) => false,
+            // o modelo principal foi recusado (429): o reserva é outro modelo, pode estar livre
+            Err(SendErr::Refused(..)) => true,
             Err(_) => true,
             Ok(r) => !r.status().is_success(),
         };
         if needs_fallback {
-            let fb_res = send_with_retries(app, &c, &prep_body(&c.fallback_model), max_retries, side).await;
+            let fb_res = send_with_retries(app, &c, c.fallback_model.trim(), &prep_body(&c.fallback_model), max_retries, side).await;
             match fb_res {
                 // Usa 'ref r2' para apenas referenciar a resposta ao checar o status, sem movê-la
                 Ok(ref r2) if r2.status().is_success() => {
@@ -349,7 +372,7 @@ pub async fn chat(app: &App, id: &str, body: Bytes, side: bool) -> Response {
             out.body(Body::from_stream(safe_stream(resp, label(&c)))).unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response())
         }
 
-        Err(e @ (SendErr::Limit(..) | SendErr::Daily(..))) => {
+        Err(e @ (SendErr::Limit(..) | SendErr::Daily(..) | SendErr::Refused(..))) => {
             let mut h = axum::http::HeaderMap::new();
             if let Ok(v) = e.wait().unwrap_or(30).to_string().parse::<axum::http::HeaderValue>() {
                 h.insert(axum::http::header::RETRY_AFTER, v);

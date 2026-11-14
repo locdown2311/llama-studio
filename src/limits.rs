@@ -23,10 +23,20 @@ struct Days {
     loaded: bool,
 }
 
+/// Um 429 do provedor para um modelo: até quando esperar e o que ele disse.
+struct Refusal {
+    until: std::time::Instant,
+    at: std::time::Instant,
+    why: String,
+    used: usize,
+}
+
 #[derive(Default)]
 pub struct Limits {
     queues: Mutex<HashMap<String, Arc<Nim>>>,
     days: Mutex<Days>,
+    /// conta|modelo -> último 429
+    refusals: Mutex<HashMap<String, Refusal>>,
 }
 
 pub enum Deny {
@@ -127,13 +137,27 @@ impl Limits {
         Ok(())
     }
 
-    /// A API respondeu 429 mesmo assim: a conta inteira espera `secs`.
-    pub fn block(&self, app: &App, c: &ApiProvider, secs: u64) {
-        if let Some(r) = rule(&app.cfg(), c) {
-            if r.rpm > 0 {
-                self.queue(&r).block(secs);
-            }
+    /// O provedor recusou (429) um modelo: só ele espera `secs` (outro modelo da mesma conta pode estar livre;
+    /// no NVIDIA o 429 com a fila folgada costuma ser o modelo sobrecarregado, não a sua cota).
+    pub fn refused(&self, app: &App, c: &ApiProvider, model: &str, secs: u64, why: &str) {
+        let Some(r) = rule(&app.cfg(), c) else { return };
+        let used = if r.rpm > 0 { self.queue(&r).status().used as usize } else { 0 };
+        let now = std::time::Instant::now();
+        let until = now + std::time::Duration::from_secs(secs.clamp(2, 120));
+        self.refusals.lock().unwrap_or_else(|e| e.into_inner()).insert(format!("{}|{}", r.key, model), Refusal { until, at: now, why: why.to_string(), used });
+        // muitos modelos recusados juntos = é a conta: segura a fila inteira também
+        let now2 = std::time::Instant::now();
+        let recent = self.refusals.lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|(k, v)| k.starts_with(&format!("{}|", r.key)) && now2.saturating_duration_since(v.at).as_secs() < 30).count();
+        if recent >= 3 && r.rpm > 0 {
+            self.queue(&r).block(secs);
         }
+    }
+
+    /// Quanto este modelo ainda tem de esperar por causa de um 429.
+    pub fn model_wait(&self, app: &App, c: &ApiProvider, model: &str) -> std::time::Duration {
+        let Some(r) = rule(&app.cfg(), c) else { return Default::default() };
+        let now = std::time::Instant::now();
+        self.refusals.lock().unwrap_or_else(|e| e.into_inner()).get(&format!("{}|{}", r.key, model)).map(|x| x.until.saturating_duration_since(now)).unwrap_or_default()
     }
 
     /// Para o medidor da conversa.
@@ -151,6 +175,15 @@ impl Limits {
             v["next_secs"] = json!(s.next_secs);
             v["budget"] = json!(budget);
             v["reserve"] = json!(crate::nim::reserve_of(budget));
+        }
+        // o último 429 deste modelo (nos últimos 5 minutos): o medidor diz que foi o provedor, não a fila
+        let now = std::time::Instant::now();
+        if let Some(x) = self.refusals.lock().unwrap_or_else(|e| e.into_inner()).get(&format!("{}|{}", r.key, c.model.trim())) {
+            let ago = now.saturating_duration_since(x.at).as_secs();
+            if ago < 300 {
+                let wait = x.until.saturating_duration_since(now);
+                v["refused"] = json!({ "model": c.model.trim(), "why": x.why, "ago": ago, "wait": if wait.is_zero() { 0 } else { wait.as_secs() + 1 }, "used": x.used });
+            }
         }
         v
     }
