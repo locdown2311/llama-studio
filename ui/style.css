@@ -484,6 +484,8 @@ svg { display: block; flex: none; width: 16px; height: 16px; }
 .send svg { width: 17px; height: 17px; }
 .send.stop { background: var(--stop, #d14343); color: #fff; box-shadow: 0 2px 6px color-mix(in srgb, var(--stop, #d14343) 35%, transparent); }
 .send.stop:hover { background: var(--stop-2, #b93636); }
+.send.stop.stopping { animation: stop-pulse 1s ease-in-out infinite; }
+@keyframes stop-pulse { 50% { opacity: .55; } }
 
 .popover {
   display: none; position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 30;

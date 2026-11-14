@@ -2066,4 +2066,7 @@ const I18N_EN = {
   "sim/não": "yes/no",
   "lista": "list",
   "Salve a skill antes de testar.": "Save the skill before testing.",
+  "Parada forçada.": "Forced stop.",
+  "Parada forçada: a conversa foi liberada.": "Forced stop: the chat was released.",
+  "Parando... clique de novo para forçar a parada": "Stopping... click again to force it",
 };

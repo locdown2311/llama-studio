@@ -91,7 +91,7 @@ async function execTool(name, args, info, tctx, tmsg) {
     if (name === 'read_file' && args?.path && args.offset == null && args.limit == null && tctx.conv && outlineGiven(tctx.conv, args.path, tmsg)) {
       const { next, total } = readCoverage(tctx.conv, args.path, tmsg);
       if (total && next > total) return { content: L('[Você já leu este arquivo inteiro nesta conversa (linhas 1-{0}); o conteúdo está mais acima. Use o que já tem, ou leia de novo só um trecho com offset/limit se ele mudou.]', total), isError: false };
-      const r = await api('/api/tools/call', { name, arguments: { ...args, offset: next, limit: 600 }, allow: tctx.refs, ws: tctx.ws });
+      const r = await api('/api/tools/call', { name, arguments: { ...args, offset: next, limit: 600 }, allow: tctx.refs, ws: tctx.ws }, { signal: tctx.signal });
       return { ...r, content: L('[O sumário deste arquivo já está mais acima. Seguem as linhas a partir da {0}, que você ainda não leu; continue com offset para o resto.]\n', next) + r.content };
     }
     if (name === 'execute_code') return await runCode(args?.code ?? '', tctx, tmsg);
@@ -126,9 +126,14 @@ async function execTool(name, args, info, tctx, tmsg) {
       body.conv = tctx.conv.id;
       cps.push(body.cp);
     }
-    const r = await api('/api/tools/call', body);
+    // a conversa é dona dos comandos (o Parar encerra os dela); o pedido cai junto se a resposta for cancelada
+    if (tctx.conv) body.run = tctx.conv.id;
+    const r = await api('/api/tools/call', body, { signal: tctx.signal });
     return r;
-  } catch (e) { return { content: L('Erro: ') + e.message, isError: true }; }
+  } catch (e) {
+    if (e.name === 'AbortError' || tctx.signal?.aborted) return { content: L('Cancelado pelo usuário.'), isError: true };
+    return { content: L('Erro: ') + e.message, isError: true };
+  }
 }
 
 function recallHistory(args, conv) {

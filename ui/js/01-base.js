@@ -218,9 +218,10 @@ const store = {
   },
 };
 
-async function api(path, body, { raw } = {}) {
+async function api(path, body, { raw, signal } = {}) {
   const isBin = body instanceof Blob || body instanceof ArrayBuffer;
   const r = await fetch(path, {
+    signal,
     method: body === undefined ? 'GET' : 'POST',
     headers: { 'X-Studio': '1', ...(body !== undefined && !isBin ? { 'Content-Type': 'application/json' } : {}) },
     body: body === undefined ? undefined : isBin ? body : JSON.stringify(body),

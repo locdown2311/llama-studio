@@ -92,6 +92,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/skills/save", post(skills_save))
         .route("/api/skills/delete", post(skills_delete))
         .route("/api/skills/test-tool", post(skills_test_tool))
+        .route("/api/tools/stop", post(tools_stop))
         .route("/api/skills/import-path", post(skills_import_path))
         .route("/api/skills/import-zip", post(skills_import_zip))
         .route("/api/skills/open", post(skills_open))
@@ -1336,7 +1337,9 @@ async fn tools_call(State(app): S, b: Bytes) -> Res {
             }
         }
     }
-    let r = tools::call(&app, ws, name, args, &strs(&v, "allow")).await;
+    // o dono dos comandos (a conversa): o Parar encerra os processos dela
+    let owner = st(&v, "run").to_string();
+    let r = crate::shell::OWNER.scope(owner, tools::call(&app, ws, name, args, &strs(&v, "allow"))).await;
     ok(json!({"content": r.content, "isError": r.is_error, "images": r.images}))
 }
 
@@ -1727,4 +1730,14 @@ async fn bench_start(State(app): S, b: Bytes) -> Res {
 async fn bench_cancel() -> Res {
     crate::bench::cancel();
     ok(crate::bench::status())
+}
+
+/// O Parar da conversa: encerra os comandos que ela abriu (e tudo que eles abriram).
+async fn tools_stop(b: Bytes) -> Res {
+    let v = body(&b);
+    let run = st(&v, "run");
+    if run.is_empty() {
+        return Err(bad(L!("Falta a conversa.", "Missing the chat.")));
+    }
+    ok(json!({ "stopped": crate::shell::stop(run) }))
 }

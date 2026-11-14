@@ -404,6 +404,7 @@ async function runAgent(conv) {
     const esc = { fails: 0, sigs: new Set(), repeat: '', done: false };
 
     for (let step = 0; step < g.limit; step++) {
+      if (ac.dead) return; // parada forçada: o resto chega tarde e é ignorado
       const msg = { role: 'assistant', content: '', reasoning: '', tool_calls: [], t0: step === 0 ? t0 : Date.now() };
       conv._step = step;
       conv.messages.push(msg);
@@ -436,6 +437,7 @@ async function runAgent(conv) {
         if (!msg.tool_calls.length) delete msg.tool_calls;
         conv.updatedAt = Date.now(); saveConvs();
       }
+      if (ac.dead) return;
       if (!msg.tool_calls?.length) break;
       // JSON quebrado, nome de parâmetro trocado, número como texto...: conserta pelo esquema antes de executar
       repairCalls(msg.tool_calls, tools);
@@ -471,7 +473,7 @@ async function runAgent(conv) {
           tmsg.status = 'running'; scheduleRender();
           const ts = performance.now();
           reads.push(execTool(tc.function.name, parseArgs(tc.function.arguments) ?? tc.function.arguments, info, tctx, tmsg).then((r) => {
-            tmsg.ms = performance.now() - ts; tmsg.content = r.content; tmsg.isError = r.isError; tmsg.status = r.isError ? 'error' : 'ok'; saveConvs(); scheduleRender();
+            if (ac.dead) return; tmsg.ms = performance.now() - ts; tmsg.content = r.content; tmsg.isError = r.isError; tmsg.status = r.isError ? 'error' : 'ok'; saveConvs(); scheduleRender();
           }));
           continue;
         }
@@ -485,7 +487,7 @@ async function runAgent(conv) {
           tmsg.status = 'running'; scheduleRender();
           const ts = performance.now();
           parallel.push(runMultiExplore(parseArgs(tc.function.arguments) || {}, tctx, tmsg).then((r) => {
-            tmsg.ms = performance.now() - ts; tmsg.content = r.content; tmsg.isError = r.isError; tmsg.status = r.isError ? 'error' : 'ok'; saveConvs(); scheduleRender();
+            if (ac.dead) return; tmsg.ms = performance.now() - ts; tmsg.content = r.content; tmsg.isError = r.isError; tmsg.status = r.isError ? 'error' : 'ok'; saveConvs(); scheduleRender();
           }));
           continue;
         }
@@ -519,6 +521,7 @@ async function runAgent(conv) {
         tmsg.status = 'running'; scheduleRender();
         const ts = performance.now();
         const r = await execTool(tc.function.name, parseArgs(tc.function.arguments) ?? tc.function.arguments, info, tctx, tmsg);
+        if (ac.dead) return;
         tmsg.ms = performance.now() - ts;
         tmsg.content = r.content; tmsg.isError = r.isError; tmsg.status = r.isError ? 'error' : 'ok';
         if (r.images?.length) { tmsg._images = r.images; images.push({ name: tc.function.name, images: r.images }); }
@@ -542,7 +545,7 @@ async function runAgent(conv) {
         saveConvs(); scheduleRender();
       }
       if (explores.length) {
-        const done = (e, r) => { e.tmsg.ms = performance.now() - e.ts; e.tmsg.content = r.content; e.tmsg.isError = r.isError; e.tmsg.status = r.isError ? 'error' : 'ok'; saveConvs(); scheduleRender(); };
+        const done = (e, r) => { if (ac.dead) return; e.tmsg.ms = performance.now() - e.ts; e.tmsg.content = r.content; e.tmsg.isError = r.isError; e.tmsg.status = r.isError ? 'error' : 'ok'; saveConvs(); scheduleRender(); };
         const run = (e, apiId) => runExplorer(e.args, tctx, e.tmsg, apiId).catch((err) => { if (ac.signal.aborted) throw err; return { content: String(err.message || err), isError: true }; }).then((r) => done(e, r));
         // um só: como antes (a primeira API da equipe, ou o modelo local); vários: cada API pega o próximo ao terminar
         // subagentes que escrevem não dividem arquivos
@@ -587,9 +590,19 @@ async function runAgent(conv) {
   } catch (e) {
     if (!(e.name === 'AbortError' || ac.signal.aborted)) conv.messages.push({ role: 'error', content: e.message || String(e) });
   } finally {
+    // parada forçada: a conversa já foi liberada (e talvez já tenha outra resposta rodando)
+    if (!ac.dead) finishRun(conv, ac);
+  }
+}
+
+/** Fecha uma resposta: marca o que ficou pela metade, libera a conversa e segue a fila. */
+function finishRun(conv, ac, forced) {
+  {
     // só diz "cancelado pelo usuário" se foi o usuário; erro interno não é cancelamento
-    const why = ac.signal.aborted ? L('Cancelado pelo usuário.') : L('Não executada: a resposta parou por um erro do studio (veja a mensagem abaixo).');
+    const why = forced || (ac.signal.aborted ? L('Cancelado pelo usuário.') : L('Não executada: a resposta parou por um erro do studio (veja a mensagem abaixo).'));
     const stuck = ac.signal.aborted ? 'denied' : 'error';
+    if (forced) for (const m of conv.messages) if (m.role === 'assistant') delete m.streaming;
+    const asked = new Set(conv.messages.flatMap((m) => [m.tool_call_id, ...(m.asks || []).map((x) => x.id)]));
     for (const m of conv.messages) if (m.role === 'tool') {
       delete m.asks;
       if (['pending', 'running', 'approval', 'audit'].includes(m.status)) { m.status = stuck; m.isError = true; m.content = m.content || why; }
@@ -600,7 +613,9 @@ async function runAgent(conv) {
     setTimeout(() => maybeSummarizeMap(conv), 1500); // pré-leitura: só quando o servidor ficar livre
     const last = conv.messages[conv.messages.length - 1];
     if (last?.role === 'assistant' && !last.content && !last.reasoning && !last.tool_calls?.length) conv.messages.pop();
-    S.runs.delete(conv.id); S.waiting.delete(conv.id);
+    if (S.runs.get(conv.id) === ac) S.runs.delete(conv.id);
+    S.waiting.delete(conv.id);
+    for (const [id, fn] of S.approvals) if (asked.has(id)) { S.approvals.delete(id); fn('deny'); }
     updateBusy();
     conv.updatedAt = Date.now();
     saveConvs(); renderConvList();

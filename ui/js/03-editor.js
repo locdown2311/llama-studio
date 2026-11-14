@@ -215,7 +215,10 @@ function updateSendBtn() {
   send.classList.toggle('stop', busy && !queueMode);
   sendRing();
   send.classList.toggle('queue', queueMode);
-  send.title = queueMode ? L('Pôr na fila (Enter) · Esc para parar a resposta') : busy ? L('Parar (Esc)') : L('Enviar (Enter)');
+  // já pediu para parar e ainda não parou: o próximo clique força
+  const stopping = busy && !queueMode && !!S.runs.get(cur()?.id)?.stopAt;
+  send.classList.toggle('stopping', stopping);
+  send.title = queueMode ? L('Pôr na fila (Enter) · Esc para parar a resposta') : stopping ? L('Parando... clique de novo para forçar a parada') : busy ? L('Parar (Esc)') : L('Enviar (Enter)');
   send.setAttribute('aria-label', send.title);
 }
 

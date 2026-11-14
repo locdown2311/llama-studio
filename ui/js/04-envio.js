@@ -364,11 +364,29 @@ function drawQueue() {
   });
 }
 
-function stop() {
-  const c = cur();
+/* Parar: cancela a resposta e encerra os comandos que a conversa abriu (a árvore inteira, no servidor). Se algo
+   ainda segurar a resposta (um conector que não responde, um passo travado), o segundo clique, ou 6 s depois,
+   força: a conversa é liberada na hora e o que chegar depois é ignorado. */
+const STOP_FORCE_MS = 6000;
+function stop(c = cur()) {
   const ac = c && S.runs.get(c.id);
   if (!ac) return;
+  if (ac.stopAt) { forceStop(c); return; }
+  ac.stopAt = Date.now();
   ac.abort();
+  api('/api/tools/stop', { run: c.id }).catch(() => {});
+  renderComposer();
+  setTimeout(() => { if (S.runs.get(c.id) === ac) forceStop(c); }, STOP_FORCE_MS);
+}
+
+function forceStop(c) {
+  const ac = S.runs.get(c.id);
+  if (!ac || ac.dead) return;
+  ac.dead = true;
+  ac.abort();
+  api('/api/tools/stop', { run: c.id }).catch(() => {});
+  finishRun(c, ac, L('Parada forçada.'));
+  toast(L('Parada forçada: a conversa foi liberada.'));
 }
 
 function collectRefs(conv) {

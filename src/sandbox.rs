@@ -185,6 +185,8 @@ async fn sh_in(name: &str, body: &str, secs: u64) -> Result<(Option<i32>, String
     let mut c = wsl();
     c.args(["-d", name, "-u", "root", "-e", "sh", "-s"]).stdin(std::process::Stdio::piped());
     let mut child = c.spawn().map_err(|e| LF!("Não consegui rodar o wsl.exe: {e}", "Could not run wsl.exe: {e}"))?;
+    // o Parar (e o tempo esgotado) encerram também o que roda dentro da distro
+    let mut guard = crate::shell::Guard::new(child.id(), Some(name));
     if let Some(mut si) = child.stdin.take() {
         let _ = si.write_all(body.as_bytes()).await;
         drop(si);
@@ -203,7 +205,10 @@ async fn sh_in(name: &str, body: &str, secs: u64) -> Result<(Option<i32>, String
     };
     let res = tokio::time::timeout(Duration::from_secs(secs), async { tokio::join!(ro, re, child.wait()) }).await;
     match res {
-        Ok((o, e, st)) => Ok((st.ok().and_then(|s| s.code()), String::from_utf8_lossy(&o).to_string(), wsl_text(&e))),
+        Ok((o, e, st)) => {
+            guard.done();
+            Ok((st.ok().and_then(|s| s.code()), String::from_utf8_lossy(&o).to_string(), wsl_text(&e)))
+        }
         Err(_) => Err(LF!("Tempo esgotado ({secs}s). O comando foi encerrado.", "Timed out ({secs}s). The command was stopped.")),
     }
 }
