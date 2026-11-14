@@ -248,7 +248,7 @@ const CONCISE_NOTE = L('Seja direto e econômico: responda só o que foi pedido,
 const LOOP_WARN = 3, LOOP_STOP = 4, ERR_WARN = 3, ERR_STOP = 5;
 function stepGuard(base) {
   return { base, limit: base, cap: base * 3, seen: new Map(), errs: new Map(), warned: new Set(), lastWarn: -99, writes: 0, mark: { done: 0, writes: 0 }, stop: '',
-    files: new Map(), lastWrite: -1, lastRun: -1, checked: false };
+    files: new Map(), lastWrite: -1, lastRun: -1, checked: false, preflown: false };
 }
 // mesmo arquivo editado tantas vezes numa resposta: o modelo provavelmente está consertando em pedaços o que quebrou
 const EDIT_WARN = 5;
@@ -264,6 +264,41 @@ function needsCheck(conv, g) {
 function checkNote(conv, g) {
   const files = [...g.files.keys()].slice(0, 12);
   return L('(Nota do studio — antes de concluir, confira o trabalho.)\n1. Releia o pedido original do usuário e liste cada coisa que ele pediu.\n2. Se há algo para rodar (build, testes, o script, o programa), rode agora e leia a saída. Se não há, releia os arquivos alterados ({0}) e confira que estão completos e coerentes.\n3. Corrija o que não estiver certo. Só então responda com o resumo final: o que foi feito, como você conferiu e o que ficou pendente.', files.join(', ') || L('os que você mudou'));
+}
+/** Verificador determinístico antes de concluir (uma vez por resposta): fatos checados em código, sem
+   gastar instrução — nada a apontar custa zero tokens. Devolve uma nota (ou ''). A checagem 3 do plano
+   (comando citado fora do PATH) ficou de fora: exigiria endpoint novo e o erro já aparece no run_command. */
+const PREFLIGHT_CMDS = [['Cargo.toml', 'cargo build'], ['package.json', 'npm test'], ['pyproject.toml', 'uv run pytest'], ['Makefile', 'make'], ['go.mod', 'go test ./...']];
+const PREFLIGHT_PATH = /([A-Za-z0-9_./\\-]+\.(?:rs|js|mjs|cjs|ts|tsx|jsx|py|toml|json|md|html|css|sh|ps1|bat|cmd|c|h|cpp|hpp|go|java|xml|yml|yaml|ini|cfg|txt|lock))\b/gi;
+const PREFLIGHT_CLAIM = /[^\n]{0,40}\b(?:criei|criado|salvei|escrevi|alterei|modifiquei|renomeei|exclu[ií]|apaguei|mov[ií]|editei|gere[iu]|adicionei|removi|deixei em|está em|ficou em|salvo em)\b[^\n]{0,90}/gi;
+/** Caminhos que a resposta final afirma ter criado/alterado (para o verificador conferir no disco). */
+function preflightPaths(text) {
+  const out = [];
+  for (const m of String(text || '').matchAll(PREFLIGHT_CLAIM)) {
+    for (const p of m[0].matchAll(PREFLIGHT_PATH)) {
+      const v = p[1];
+      if (!out.includes(v)) out.push(v);
+    }
+  }
+  return out;
+}
+async function preflight(conv, g, msg) {
+  const notes = [];
+  const text = splitThink(msg.content || '').text;
+  // 1. alterou arquivos e nada rodou depois: o projeto tem comando conhecido?
+  if (g.writes > 0 && g.lastRun < g.lastWrite) {
+    for (const [f, cmd] of PREFLIGHT_CMDS) {
+      const st = await api('/api/stat', { path: f, ws: wsOf(conv) }).catch(() => null);
+      if (st?.exists) { notes.push(L('(Nota do studio — verificação automática) Você alterou arquivos ({0}) e nenhum comando rodou depois da última alteração. O projeto tem {1}: rode-o agora e leia a saída antes de concluir.', [...g.files.keys()].slice(0, 6).join(', '), cmd)); break; }
+    }
+  }
+  // 2. caminho citado como criado/alterado que não existe na pasta de trabalho (alucinação de arquivo)
+  for (const p of preflightPaths(text)) {
+    if (g.files.has(p.replace(/\\/g, '/').toLowerCase())) continue; // a ferramenta gravou: existe
+    const st = await api('/api/stat', { path: p, ws: wsOf(conv) }).catch(() => null);
+    if (st && st.exists === false) { notes.push(L('(Nota do studio — verificação automática) Você disse que {0} foi criado ou alterado, mas esse arquivo não existe na pasta de trabalho. Confira o caminho e o que foi realmente gravado.', p)); break; }
+  }
+  return notes.join('\n');
 }
 function todosDone(conv) { return (conv.todos || []).filter((t) => t.status === 'done').length; }
 function noteOn(r, text) { r.studioNote = (r.studioNote ? r.studioNote + '\n' : '') + text; }
@@ -478,6 +513,17 @@ async function runAgent(conv) {
       if (ac.dead) return;
       if (msg.looped) continue;
       if (!msg.tool_calls?.length) {
+        // verificador determinístico (uma vez por resposta): fatos checados em código antes de concluir
+        if (!g.preflown && step < g.limit - 2) {
+          g.preflown = true;
+          const pre = await preflight(conv, g, msg);
+          if (pre) {
+            conv.messages.push({ role: 'user', hidden: true, note: true, content: pre });
+            conv._thinkNext = true;
+            saveConvs(); scheduleRender();
+            continue;
+          }
+        }
         // ia terminar, mas mudou arquivos e não conferiu: pede a checagem (pensando, no econômico/sanduíche)
         if (needsCheck(conv, g) && step < g.limit - 2) {
           g.checked = true;

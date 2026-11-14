@@ -52,6 +52,8 @@ const I18N_EN = {
 "## Você": "## You",
 "% do contexto": "% of the context",
 "(Nota do studio: o modelo anterior{0} {1} nesta tarefa. Você é um modelo maior assumindo daqui. Releia os erros acima, descubra a causa e, se preciso, siga por outro caminho.)": "(Studio note: the previous model{0} {1} on this task. You are a larger model taking over from here. Re-read the errors above, find the cause and, if needed, take another path.)",
+"(Nota do studio — verificação automática) Você alterou arquivos ({0}) e nenhum comando rodou depois da última alteração. O projeto tem {1}: rode-o agora e leia a saída antes de concluir.": "(Studio note — automatic check) You changed files ({0}) and no command ran after the last change. This project has {1}: run it now and read the output before concluding.",
+"(Nota do studio — verificação automática) Você disse que {0} foi criado ou alterado, mas esse arquivo não existe na pasta de trabalho. Confira o caminho e o que foi realmente gravado.": "(Studio note — automatic check) You said {0} was created or changed, but that file does not exist in the workspace. Check the path and what was actually written.",
 "(nenhum ainda)": "(none yet)",
 "(sem saída)": "(no output)",
 "+ Começar uma conversa aqui": "+ Start a chat here",
