@@ -230,7 +230,8 @@ async fn route(State(h): State<H>, req: Request) -> Response {
 
 pub fn client_ip(h: &Hub, headers: &HeaderMap, peer: Option<std::net::SocketAddr>) -> String {
     if h.cfg.trust_proxy {
-        if let Some(ip) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()).and_then(|v| v.split(',').next()) {
+        // o último da lista é o que o proxy da frente viu (os anteriores vêm do cliente e podem ser forjados)
+        if let Some(ip) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()).and_then(|v| v.rsplit(',').next()).filter(|v| !v.trim().is_empty()) {
             return ip.trim().to_string();
         }
     }

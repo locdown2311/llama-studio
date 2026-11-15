@@ -54,6 +54,34 @@ O modelo já tem o que o studio precisa:
 - limite de 200 MB nos envios;
 - `X-Forwarded-For` só com o IP real.
 
+### Com o Nginx Proxy Manager
+
+1. Descubra a rede do contêiner do NPM e ponha o nome dela no `.env`, como `NPM_NETWORK=npm_default`:
+   ```sh
+   docker inspect $(docker ps -qf ancestor=jc21/nginx-proxy-manager) -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}'
+   ```
+2. Suba com o arquivo extra, que põe o hub na rede do NPM com o nome `studio-hub`:
+   ```sh
+   docker compose -f docker-compose.yml -f docker-compose.npm.yml up -d
+   ```
+3. No NPM, em **Proxy Hosts → Add Proxy Host**:
+   - **Details**:
+     - Domain: `studio.seudominio.com`;
+     - Scheme: `http`;
+     - Forward Hostname: `studio-hub`;
+     - Port: `8700`;
+     - marque **Websockets Support**. Ele é obrigatório, porque o túnel do PC usa WebSocket.
+   - **SSL**: escolha "Request a new SSL Certificate" e marque **Force SSL** e **HTTP/2**.
+   - **Advanced**, em Custom Nginx Configuration:
+     ```nginx
+     proxy_buffering off;
+     proxy_request_buffering off;
+     proxy_read_timeout 3600s;
+     proxy_send_timeout 3600s;
+     client_max_body_size 200m;
+     ```
+     O `proxy_buffering off` faz o chat aparecer enquanto é gerado. Os timeouts deixam as tarefas longas terminarem.
+
 ### Compilar no próprio servidor (em vez de baixar)
 
 Rode na raiz do repositório:

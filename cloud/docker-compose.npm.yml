@@ -1,0 +1,13 @@
+# Com o Nginx Proxy Manager (em contêiner): põe o hub na rede dele, com o nome "studio-hub".
+#   docker compose -f docker-compose.yml -f docker-compose.npm.yml up -d
+# NPM_NETWORK = a rede do contêiner do NPM (veja com: docker network ls).
+services:
+  hub:
+    networks:
+      npm:
+        aliases: [studio-hub]
+
+networks:
+  npm:
+    external: true
+    name: ${NPM_NETWORK:-npm_default}
