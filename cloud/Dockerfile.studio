@@ -23,7 +23,19 @@ RUN set -eux; \
       cd /opt/ghidra/support/gradle && ./gradlew --no-daemon buildNatives; \
       rm -rf /root/.gradle /opt/ghidra/support/gradle/.gradle; \
     fi; \
-    find /opt/ghidra/Ghidra/Features/Decompiler -name decompile -path "*linux*" | grep -q . || { echo "decompilador nativo não encontrado"; exit 1; }
+    find /opt/ghidra/Ghidra/Features/Decompiler -name decompile -path "*linux*" | grep -q . || { echo "decompilador nativo não encontrado"; exit 1; }; \
+    du -sh /opt/ghidra; \
+    # enxuga: o que o modo sem janela não usa (documentação, código-fonte, servidor, depurador, extensões
+    # opcionais, binários de outros sistemas e processadores raros)
+    cd /opt/ghidra; \
+    rm -rf docs server Extensions Ghidra/Extensions Ghidra/Debug support/gradle; \
+    find . -name "*-src.zip" -delete; \
+    find Ghidra -type d -path "*/os/*" \( -name "win_*" -o -name "mac_*" -o -name "freebsd_*" \) -prune -exec rm -rf {} +; \
+    if [ "$arch" = "aarch64" ]; then find Ghidra -type d -name linux_x86_64 -prune -exec rm -rf {} +; else find Ghidra -type d -name linux_arm_64 -prune -exec rm -rf {} +; fi; \
+    keep=" x86 ARM AARCH64 MIPS PowerPC RISCV JVM Dalvik DATA 8051 68000 SuperH Atmel tricore Xtensa V850 "; \
+    for d in Ghidra/Processors/*; do n=$(basename "$d"); case "$keep" in *" $n "*) ;; *) rm -rf "$d";; esac; done; \
+    find Ghidra -type f -path "*/os/linux_*/*" -exec strip --strip-unneeded {} + 2>/dev/null || true; \
+    du -sh /opt/ghidra
 
 FROM debian:trixie-slim
 # ferramentas que os agentes usam na pasta da nuvem (engenharia reversa estática incluída)
