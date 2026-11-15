@@ -123,13 +123,15 @@ impl Limits {
     }
 
     /// Espera a vaga do minuto e confere o dia. `side`: explorador, auditor, tarefa de fundo.
-    pub async fn acquire(&self, app: &App, c: &ApiProvider, side: bool) -> Result<(), Deny> {
+    /// `wait` falso: sem vaga agora, volta na hora (a rotação de chaves tenta a próxima chave).
+    pub async fn acquire(&self, app: &App, c: &ApiProvider, side: bool, wait: bool) -> Result<(), Deny> {
         let Some(r) = rule(&app.cfg(), c) else { return Ok(()) };
         if r.rpd > 0 && self.day_used(app, &r.key) >= r.rpd {
             return Err(Deny::Daily(r.rpd));
         }
         if r.rpm > 0 {
-            self.queue(&r).acquire(side).await.map_err(Deny::Wait)?;
+            let q = self.queue(&r);
+            if wait { q.acquire(side).await } else { q.try_now(side) }.map_err(Deny::Wait)?;
         }
         if r.rpd > 0 || r.rpm > 0 {
             self.count_day(app, &r.key);

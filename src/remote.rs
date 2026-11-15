@@ -167,7 +167,7 @@ async fn send_with_retries(app: &App, c: &ApiProvider, model: &str, body_str: &s
         // API com limite (NIM ou configurado): espera uma vaga na janela de 60 s em vez de bater no limite
         // (as novas tentativas também contam); o limite do dia recusa na hora
         if limited {
-            match app.limits.acquire(app, c, side).await {
+            match app.limits.acquire(app, c, side, !rotating).await {
                 Ok(()) => {}
                 Err(crate::limits::Deny::Wait(w)) => return Err(SendErr::Limit(w, label(c))),
                 Err(crate::limits::Deny::Daily(d)) => return Err(SendErr::Daily(d, label(c))),

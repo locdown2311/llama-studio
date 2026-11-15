@@ -151,6 +151,11 @@ impl Nim {
         }
     }
 
+    /// Pega a vaga só se estiver livre agora (com rotação de chaves: sem vaga, vai para a próxima chave).
+    pub fn try_now(&self, side: bool) -> Result<(), u64> {
+        self.lock().try_take(side, Instant::now()).map_err(|w| w.as_secs().max(1))
+    }
+
     /// O NIM respondeu 429 mesmo assim (outro programa na mesma chave, relógio): ninguém pede por `secs`.
     pub fn block(&self, secs: u64) {
         let until = Instant::now() + Duration::from_secs(secs.clamp(2, 60));
