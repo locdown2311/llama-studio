@@ -127,13 +127,15 @@ impl Boxes {
     }
 
     /// Liga (ou cria) o contêiner do usuário e devolve o endereço dele na rede interna.
-    pub async fn ensure(&self, h: &crate::Hub, u: &User) -> Result<String, String> {
+    /// `page`: a página do studio está abrindo agora. Se o contêiner ligado for de uma imagem velha e não
+    /// estiver rodando nenhuma tarefa, troca já (senão a interface nova só chegaria quando ele desligasse).
+    pub async fn ensure(&self, h: &crate::Hub, u: &User, page: bool) -> Result<String, String> {
         let addr = h.cfg.box_addr.replace("{id}", &u.id.to_string());
         {
             let mut st = self.st.lock().unwrap();
             let s = st.entry(u.id).or_default();
             s.last = Some(Instant::now());
-            if s.running && s.checked.is_some_and(|t| t.elapsed() < Duration::from_secs(60)) {
+            if !page && s.running && s.checked.is_some_and(|t| t.elapsed() < Duration::from_secs(60)) {
                 return Ok(addr);
             }
         }
@@ -157,7 +159,7 @@ impl Boxes {
         let state = docker(h, &["inspect", "-f", "{{.State.Running}} {{.Image}}", &n]).await.ok();
         match state.as_deref().and_then(|s| s.split_once(' ')) {
             // ligado fica como está (imagem nova só entra quando ele desligar, para não cortar uma tarefa)
-            Some(("true", _)) => {}
+            Some(("true", img)) if img == want || !page || self.busy(h, &addr, u).await => {}
             Some((_, img)) if img == want => {
                 self.make_room(h, u.id).await?;
                 docker(h, &["start", &n]).await?;
@@ -188,6 +190,14 @@ impl Boxes {
         s.checked = Some(Instant::now());
         s.last = Some(Instant::now());
         Ok(addr)
+    }
+
+    /// O studio da nuvem está rodando alguma tarefa em segundo plano?
+    async fn busy(&self, h: &crate::Hub, addr: &str, u: &User) -> bool {
+        let r = h.http.get(format!("{addr}/api/jobs")).header("host", "127.0.0.1").header("x-studio", "1").header("x-hub-secret", &u.secret).timeout(Duration::from_secs(3)).send().await;
+        let Ok(r) = r else { return false };
+        let v: Value = r.bytes().await.ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        v["jobs"].as_array().is_some_and(|a| a.iter().any(|j| matches!(j["state"].as_str(), Some("queued" | "running"))))
     }
 
     /// Respeita o máximo de contêineres ligados: desliga o mais parado (há mais de 2 min sem uso) ou recusa.

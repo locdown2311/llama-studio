@@ -226,7 +226,7 @@ async fn route(State(h): State<H>, req: Request) -> Response {
             }
         }
     } else {
-        match h.boxes.ensure(&h, &u).await {
+        match h.boxes.ensure(&h, &u, is_page).await {
             Ok(addr) => boxes::forward(&h, &addr, &u, req).await,
             Err(e) => {
                 let mut r = err(StatusCode::SERVICE_UNAVAILABLE, &e);
