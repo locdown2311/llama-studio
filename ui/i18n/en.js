@@ -2269,4 +2269,11 @@ const I18N_EN = {
   "Essa conversa está rodando em segundo plano. Espere terminar ou pare.": "This chat is running in the background. Wait for it to finish or stop it.",
   "Rodar as tarefas em segundo plano": "Run tasks in the background",
   "O agente roda no studio (do PC ou da nuvem), não nesta tela: dá para fechar o app ou apagar a tela, e chega uma notificação quando termina. Padrão: ligado no celular.": "The agent runs in the studio (on the PC or in the cloud), not on this screen: you can close the app or turn off the screen, and a notification arrives when it's done. Default: on for phones.",
+  "maior que 200 MB": "larger than 200 MB",
+  "Não consegui enviar {0}: {1}": "Couldn't send {0}: {1}",
+  "Enviar arquivos": "Send files",
+  "Deste aparelho para a pasta anexos do studio": "From this device to the studio's attachments folder",
+  "Copia para a pasta anexos do espaço de trabalho": "Copies into the workspace's attachments folder",
+  "Foto ou imagem": "Photo or image",
+  "Da galeria ou da câmera": "From the gallery or the camera",
 };

@@ -451,9 +451,38 @@ function fillWsPop() {
     h('button.menu-item', { onclick: () => { closePops(); toggleWs(); } }, ic('panel'), $('#ws').classList.contains('hidden') ? L('Mostrar painel de arquivos') : L('Ocultar painel de arquivos')));
 }
 
+/** Envia arquivos deste aparelho para a pasta "anexos" do espaço de trabalho (do PC ou da nuvem) e põe a
+ *  etiqueta na mensagem. No celular e em outro navegador é o único jeito de mandar um arquivo. */
+async function uploadFiles(files) {
+  saveRange();
+  for (const f of files) {
+    const r = addRef({ name: f.name || 'arquivo', status: 'loading' });
+    try {
+      if (f.size > 200 * 1024 * 1024) throw new Error(L('maior que 200 MB'));
+      const up = await api('/api/ws/upload?name=' + encodeURIComponent(f.name || 'arquivo') + '&ws=' + encodeURIComponent(S.ws.path), f);
+      r.path = up.path; r.name = basename(up.path); r.status = 'ok';
+      if (/^image\//.test(f.type)) {
+        const data = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => res(null); fr.readAsDataURL(f); });
+        if (data) S.imgData.set(up.path, data);
+      }
+    } catch (e) { r.status = 'missing'; toast(L('Não consegui enviar {0}: {1}', f.name, e.message), 'err'); }
+    updateRefPill(r);
+  }
+  refreshTree(); updatePickers();
+}
+function pickUpload(accept) {
+  const input = h('input', { type: 'file', multiple: true, hidden: true });
+  if (accept) input.accept = accept;
+  input.onchange = () => { if (input.files?.length) uploadFiles([...input.files]); input.remove(); };
+  document.body.append(input);
+  input.click();
+}
+
 function fillPlusPop() {
   const pop = $('#pop-plus'); pop.innerHTML = '';
   pop.append(h('div.pop-head', null, h('span', null, L('Inserir na mensagem'))),
+    h('button.menu-item', { onclick: () => { closePops(); pickUpload(); } }, ic('paperclip'), h('span.mi-main', null, L('Enviar arquivos'), h('span.mi-sub', null, HUB ? L('Deste aparelho para a pasta anexos do studio') : L('Copia para a pasta anexos do espaço de trabalho')))),
+    h('button.menu-item', { onclick: () => { closePops(); pickUpload('image/*'); } }, ic('image'), h('span.mi-main', null, L('Foto ou imagem'), h('span.mi-sub', null, L('Da galeria ou da câmera')))),
     h('button.menu-item', { onclick: async () => {
       closePops();
       const p = await pickPath({ title: L('Referenciar arquivo ou pasta'), mode: 'any', start: S.ws.path });
@@ -678,6 +707,11 @@ async function preloadImgs(conv) {
 function handleDrop(dt) {
   const internal = dt.getData('application/x-studio-path');
   if (internal) { try { addRef(JSON.parse(internal)); } catch { /* ok */ } return; }
+  // aberto pela central (outro aparelho): o arquivo não está no computador do studio, então vai enviado
+  if (HUB) {
+    const fs = [...(dt.items || [])].filter((i) => i.kind === 'file' && !i.webkitGetAsEntry?.()?.isDirectory).map((i) => i.getAsFile()).filter(Boolean);
+    if (fs.length) { uploadFiles(fs); return; }
+  }
   const uris = (dt.getData('text/uri-list') || '').split(/\r?\n/).filter((l) => l && !l.startsWith('#'));
   const fromUri = uris.map(fileUriToPath).filter(Boolean);
   if (fromUri.length) { fromUri.forEach(statRef); return; }

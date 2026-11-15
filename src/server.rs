@@ -91,7 +91,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/workspace", post(set_workspace))
         .route("/api/ws/list", get(ws_list))
         .route("/api/ws/read", get(ws_read))
-        .route("/api/ws/upload", post(ws_upload))
+        .route("/api/ws/upload", post(ws_upload).layer(DefaultBodyLimit::max(200 * 1024 * 1024)))
         .route("/api/reveal", post(reveal))
         .route("/api/export", post(export_conv))
         .route("/api/browse", get(browse))
