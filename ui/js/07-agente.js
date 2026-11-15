@@ -439,7 +439,7 @@ async function runAgent(conv) {
       (S.settings.projMap === true ? ensureMap(conv) : Promise.resolve()).then(() => api('/api/context', { ws: wsOf(conv), skills: base, skillCatalog: skillCat, groups, refs: [], lazy, map: S.settings.projMap === true, packs: packLevels(), now: new Date().toLocaleDateString(LOCALE, { dateStyle: 'full' }) })),
     ]);
     pruneTrack(conv, (offered || []).filter((n) => !(conv.pruned || []).includes(n)));
-    if (!started && conv.pruned.length && savedTok) conv.messages.push({ role: 'notice', icon: 'sparkles', content: L('Economia: {0} ferramentas sem uso neste projeto ficaram de fora (~{1} tokens a menos por pedido). Se precisar, o modelo traz de volta.', conv.pruned.length, savedTok) });
+    if (!started && conv.pruned.length && savedTok) conv.messages.push({ role: 'notice', icon: 'dollar', content: L('Economia: {0} ferramentas sem uso neste projeto ficaram de fora (~{1} tokens a menos por pedido). Se precisar, o modelo traz de volta.', conv.pruned.length, savedTok) });
     // o catálogo dos conectores também fica congelado por conversa: conector ligado depois entra como nota
     // na mensagem; desligado continua listado (a chamada só falha) em vez de fazer o servidor reler tudo
     let catalogSys = catalog || '';

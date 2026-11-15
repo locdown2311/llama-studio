@@ -300,7 +300,7 @@ function showModelStats() {
           h('td', null, sec(r.ms, r.msN)), h('td', null, sec(r.ttft, r.ttftN))))))
         : h('p.muted', null, L('Ainda não há respostas suficientes para comparar.')),
       h('small.muted', null, L('Erros = chamadas de ferramenta que falharam (sem contar cancelamentos e permissões negadas). Destacado: o que menos erra entre os que fizeram 20+ chamadas. O 1º sinal só existe nas respostas desta versão em diante.'))),
-    foot: [h('button.btn', { onclick: () => { m.close(); openSettings('economy'); } }, ic('sparkles'), L('Economia e aprendizado')), h('span.spacer'), h('button.btn', { onclick: () => m.close() }, L('Fechar'))],
+    foot: [h('button.btn', { onclick: () => { m.close(); openSettings('economy'); } }, ic('dollar'), L('Economia e aprendizado')), h('span.spacer'), h('button.btn', { onclick: () => m.close() }, L('Fechar'))],
   });
 }
 

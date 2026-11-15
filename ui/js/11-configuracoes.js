@@ -108,7 +108,7 @@ function renderSettings() {
         (st.ev[k] || []).length ? h('small', null, L('{0} correções esperando a próxima revisão', st.ev[k].length)) : null));
     };
     drawEco();
-    section('economy', L('Economia de tokens'), 'sparkles', L('O studio aprende com as conversas anteriores do mesmo projeto para gastar menos nas próximas, sem mexer no modelo. Adaptado do TokenEconomizer (Microsoft Research).'),
+    section('economy', L('Economia de tokens'), 'dollar', L('O studio aprende com as conversas anteriores do mesmo projeto para gastar menos nas próximas, sem mexer no modelo. Adaptado do TokenEconomizer (Microsoft Research).'),
       sw(L('Guardar ferramentas sem uso'), L('Ferramentas que ninguém usa no projeto há {0} pedidos (em 2+ conversas) ou há {1} conversas saem da lista enviada ao modelo. Ele pode trazer de volta quando precisar. Cada ferramenta a menos são centenas de tokens em todo pedido.', TE.pruneP, TE.pruneS), teOn('toolPrune'), (v) => put2({ toolPrune: v })),
       sw(L('Juiz de laços'), L('Quando o agente repete a mesma ação ou o mesmo erro, um modelo rápido (a API do auditor ou de fundo) decide se ele travou. Só então ele recebe uma orientação para mudar de rumo; se continuar, a resposta para. Sem juiz, vale o aviso fixo.'), teOn('loopJudge'), (v) => put2({ loopJudge: v })),
       sw(L('Aprender fatos do projeto'), L('Correções que o agente faz ("falhou assim, funcionou assado") viram fatos do projeto depois de confirmados em {0} conversas, e entram no começo das próximas. A revisão roda numa API de fundo.', TE.confirm), teOn('microSkills'), (v) => { put2({ microSkills: v }); drawEco(); }),
