@@ -11,7 +11,7 @@ O Ghidra está instalado em `/opt/ghidra` e roda sem janela pelo comando `ghidra
 - `ghidra-decompile arquivo.exe main 0x401000` decompila só essas funções, por nome ou por endereço.
 - `ghidra-decompile arquivo.exe` decompila tudo, até 200 funções (`GHIDRA_LIMIT` muda o limite).
 
-A primeira chamada num binário faz a análise completa, que leva de segundos a minutos. As seguintes reaproveitam a análise guardada em `~/.ghidra-projetos`.
+A primeira chamada num binário faz a análise completa, que leva de segundos a minutos. As seguintes reaproveitam a análise guardada em `~/ghidra-projetos`.
 
 Como trabalhar:
 

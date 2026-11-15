@@ -3,7 +3,7 @@
 #   ghidra-decompile BINARIO                 decompila as funções (até GHIDRA_LIMIT, padrão 200)
 #   ghidra-decompile BINARIO main 0x401000   só estas (nome ou endereço)
 #   ghidra-decompile --list BINARIO          lista funções e importações
-# A análise fica guardada em ~/.ghidra-projetos (a segunda chamada no mesmo binário é rápida).
+# A análise fica guardada em ~/ghidra-projetos (a segunda chamada no mesmo binário é rápida).
 # Memória: GHIDRA_MAXMEM (padrão 768M).
 set -e
 script=Decompile.java
@@ -11,7 +11,7 @@ if [ "$1" = "--list" ]; then script=ListFunctions.java; shift; fi
 if [ -z "$1" ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 0; fi
 bin=$(readlink -f "$1"); shift
 [ -f "$bin" ] || { echo "arquivo não encontrado: $bin" >&2; exit 1; }
-proj="$HOME/.ghidra-projetos"; mkdir -p "$proj"
+proj="$HOME/ghidra-projetos"; mkdir -p "$proj"
 name=$(printf '%s' "$bin" | sha1sum | cut -c1-12)
 out=$(mktemp); export GHIDRA_OUT="$out"
 export MAXMEM="${GHIDRA_MAXMEM:-768M}"
