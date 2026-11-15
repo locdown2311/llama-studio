@@ -11,10 +11,15 @@ RUN cargo build --release --locked --no-default-features && strip target/release
 
 # Ghidra (análise estática com o PC desligado). No ARM64 o decompilador nativo é compilado aqui (support/gradle/
 # gradlew buildNatives; vai para build/os/linux_arm_64, que o Ghidra prefere), se a versão baixada não trouxer pronto. GHIDRA_URL fixa uma versão; vazio = a última publicada.
+# Ghidra 12 exige JDK 25 (o JRE não serve: o lançador dele procura um JDK)
+FROM eclipse-temurin:25-jdk AS jdk
+
 FROM debian:trixie-slim AS ghidra
 ARG GHIDRA_URL=
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl unzip jq openjdk-21-jdk-headless build-essential \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl unzip jq build-essential \
     && rm -rf /var/lib/apt/lists/*
+COPY --from=jdk /opt/java/openjdk /opt/jdk
+ENV JAVA_HOME=/opt/jdk PATH=/opt/jdk/bin:$PATH
 RUN set -eux; \
     url="${GHIDRA_URL:-$(curl -fsSL https://api.github.com/repos/NationalSecurityAgency/ghidra/releases/latest | jq -r '.assets[] | select(.name | endswith(".zip")) | .browser_download_url' | head -1)}"; \
     echo "Ghidra: $url"; curl -fsSL -o /tmp/g.zip "$url"; unzip -q /tmp/g.zip -d /opt; rm /tmp/g.zip; mv /opt/ghidra_* /opt/ghidra; \
@@ -39,26 +44,28 @@ RUN set -eux; \
 
 FROM debian:trixie-slim
 # ferramentas que os agentes usam na pasta da nuvem (engenharia reversa estática incluída)
-# - o Ghidra exige o JDK (não basta o JRE: o lançador dele confere)
 # - npm da Debian puxa ~500 pacotes node-*: aqui só o nodejs, e o npm vem do próprio registro (um pacote só)
 # - navegador do executor: o chromium-headless-shell (sem interface) se existir, senão o chromium
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates libssl3t64 python3 python3-pip git curl unzip xz-utils zip file \
-      binutils binutils-multiarch procps less jq nodejs ripgrep fd-find openjdk-21-jdk-headless fonts-dejavu-core \
+      binutils binutils-multiarch procps less jq nodejs ripgrep fd-find fonts-dejavu-core \
     && (apt-get install -y --no-install-recommends chromium-headless-shell && ln -s /usr/bin/chromium-headless-shell /usr/local/bin/studio-browser \
         || (apt-get install -y --no-install-recommends chromium && ln -s /usr/bin/chromium /usr/local/bin/studio-browser)) \
     && mkdir -p /usr/local/lib/node_modules/npm \
-    && curl -fsSL "$(curl -fsSL https://registry.npmjs.org/npm/latest | jq -r .dist.tarball)" | tar -xz -C /usr/local/lib/node_modules/npm --strip-components=1 \
+    && curl -fsSL "$(curl -fsSL https://registry.npmjs.org/npm/latest-10 | jq -r .dist.tarball)" | tar -xz -C /usr/local/lib/node_modules/npm --strip-components=1 \
     && ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
     && pip3 install --no-cache-dir --break-system-packages pefile capstone lief pyelftools \
     && ln -s /usr/bin/fdfind /usr/local/bin/fd \
     && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/info /usr/lib/jvm/*/lib/src.zip /root/.cache \
     && useradd -u 1000 -m -d /data/home studio
+# JDK sem o que só serve para compilar módulos (jmods) e sem o código-fonte
+COPY --from=jdk /opt/java/openjdk /opt/jdk
+RUN rm -rf /opt/jdk/jmods /opt/jdk/lib/src.zip /opt/jdk/man /opt/jdk/legal && ln -s /opt/jdk/bin/java /usr/local/bin/java
 COPY --from=ghidra /opt/ghidra /opt/ghidra
 COPY cloud/ghidra/Decompile.java cloud/ghidra/ListFunctions.java /opt/studio-ghidra/
 COPY --chmod=755 cloud/ghidra/ghidra-decompile /usr/local/bin/ghidra-decompile
 COPY --from=build /src/target/release/llama-studio /usr/local/bin/llama-studio
-ENV STUDIO_BROWSER=/usr/local/bin/studio-browser STUDIO_CLOUD=1 STUDIO_DIR=/data STUDIO_PORT=8080 STUDIO_NO_OPEN=1 HOME=/data/home GHIDRA_INSTALL_DIR=/opt/ghidra
+ENV JAVA_HOME=/opt/jdk STUDIO_BROWSER=/usr/local/bin/studio-browser STUDIO_CLOUD=1 STUDIO_DIR=/data STUDIO_PORT=8080 STUDIO_NO_OPEN=1 HOME=/data/home GHIDRA_INSTALL_DIR=/opt/ghidra
 USER 1000:1000
 WORKDIR /data
 EXPOSE 8080

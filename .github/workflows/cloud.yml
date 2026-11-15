@@ -58,7 +58,7 @@ jobs:
           img=ghcr.io/${{ steps.gh.outputs.owner }}/llama-studio-cloud:${{ matrix.arch }}
           docker image ls "$img"
           docker history --format '{{.Size}}\t{{.CreatedBy}}' "$img" | cut -c1-150 | head -12
-          docker run --rm --entrypoint sh "$img" -c 'set -e; studio-browser --version || ls -la /usr/local/bin/studio-browser; node --version; npx --version; cp /bin/ls /tmp/ls; GHIDRA_MAXMEM=1500M ghidra-decompile --list /tmp/ls > /tmp/out; head -5 /tmp/out; grep -q "# funções" /tmp/out; GHIDRA_MAXMEM=1500M ghidra-decompile /tmp/ls main | head -15'
+          docker run --rm --entrypoint sh "$img" -c 'set -e; readlink -f /usr/local/bin/studio-browser; studio-browser --version; java -version; node --version; npx --version; cp /bin/ls /tmp/ls; GHIDRA_MAXMEM=1500M ghidra-decompile --list /tmp/ls > /tmp/out; head -5 /tmp/out; grep -q "# funções" /tmp/out; GHIDRA_MAXMEM=1500M ghidra-decompile /tmp/ls main | head -15'
       - name: Central
         uses: docker/build-push-action@v6
         with:
