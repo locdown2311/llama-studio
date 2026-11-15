@@ -1884,14 +1884,22 @@ details.verify.warn summary svg { color: var(--warn); }
 /* ------------------------------------------------------------ celular */
 @media (max-width: 640px) {
   /* a barra do compositor quebra em duas linhas em vez de espremer os ícones */
-  .bar { flex-wrap: wrap; row-gap: 6px; column-gap: 4px; padding: 6px 8px 8px; }
+  .bar { flex-wrap: wrap; row-gap: 6px; column-gap: 2px; padding: 6px 6px 8px; }
   .bar .pick-wrap, .bar > .bar-btn, .bar > .mic-btn, .bar > .send { flex-shrink: 0; }
   .bar-btn { height: 36px; }
-  .bar-btn.icon-only, .bar-btn.round { width: 36px; }
+  .bar-btn.icon-only, .bar-btn.round { width: 32px; }
+  /* medidores compactos e microfone + enviar sempre no fim da linha */
+  .bar .spacer { display: none; }
+  .nim-meter { margin-left: auto; margin-right: 0; padding: 0 6px; font-size: 11px; }
+  .ctx-meter { margin-right: 0; padding: 0 4px; }
+  .ctx-meter span { display: none; }
+  .nim-meter:not([hidden]) ~ .pick-wrap .ctx-meter { margin-left: 0; }
+  .bar > .pick-wrap:has(> .ctx-meter) { margin-left: auto; }
+  .nim-meter:not([hidden]) ~ .pick-wrap:has(> .ctx-meter) { margin-left: 0; }
   .bar-btn.icon-only > svg { width: 18px; height: 18px; }
-  #pick-model b { max-width: 120px; }
-  .mic-btn { width: 36px; height: 36px; }
-  .send { width: 40px; height: 40px; }
+  #pick-model b { max-width: 104px; }
+  .mic-btn { width: 34px; height: 36px; margin: 0; }
+  .send { width: 38px; height: 38px; }
   .editor { font-size: 16px; } /* menos que 16 px faz o iPhone dar zoom ao tocar */
   .composer-wrap { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
   /* menus da barra viram uma folha embaixo, na largura da tela */
