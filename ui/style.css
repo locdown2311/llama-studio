@@ -86,7 +86,7 @@ svg { display: block; flex: none; width: 16px; height: 16px; }
 ::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 9px; border: 2px solid transparent; background-clip: padding-box; }
 ::-webkit-scrollbar-track { background: transparent; }
 
-#app { display: flex; height: 100vh; }
+#app { display: flex; height: 100vh; height: 100dvh; } /* dvh: no celular, a altura sem a barra do navegador */
 
 /* ------------------------------------------------------------ barra lateral */
 #side {
@@ -216,6 +216,7 @@ svg { display: block; flex: none; width: 16px; height: 16px; }
 .nim-meter[hidden] { display: none; }
 .nim-meter i { position: absolute; left: 0; bottom: 0; height: 2px; background: var(--accent); transition: width .3s; }
 .nim-meter span { position: relative; }
+.nim-meter .nm-short { display: none; }
 .nim-meter.mid i { background: #d99a1e; }
 .nim-meter.hi i { background: #dc4a3d; }
 .nim-meter.hi { color: #c43c30; }
@@ -1891,6 +1892,9 @@ details.verify.warn summary svg { color: var(--warn); }
   /* medidores compactos e microfone + enviar sempre no fim da linha */
   .bar .spacer { display: none; }
   .nim-meter { margin-left: auto; margin-right: 0; padding: 0 6px; font-size: 11px; }
+  .nim-meter .nm-long { display: none; }
+  .nim-meter .nm-short { display: inline; }
+  .modal { max-height: calc(100dvh - 40px); }
   .ctx-meter { margin-right: 0; padding: 0 4px; }
   .ctx-meter span { display: none; }
   .nim-meter:not([hidden]) ~ .pick-wrap .ctx-meter { margin-left: 0; }
@@ -1900,7 +1904,7 @@ details.verify.warn summary svg { color: var(--warn); }
   #pick-model b { max-width: 104px; }
   .mic-btn { width: 34px; height: 36px; margin: 0; }
   .send { width: 38px; height: 38px; }
-  .editor { font-size: 16px; } /* menos que 16 px faz o iPhone dar zoom ao tocar */
+  .editor { font-size: 16px; min-height: 26px; } /* menos que 16 px faz o iPhone dar zoom ao tocar */
   .composer-wrap { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
   /* menus da barra viram uma folha embaixo, na largura da tela */
   .composer .popover, .popover.mention {

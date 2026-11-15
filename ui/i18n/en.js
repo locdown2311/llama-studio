@@ -2276,4 +2276,7 @@ const I18N_EN = {
   "Copia para a pasta anexos do espaço de trabalho": "Copies into the workspace's attachments folder",
   "Foto ou imagem": "Photo or image",
   "Da galeria ou da câmera": "From the gallery or the camera",
+  "Pergunte algo ou peça uma tarefa": "Ask something or request a task",
+  "chave {0}/{1}": "key {0}/{1}",
+  "limite do dia": "daily limit",
 };

@@ -1985,7 +1985,7 @@ function drawNimMeter() {
   const rot = d.rot ? L(" · chave {0}/{1}", d.rot.cur, d.rot.n) : "";
   if (d.rot && !perMin && !(d.rpd > 0)) {
     el.hidden = false; el.className = "nim-meter lo";
-    el.innerHTML = `<i style="width:0%"></i><span>${esc((a.name || a.id) + rot)}</span>`;
+    el.innerHTML = `<i style="width:0%"></i><span class="nm-long">${esc((a.name || a.id) + rot)}</span><span class="nm-short">${esc(L('chave {0}/{1}', d.rot.cur, d.rot.n))}</span>`;
     el.title = L("{0}: rotação de chaves, usando a chave {1} de {2}. Quando uma acaba, a próxima entra na hora.", a.name || a.id, d.rot.cur, d.rot.n);
     return;
   }
@@ -2003,7 +2003,9 @@ function drawNimMeter() {
     : !perMin ? L("{0} hoje {1}/{2}", name, d.day, d.rpd)
     : wait > 0 ? L("{0} {1}/{2} · {3}s", name, d.used, d.max, wait) + day
     : L("{0} {1}/{2}", name, d.used, d.max) + day;
-  el.innerHTML = `<i style="width:${pct.toFixed(0)}%"></i><span>${esc(txt + rot)}</span>`;
+  // no celular só os números (o nome inteiro empurrava o botão de enviar para fora da tela)
+  const short = dayOut ? L("limite do dia") : wait > 0 ? `${d.used}/${d.max} · ${wait}s` : rfWait > 0 && wait === 0 ? `${d.used}/${d.max} · ${rfWait}s` : perMin ? `${d.used}/${d.max}` : `${d.day}/${d.rpd}`;
+  el.innerHTML = `<i style="width:${pct.toFixed(0)}%"></i><span class="nm-long">${esc(txt + rot)}</span><span class="nm-short">${esc(short)}</span>`;
   el.title = (dayOut
     ? L("{0}: os {1} pedidos do dia acabaram. Até a meia-noite UTC os pedidos vão para outra API ou para o modelo local.", full, d.rpd)
     : !perMin ? L("{0}: {1} de {2} pedidos hoje (renova à meia-noite UTC).", full, d.day, d.rpd)

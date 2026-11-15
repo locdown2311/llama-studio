@@ -134,6 +134,10 @@ async function init() {
     setInterval(() => checkUpdates(), 6 * 3600 * 1000);
   }
   if (EXECUTOR) { executorLoop(); return; }
+  // no celular, um texto de exemplo curto (o longo ocupava três linhas da caixa)
+  const narrow = matchMedia('(max-width: 640px)');
+  const ph = () => { const ed = $('#input'); if (ed) ed.dataset.placeholder = narrow.matches ? L('Pergunte algo ou peça uma tarefa') : L('Pergunte algo ou peça uma tarefa. Digite @ para inserir uma habilidade ou conector, ou arraste arquivos para cá.'); };
+  ph(); narrow.addEventListener('change', ph);
   focusEditor(true);
   drawBgBar();
   setInterval(reconcileBg, 15000);
