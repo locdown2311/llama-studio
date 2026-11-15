@@ -63,6 +63,13 @@ fn ensure_runner(app: &App) -> Result<(), String> {
     let port = *crate::cloud::PORT.get().unwrap_or(&app.cfg().port);
     let profile = app.root.join("executor");
     let _ = std::fs::create_dir_all(&profile);
+    // o cache do navegador do executor só cresce e não serve para nada entre tarefas: fica fora do perfil,
+    // limitado a 50 MB, e é apagado toda vez que o executor sobe
+    let cache = app.root.join("cache").join("executor");
+    let _ = std::fs::remove_dir_all(&cache);
+    for d in ["Default/Cache", "Default/Code Cache", "Default/GPUCache", "Default/Service Worker/CacheStorage", "Default/Service Worker/ScriptCache", "GrShaderCache", "ShaderCache"] {
+        let _ = std::fs::remove_dir_all(profile.join(d));
+    }
     let mut cmd = tokio::process::Command::new(exe);
     cmd.args([
         "--headless=new",
@@ -75,6 +82,8 @@ fn ensure_runner(app: &App) -> Result<(), String> {
         "--disable-backgrounding-occluded-windows",
         "--mute-audio",
         &format!("--user-data-dir={}", profile.display()),
+        &format!("--disk-cache-dir={}", cache.display()),
+        "--disk-cache-size=52428800",
     ]);
     // como root o Chrome não abre com o sandbox dele (Linux)
     let root = std::fs::read_to_string("/proc/self/status").ok().and_then(|t| t.lines().find(|l| l.starts_with("Uid:")).map(|l| l.split_whitespace().nth(1) == Some("0"))).unwrap_or(false);

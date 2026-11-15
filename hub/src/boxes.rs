@@ -53,7 +53,9 @@ pub fn mkdir_owned(p: &Path) {
     }
 }
 
+/// Espaço usado pela pasta do usuário, sem contar `cache/` (npm, pip, navegador do executor: dá para apagar).
 fn du(p: &Path) -> u64 {
+    let skip = p.join("cache");
     let mut total = 0u64;
     let mut stack = vec![p.to_path_buf()];
     while let Some(d) = stack.pop() {
@@ -61,7 +63,9 @@ fn du(p: &Path) -> u64 {
         for e in rd.flatten() {
             let Ok(m) = e.metadata() else { continue };
             if m.is_dir() {
-                stack.push(e.path());
+                if e.path() != skip {
+                    stack.push(e.path());
+                }
             } else {
                 total += m.len();
             }
@@ -141,6 +145,16 @@ impl Boxes {
         }
         let lock = self.lock_for(u.id);
         let _g = lock.lock().await;
+        // cache grande (npm, pip, navegador): apaga enquanto o studio está desligado
+        if !self.running(u.id) {
+            let c = dir(h, u.id).join("cache");
+            let _ = tokio::task::spawn_blocking(move || {
+                if c.is_dir() && du(&c) > 1024 * 1024 * 1024 {
+                    let _ = std::fs::remove_dir_all(&c);
+                }
+            })
+            .await;
+        }
         let mb = self.disk(h, u.id).await;
         let quota = crate::admin::quota_mb(h, u.id);
         if mb > quota {
@@ -249,6 +263,10 @@ impl Boxes {
             format!("STUDIO_HUB_SECRET={}", u.secret),
             "STUDIO_NO_OPEN=1".into(),
             "HOME=/data/home".into(),
+            // caches fora da cota (pasta cache/, apagada pela central quando passa de 1 GB)
+            "XDG_CACHE_HOME=/data/cache".into(),
+            "NPM_CONFIG_CACHE=/data/cache/npm".into(),
+            "PIP_CACHE_DIR=/data/cache/pip".into(),
             format!("HTTPS_PROXY={proxy}"),
             format!("HTTP_PROXY={proxy}"),
             format!("https_proxy={proxy}"),
