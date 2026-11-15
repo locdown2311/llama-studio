@@ -44,7 +44,7 @@ const SNAPSHOT_JS: &str = r#"(() => {
   return JSON.stringify({ title: document.title, url: location.href, text, items });
 })()"#;
 
-fn find_exe() -> Option<PathBuf> {
+pub fn find_exe() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("STUDIO_BROWSER") {
         return Some(PathBuf::from(p));
     }

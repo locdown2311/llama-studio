@@ -13,6 +13,7 @@ mod db;
 mod link;
 mod pages;
 mod proxy;
+mod push;
 mod sync;
 mod totp;
 
@@ -107,6 +108,7 @@ async fn main() {
     let cfg = Cfg::load();
     let _ = std::fs::create_dir_all(cfg.data.join("users"));
     let conn = db::open(&cfg.data.join("hub.db")).expect("banco de dados");
+    push::init(&conn);
     if args.len() > 1 {
         std::process::exit(db::cli(&conn, &args[1..]));
     }
@@ -141,6 +143,10 @@ async fn main() {
         .route("/hub/api/admin/users", get(admin::users))
         .route("/hub/api/admin/action", post(admin::action))
         .route("/hub/sync/apis", post(sync::push_apis))
+        .route("/hub/api/push/key", get(push::key))
+        .route("/hub/api/push/subscribe", post(push::subscribe))
+        .route("/hub/api/push/unsubscribe", post(push::unsubscribe))
+        .route("/hub/internal/notify", post(push::internal))
         .route("/hub/api/logout", post(auth::logout))
         .route("/hub/api/me", get(auth::me))
         .route("/hub/api/pair", post(auth::pair))

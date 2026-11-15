@@ -40,7 +40,7 @@ pub async fn manifest() -> Response {
 }
 /// Sem cache de nada: o studio é sempre o da hora (PC ou nuvem); o service worker só existe para o app instalar.
 pub async fn sw() -> Response {
-    file("text/javascript; charset=utf-8", b"self.addEventListener('install',()=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',()=>{});", "no-cache")
+    file("text/javascript; charset=utf-8", include_bytes!("../assets/sw.js"), "no-cache")
 }
 
 /// Põe o manifesto e o script da central na página do studio.

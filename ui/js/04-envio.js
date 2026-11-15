@@ -21,6 +21,7 @@ async function send(now) {
   if (!item) return;
   const conv = cur() || newConv();
   if (busy) { enqueue(conv, { ...item, ...(now ? { now: true } : {}) }); return; }
+  if (conv.bg) { toast(L('Essa conversa está rodando em segundo plano. Espere terminar ou pare.'), 'err'); return; }
   await submit(conv, item);
 }
 
@@ -62,6 +63,7 @@ async function submit(conv, item) {
   if (autoLevelOf(conv) !== 'desligado') await autoRoute(conv, conv.messages[conv.messages.length - 1]);
   saveConvs(); renderConvList();
   if (conv.id === S.curId) { renderChatTitle(); renderMessages(false); updatePickers(); }
+  if (bgMode()) { await startBg(conv); return; }
   await runAgent(conv);
 }
 

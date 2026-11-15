@@ -109,12 +109,15 @@ async function init() {
     toast(L('Não consegui falar com o auxiliar: ') + e.message, 'err');
   }
   renderWsPath();
+  // a notificação abre a conversa certa (/?c=<id>)
+  const wantConv = new URLSearchParams(location.search).get('c');
+  if (wantConv && S.convs.some((c) => c.id === wantConv)) S.curId = wantConv;
   if (S.convs.length && !cur()) S.curId = S.convs[0].id;
   renderConvList();
   renderChat();
   renderTree();
   await Promise.all([loadSkills(), loadMcp(), checkHealth(), loadModels()]);
-  setTimeout(() => maybeOnboard(), 600);
+  if (!EXECUTOR) setTimeout(() => maybeOnboard(), 600);
   // tela de abertura enquanto o modelo carrega (o servidor pode estar subindo agora)
   for (let i = 0; i < 4 && S.llama && S.llama.state === 'stopped' && S.llama.config?.AutoStart; i++) { await new Promise((r) => setTimeout(r, 400)); await checkHealth(); }
   if (S.llama && ['loading', 'external-loading'].includes(S.llama.state)) showSplash();
@@ -126,9 +129,14 @@ async function init() {
   setInterval(pingApis, 30000);
   setTimeout(() => pingApis(), 2000);
   setTimeout(uiMigrate, 2500);
-  setTimeout(() => checkUpdates(), 4000);
-  setInterval(() => checkUpdates(), 6 * 3600 * 1000);
+  if (!EXECUTOR) {
+    setTimeout(() => checkUpdates(), 4000);
+    setInterval(() => checkUpdates(), 6 * 3600 * 1000);
+  }
+  if (EXECUTOR) { executorLoop(); return; }
   focusEditor(true);
+  drawBgBar();
+  setInterval(reconcileBg, 15000);
 }
 
 if (document.readyState === 'loading') {

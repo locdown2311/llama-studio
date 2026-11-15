@@ -29,6 +29,8 @@ pub const RES_BODY: u8 = 5;
 pub const RES_END: u8 = 6;
 pub const RES_ERR: u8 = 7;
 pub const CANCEL: u8 = 8;
+/// do PC: manda uma notificação para os celulares da conta
+pub const NOTIFY: u8 = 9;
 const CHUNK: usize = 256 * 1024;
 
 pub fn frame(kind: u8, id: u32, data: &[u8]) -> Vec<u8> {
@@ -125,6 +127,12 @@ async fn run(h: H, uid: i64, device: i64, name: String, sock: WebSocket) {
         let kind = b[0];
         let id = u32::from_be_bytes([b[1], b[2], b[3], b[4]]);
         let data = b.slice(5..);
+        if kind == NOTIFY {
+            let v: Value = serde_json::from_slice(&data).unwrap_or_default();
+            let h2 = h.clone();
+            tokio::spawn(async move { crate::push::send(&h2, uid, &crate::push::clean(&v)).await });
+            continue;
+        }
         let ev = match kind {
             RES_HEAD => {
                 let v: Value = serde_json::from_slice(&data).unwrap_or_default();

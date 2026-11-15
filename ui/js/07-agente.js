@@ -851,3 +851,110 @@ async function compactNow(conv) {
   } catch (e) { toast(e.message, 'err'); }
   finally { S.runs.delete(conv.id); renderComposer(); renderMessages(false); }
 }
+
+/* ============================================================ tarefas em segundo plano
+   Pelo celular (aberto pela central), a tarefa não roda nesta página: o studio (do PC ou da nuvem) abre a
+   própria interface num navegador sem janela — o executor — e roda lá o mesmo agente. Esta tela pode fechar:
+   a conversa sincroniza sozinha, as permissões pedidas aparecem aqui e o fim chega como notificação. */
+const EXECUTOR = new URLSearchParams(location.search).has('executor');
+
+function bgMode() {
+  if (EXECUTOR || !HUB) return false;
+  const v = S.settings.bgTasks;
+  return v == null ? matchMedia('(pointer: coarse)').matches : !!v;
+}
+
+async function startBg(conv) {
+  conv.bg = { state: 'queued', at: Date.now() };
+  saveConvsNow(true);
+  await uiFlush();
+  try {
+    await api('/api/jobs/start', { conv: conv.id, title: conv.title });
+  } catch (e) {
+    // sem executor (sem navegador no PC, por exemplo): roda aqui mesmo
+    conv.bg = null; saveConvsNow(true); drawBgBar();
+    toast(e.message + ' ' + L('Rodando nesta tela.'), 'err');
+    return runAgent(conv);
+  }
+  drawBgBar();
+  toast(L('Rodando em segundo plano. Pode fechar o app: você recebe um aviso quando terminar.'));
+  // o toque em enviar vale como gesto para pedir a permissão de notificação
+  window.__hubPush?.();
+}
+
+/** Faixa acima da caixa de texto: a conversa aberta está rodando no executor. */
+function drawBgBar() {
+  let bar = $('#bgbar');
+  const c = cur();
+  if (!c?.bg) { bar?.remove(); return; }
+  if (!bar) { bar = h('div.bgbar#bgbar'); $('.composer-wrap')?.prepend(bar); }
+  bar.innerHTML = '';
+  const where = window.__hubTarget === 'pc' ? L('no seu PC') : L('na nuvem');
+  bar.append(h('span.spin', { html: svg('loader') }), h('span', null, c.bg.state === 'queued' ? L('Na fila {0}...', where) : L('Rodando {0}. Pode fechar o app.', where)),
+    h('span.spacer'), h('button.btn.sm', { type: 'button', onclick: async (e) => { e.target.disabled = true; await api('/api/jobs/answer', { stop: c.id }).catch(() => {}); } }, ic('stop'), L('Parar')));
+}
+
+/** Resposta a um pedido de permissão que está em outra tela (o executor). */
+function remoteAnswer(id, a) { api('/api/jobs/answer', { id, a }).catch(() => {}); }
+
+/** Confere se as tarefas marcadas como em segundo plano ainda estão vivas (o executor pode ter caído). */
+async function reconcileBg() {
+  if (EXECUTOR || !S.convs.some((c) => c.bg)) return;
+  let r; try { r = await api('/api/jobs'); } catch { return; }
+  const live = new Set((r.jobs || []).filter((j) => j.state === 'queued' || j.state === 'running').map((j) => j.conv));
+  let changed = false;
+  for (const c of S.convs) {
+    if (c.bg && !live.has(c.id) && Date.now() - (c.bg.at || 0) > 20000) { c.bg = null; changed = true; }
+    else if (c.bg && live.has(c.id) && c.bg.state === 'queued' && (r.jobs || []).some((j) => j.conv === c.id && j.state === 'running')) { c.bg.state = 'running'; }
+  }
+  if (changed) { saveConvsNow(true); renderConvList(); }
+  drawBgBar();
+}
+
+/* ------------------------------------------------------------ o executor */
+async function executorRun(job) {
+  const conv = S.convs.find((c) => c.id === job.conv);
+  if (!conv) { await api('/api/jobs/done', { job: job.id, ok: false, note: L('Conversa não encontrada.') }).catch(() => {}); return; }
+  S.curId = conv.id;
+  conv.bg = { state: 'running', at: Date.now() };
+  saveConvsNow(true);
+  const asked = new Set();
+  const tick = setInterval(async () => {
+    // o agente parou esperando uma permissão: avisa o celular
+    const fresh = [...S.approvals.keys()].filter((k) => !asked.has(k));
+    if (fresh.length) { fresh.forEach((k) => asked.add(k)); api('/api/jobs/ask', { job: job.id }).catch(() => {}); }
+    let r; try { r = await api('/api/jobs/answers'); } catch { return; }
+    for (const x of r.answers || []) {
+      if (x.stop === conv.id) { stopped = true; stop(conv); }
+      else if (x.id) { const fn = S.approvals.get(x.id); if (fn) { S.approvals.delete(x.id); fn(x.a); } }
+    }
+  }, 1500);
+  let ok = true, note = '', stopped = false;
+  try { await runAgent(conv); } catch (e) { ok = false; note = String(e?.message || e); }
+  clearInterval(tick);
+  const last = [...conv.messages].reverse().find((m) => m.role === 'assistant');
+  if (last?.error) { ok = false; note = note || String(last.error); }
+  if (stopped) { ok = false; note = L('Você parou a tarefa.'); }
+  conv.bg = null;
+  conv.updatedAt = Date.now();
+  saveConvsNow(true);
+  await uiFlush();
+  const text = typeof last?.content === 'string' ? last.content : '';
+  await api('/api/jobs/done', { job: job.id, ok, title: conv.title, text, note }).catch(() => {});
+}
+
+async function executorLoop() {
+  document.title = 'executor - llama studio';
+  const pending = sessionStorage.getItem('execJob');
+  if (pending) { sessionStorage.removeItem('execJob'); try { await executorRun(JSON.parse(pending)); } catch { /* segue */ } }
+  for (;;) {
+    let r = null;
+    try { r = await api('/api/jobs/next?wait=25'); } catch { await new Promise((ok) => setTimeout(ok, 3000)); continue; }
+    if (r?.job) {
+      // recarrega para pegar a conversa e as configurações como estão agora
+      sessionStorage.setItem('execJob', JSON.stringify(r.job));
+      location.reload();
+      return;
+    }
+  }
+}

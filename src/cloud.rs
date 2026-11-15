@@ -26,11 +26,32 @@ const RES_BODY: u8 = 5;
 const RES_END: u8 = 6;
 const RES_ERR: u8 = 7;
 const CANCEL: u8 = 8;
+const NOTIFY: u8 = 9;
 const CHUNK: usize = 256 * 1024;
 /// Corpo de pedido maior que isso pelo túnel é recusado.
 const MAX_BODY: usize = 200 * 1024 * 1024;
 
 pub static PORT: OnceLock<u16> = OnceLock::new();
+
+/// O túnel aberto agora (para mandar notificações à central).
+fn link_tx() -> &'static Mutex<Option<mpsc::UnboundedSender<Message>>> {
+    static T: OnceLock<Mutex<Option<mpsc::UnboundedSender<Message>>>> = OnceLock::new();
+    T.get_or_init(Default::default)
+}
+
+/// Notificação no celular (Web Push pela central): do contêiner direto para a central; do PC pelo túnel.
+pub async fn notify(app: &App, title: &str, body: &str, url: &str) {
+    let v = json!({ "title": title, "body": body, "url": url });
+    if crate::app::cloud() {
+        let (Ok(hub), Some(secret)) = (std::env::var("STUDIO_HUB_URL"), crate::app::hub_secret()) else { return };
+        let _ = local().post(format!("{}/hub/internal/notify", hub.trim_end_matches('/'))).header("x-hub-secret", secret).header("content-type", "application/json").body(v.to_string()).timeout(Duration::from_secs(10)).send().await;
+        return;
+    }
+    let _ = app;
+    if let Some(tx) = link_tx().lock().unwrap().as_ref() {
+        let _ = tx.send(frame(NOTIFY, 0, v.to_string().as_bytes()));
+    }
+}
 
 #[derive(Default)]
 struct St {
@@ -211,6 +232,7 @@ async fn session(app: &Arc<App>, url: &str, token: &str) -> Result<(), String> {
     }
     let (mut sink, mut stream) = ws.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+    *link_tx().lock().unwrap() = Some(tx.clone());
     let writer = tokio::spawn(async move {
         while let Some(m) = rx.recv().await {
             if sink.send(m).await.is_err() {
@@ -308,6 +330,7 @@ async fn session(app: &Arc<App>, url: &str, token: &str) -> Result<(), String> {
         }
     }
     syncer.abort();
+    *link_tx().lock().unwrap() = None;
     for (_, h) in running.lock().unwrap().drain() {
         h.abort();
     }

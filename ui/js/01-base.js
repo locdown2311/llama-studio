@@ -235,6 +235,7 @@ async function uiPoll() {
       list = true;
     }
     if (list && typeof renderConvList === 'function') renderConvList();
+    if ((list || open) && typeof drawBgBar === 'function') drawBgBar();
     // não redesenha no meio de uma edição de mensagem
     if (open && typeof renderChat === 'function' && !document.querySelector('.msg.editing, .msg-edit')) renderChat();
   } catch { /* sem rede: tenta na próxima */ } finally { uiPolling = false; }

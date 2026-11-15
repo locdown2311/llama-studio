@@ -1904,3 +1904,9 @@ details.verify.warn summary svg { color: var(--warn); }
   .msg-actions button, .msg-acts button { min-height: 34px; }
   .icon-btn { min-width: 36px; min-height: 36px; }
 }
+
+/* tarefa em segundo plano (executor) */
+.bgbar { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 8px 10px 8px 12px; border-radius: 11px; background: var(--accent-1, color-mix(in srgb, var(--accent) 10%, transparent)); color: var(--text-2); font-size: 13px; }
+.bgbar .spin svg { width: 15px; height: 15px; animation: bgspin 1.1s linear infinite; color: var(--accent); }
+.bgbar .spacer { flex: 1; }
+@keyframes bgspin { to { transform: rotate(360deg); } }

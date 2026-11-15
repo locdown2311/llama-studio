@@ -102,6 +102,16 @@ No studio do PC, vá em **Configurações → Nuvem** e preencha o endereço, o 
 
 No celular, uma etiqueta no topo mostra onde o studio está rodando (**PC** ou **Nuvem**). Se o PC conecta ou cai, aparece um aviso para trocar.
 
+## Tarefas longas pelo celular
+
+Aberto pelo celular, o studio manda a tarefa para rodar no **executor**: uma página do próprio studio aberta num navegador sem janela. No PC ele usa o Edge ou o Chrome; na nuvem, o Chromium da imagem. O mesmo agente roda lá. Você pode fechar o app ou apagar a tela.
+
+- **Acompanhar**: a conversa sincroniza sozinha, então dá para abrir de novo e ver o andamento.
+- **Permissões**: se o agente pedir uma, chega uma notificação e você responde pela própria conversa.
+- **Fim**: quando termina, ou se parar, chega uma notificação. Tocar nela abre a conversa.
+- **Ativar as notificações**: no menu da etiqueta PC/Nuvem, em "Notificações neste aparelho". No iPhone, adicione o studio à tela inicial antes; é exigência da Apple.
+- **Desligar o segundo plano**: em Configurações → Modelo, "Rodar as tarefas em segundo plano". O padrão é ligado no celular.
+
 ## Administrar
 
 O painel fica em `https://SEU_DOMINIO/hub/admin`. Abrem por ele a primeira conta criada, as contas marcadas como admin e os e-mails listados em `HUB_ADMINS`. Lá dá para:

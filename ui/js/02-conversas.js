@@ -3877,7 +3877,7 @@ function renderTool(tc, res, live) {
       if (fn) {
         S.approvals.delete(tc.id);
         fn(a);
-      }
+      } else remoteAnswer(tc.id, a); // a tarefa roda no executor
     };
 
     bodyEl.append(
@@ -3948,7 +3948,7 @@ function renderTool(tc, res, live) {
   for (const ask of res?.asks || []) {
     const answer = (a) => {
       const fn = S.approvals.get(ask.id);
-      if (fn) { S.approvals.delete(ask.id); fn(a); }
+      if (fn) { S.approvals.delete(ask.id); fn(a); } else remoteAnswer(ask.id, a);
     };
     bodyEl.append(
       h("div.approval", null,

@@ -243,7 +243,9 @@ impl Boxes {
             format!("HTTP_PROXY={proxy}"),
             format!("https_proxy={proxy}"),
             format!("http_proxy={proxy}"),
-            "NO_PROXY=localhost,127.0.0.1".into(),
+            format!("NO_PROXY=localhost,127.0.0.1,{}", h.cfg.hub_host),
+            format!("no_proxy=localhost,127.0.0.1,{}", h.cfg.hub_host),
+            format!("STUDIO_HUB_URL=http://{}:{}", h.cfg.hub_host, h.cfg.bind.rsplit(':').next().unwrap_or("8700")),
         ];
         let n = name(u.id);
         let mut args: Vec<&str> = vec![

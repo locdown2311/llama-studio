@@ -8,11 +8,11 @@
     ? { pc: 'PC', cloud: 'Cloud', onPc: 'Running on your PC', onCloud: 'Running in the cloud', pcBack: 'Your PC is online.', openPc: 'Open on PC', pcGone: 'Your PC disconnected.', goCloud: 'Continue in the cloud', useCloud: 'Use the cloud instead', logout: 'Sign out', devices: 'Linked PCs', none: 'No PC linked yet. On your PC: Settings → Cloud.', remove: 'Unlink', since: 'connected', cloudStop: 'Turn off cloud studio', disk: 'Cloud folder', account: 'Account and security', admin: 'Administration', close: 'Close',
       twofa: 'Two-step verification', twofaOn: 'On. Signing in asks for a code from your authenticator app.', twofaOff: 'Off. Turn it on: your account can control your PC.', enable: 'Turn on', disable: 'Turn off', newRec: 'New recovery codes', left: '{0} recovery codes left',
       scan: '1. Scan with an authenticator app (Google Authenticator, Authy, 1Password, Aegis...) or type the key:', type: '2. Type the 6-digit code it shows:', confirm: 'Confirm', saveRec: 'Save these recovery codes somewhere safe. Each works once if you lose your phone. They won\'t be shown again.', copy: 'Copy', copied: 'Copied',
-      pass: 'Account password', code: 'Code (or recovery code)', changePass: 'Change password', cur: 'Current password', newPass: 'New password (min. 8)', save: 'Save', ok: 'Done' }
+      pass: 'Account password', code: 'Code (or recovery code)', changePass: 'Change password', cur: 'Current password', newPass: 'New password (min. 8)', save: 'Save', ok: 'Done', notif: 'Notifications on this device', notifOn: 'On', notifOff: 'Turn on', notifNo: 'Blocked in the browser settings', notifIos: 'On iPhone: add the studio to the home screen first.' }
     : { pc: 'PC', cloud: 'Nuvem', onPc: 'Rodando no seu PC', onCloud: 'Rodando na nuvem', pcBack: 'Seu PC está online.', openPc: 'Abrir no PC', pcGone: 'O PC desconectou.', goCloud: 'Continuar na nuvem', useCloud: 'Usar a nuvem', logout: 'Sair', devices: 'PCs vinculados', none: 'Nenhum PC vinculado ainda. No PC: Configurações → Nuvem.', remove: 'Desvincular', since: 'conectado', cloudStop: 'Desligar o studio na nuvem', disk: 'Pasta na nuvem', account: 'Conta e segurança', admin: 'Administração', close: 'Fechar',
       twofa: 'Duas etapas', twofaOn: 'Ligada. Entrar pede o código do app autenticador.', twofaOff: 'Desligada. Ligue: sua conta controla o seu PC.', enable: 'Ligar', disable: 'Desligar', newRec: 'Novos códigos de recuperação', left: 'Restam {0} códigos de recuperação',
       scan: '1. Leia com um app autenticador (Google Authenticator, Authy, 1Password, Aegis...) ou digite a chave:', type: '2. Digite o código de 6 dígitos que ele mostra:', confirm: 'Confirmar', saveRec: 'Guarde estes códigos de recuperação num lugar seguro. Cada um vale uma vez se você perder o celular. Eles não aparecem de novo.', copy: 'Copiar', copied: 'Copiado',
-      pass: 'Senha da conta', code: 'Código (ou de recuperação)', changePass: 'Trocar a senha', cur: 'Senha atual', newPass: 'Senha nova (mín. 8)', save: 'Salvar', ok: 'Feito' };
+      pass: 'Senha da conta', code: 'Código (ou de recuperação)', changePass: 'Trocar a senha', cur: 'Senha atual', newPass: 'Senha nova (mín. 8)', save: 'Salvar', ok: 'Feito', notif: 'Notificações neste aparelho', notifOn: 'Ligadas', notifOff: 'Ligar', notifNo: 'Bloqueadas nas configurações do navegador', notifIos: 'No iPhone: adicione o studio à tela inicial antes.' };
   const host = document.createElement('div');
   // no celular fica à direita, logo abaixo do cabeçalho (no meio, cobria o título)
   const narrow = matchMedia('(max-width: 860px)');
@@ -119,11 +119,37 @@
     const acc = add(`<div class="row"><button class="ghost" id="acc">${T.account}${me?.user?.twofa ? '' : ' ⚠'}</button>${me?.user?.admin ? `<button class="ghost" id="adm">${T.admin}</button>` : ''}</div>`);
     acc.querySelector('#acc').onclick = () => { m.classList.remove('on'); account(); };
     acc.querySelector('#adm')?.addEventListener('click', () => { location.href = '/hub/admin'; });
+    const ps = await pushState().catch(() => 'no');
+    if (ps !== 'no') {
+      const n = add(`<div class="row"><span>${T.notif}</span>${ps === 'on' ? `<span class="muted">${T.notifOn}</span>` : ps === 'denied' ? `<span class="muted">${T.notifNo}</span>` : ps === 'ios' ? `<span class="muted">${T.notifIos}</span>` : `<button id="nt">${T.notifOff}</button>`}</div>`);
+      n.querySelector('#nt')?.addEventListener('click', async (e) => { e.target.disabled = true; await enablePush().catch(() => false); m.classList.remove('on'); menu(); });
+    }
     const f = add(`<div class="row"><button class="ghost" id="stop">${T.cloudStop}</button><button class="ghost" id="out">${T.logout}</button></div>`);
     f.querySelector('#out').onclick = async () => { await post('/hub/api/logout'); location.href = '/hub/login'; };
     f.querySelector('#stop').onclick = async () => { await post('/hub/api/cloud/stop'); m.classList.remove('on'); };
     m.classList.add('on');
   }
+  /* notificações (Web Push): o fim das tarefas em segundo plano chega aqui */
+  const b64u = (s) => { const b = atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - s.length % 4) % 4)); return Uint8Array.from(b, (c) => c.charCodeAt(0)); };
+  async function pushState() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return /iPhone|iPad/.test(navigator.userAgent) ? 'ios' : 'no';
+    if (Notification.permission === 'denied') return 'denied';
+    const reg = await navigator.serviceWorker.getRegistration('/');
+    return (await reg?.pushManager.getSubscription()) ? 'on' : 'off';
+  }
+  async function enablePush() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
+    if ((await Notification.requestPermission()) !== 'granted') return false;
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.ready;
+    const { key } = await (await fetch('/hub/api/push/key')).json();
+    const sub = (await reg.pushManager.getSubscription()) || (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u(key) }));
+    const r = await post('/hub/api/push/subscribe', sub.toJSON());
+    return r.ok;
+  }
+  // a interface do studio pede ao mandar uma tarefa para o segundo plano (no toque do botão)
+  window.__hubPush = async () => { try { return (await pushState()) === 'on' || await enablePush(); } catch { return false; } };
+
   /* conta: duas etapas e senha */
   const escH = (x) => String(x ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const call = async (u, b) => { const r = await post(u, b); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.statusText); return j; };

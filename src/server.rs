@@ -74,6 +74,13 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/cloud/unlink", post(cloud_unlink))
         .route("/api/cloud/sync", post(cloud_sync))
         .route("/api/cloud/push-apis", post(cloud_push_apis))
+        .route("/api/jobs", get(jobs_list))
+        .route("/api/jobs/start", post(jobs_start))
+        .route("/api/jobs/next", get(jobs_next))
+        .route("/api/jobs/answers", get(jobs_answers))
+        .route("/api/jobs/answer", post(jobs_answer))
+        .route("/api/jobs/done", post(jobs_done))
+        .route("/api/jobs/ask", post(jobs_ask))
         .route("/api/config", post(set_config))
         .route("/api/bins", get(bins_list))
         .route("/api/bins/install", post(bins_install))
@@ -700,6 +707,35 @@ async fn cloud_enable(State(app): S, b: Bytes) -> Res {
 async fn cloud_unlink(State(app): S) -> Res {
     crate::cloud::unlink(&app);
     ok(crate::cloud::status(&app))
+}
+
+// ---------------------------------------------------------------- tarefas em segundo plano
+
+async fn jobs_list() -> Res {
+    ok(crate::jobs::list())
+}
+async fn jobs_start(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    ok(crate::jobs::start(&app, st(&v, "conv"), st(&v, "title")).map_err(bad)?)
+}
+async fn jobs_next(Query(qs): Q) -> Res {
+    ok(crate::jobs::next(q(&qs, "wait").parse().unwrap_or(25)).await)
+}
+async fn jobs_answers() -> Res {
+    ok(crate::jobs::answers())
+}
+async fn jobs_answer(b: Bytes) -> Res {
+    crate::jobs::answer(body(&b));
+    ok(json!({ "ok": true }))
+}
+async fn jobs_ask(State(app): S, b: Bytes) -> Res {
+    crate::jobs::ask(app.clone(), &body(&b)).await;
+    ok(json!({ "ok": true }))
+}
+async fn jobs_done(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    crate::jobs::done(app.clone(), &v).await;
+    ok(json!({ "ok": true }))
 }
 
 async fn cloud_push_apis(State(app): S) -> Res {

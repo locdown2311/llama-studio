@@ -27,6 +27,7 @@ mod llama;
 mod locate;
 mod engines;
 mod hf;
+mod jobs;
 mod mcp;
 mod models;
 mod nim;
@@ -181,6 +182,7 @@ fn main() {
                 tokio::spawn(backup::scheduler(app2.clone()));
                 let _ = cloud::PORT.set(port);
                 tokio::spawn(cloud::run(app2.clone()));
+                tokio::spawn(jobs::watch(app2.clone()));
                 let a = app2.clone();
                 tokio::spawn(async move { a.mcp.sync(&a.http, &a.mcp_file()).await });
                 if !app::cloud() && (start_server || app2.llama.cfg().auto_start) {
