@@ -39,19 +39,26 @@ RUN set -eux; \
 
 FROM debian:trixie-slim
 # ferramentas que os agentes usam na pasta da nuvem (engenharia reversa estática incluída)
+# - o Ghidra exige o JDK (não basta o JRE: o lançador dele confere)
+# - npm da Debian puxa ~500 pacotes node-*: aqui só o nodejs, e o npm vem do próprio registro (um pacote só)
+# - navegador do executor: o chromium-headless-shell (sem interface) se existir, senão o chromium
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates libssl3t64 python3 python3-pip python3-venv git curl wget unzip xz-utils zip file \
-      binutils binutils-multiarch procps less jq nodejs npm ripgrep fd-find openjdk-21-jre-headless \
-      chromium fonts-dejavu-core \
+      ca-certificates libssl3t64 python3 python3-pip git curl unzip xz-utils zip file \
+      binutils binutils-multiarch procps less jq nodejs ripgrep fd-find openjdk-21-jdk-headless fonts-dejavu-core \
+    && (apt-get install -y --no-install-recommends chromium-headless-shell && ln -s /usr/bin/chromium-headless-shell /usr/local/bin/studio-browser \
+        || (apt-get install -y --no-install-recommends chromium && ln -s /usr/bin/chromium /usr/local/bin/studio-browser)) \
+    && mkdir -p /usr/local/lib/node_modules/npm \
+    && curl -fsSL "$(curl -fsSL https://registry.npmjs.org/npm/latest | jq -r .dist.tarball)" | tar -xz -C /usr/local/lib/node_modules/npm --strip-components=1 \
+    && ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
     && pip3 install --no-cache-dir --break-system-packages pefile capstone lief pyelftools \
     && ln -s /usr/bin/fdfind /usr/local/bin/fd \
-    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/info /usr/lib/jvm/*/lib/src.zip /root/.cache \
     && useradd -u 1000 -m -d /data/home studio
 COPY --from=ghidra /opt/ghidra /opt/ghidra
 COPY cloud/ghidra/Decompile.java cloud/ghidra/ListFunctions.java /opt/studio-ghidra/
 COPY --chmod=755 cloud/ghidra/ghidra-decompile /usr/local/bin/ghidra-decompile
 COPY --from=build /src/target/release/llama-studio /usr/local/bin/llama-studio
-ENV STUDIO_BROWSER=/usr/bin/chromium STUDIO_CLOUD=1 STUDIO_DIR=/data STUDIO_PORT=8080 STUDIO_NO_OPEN=1 HOME=/data/home GHIDRA_INSTALL_DIR=/opt/ghidra
+ENV STUDIO_BROWSER=/usr/local/bin/studio-browser STUDIO_CLOUD=1 STUDIO_DIR=/data STUDIO_PORT=8080 STUDIO_NO_OPEN=1 HOME=/data/home GHIDRA_INSTALL_DIR=/opt/ghidra
 USER 1000:1000
 WORKDIR /data
 EXPOSE 8080
