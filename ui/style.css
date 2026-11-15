@@ -1922,3 +1922,10 @@ details.verify.warn summary svg { color: var(--warn); }
 .bgbar .spin svg { width: 15px; height: 15px; animation: bgspin 1.1s linear infinite; color: var(--accent); }
 .bgbar .spacer { flex: 1; }
 @keyframes bgspin { to { transform: rotate(360deg); } }
+
+/* economia de tokens */
+.set-sub { margin: 18px 0 6px; font-size: 13px; font-weight: 600; color: var(--text-2); }
+.eco-facts { display: flex; flex-direction: column; gap: 4px; }
+.eco-fact { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; }
+.eco-fact > span { flex: 1; min-width: 0; }
+.eco-fact > small { white-space: nowrap; }

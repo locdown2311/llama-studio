@@ -83,6 +83,38 @@ function renderSettings() {
   section('auto', L('Recursos automáticos'), 'signpost', L('Pelo pedido, o studio liga sozinho ferramentas, conectores, habilidades e o raciocínio da conversa, sem gastar tokens. Este é o padrão das conversas novas; cada conversa pode mudar pelo botão de placa na barra do chat.'),
     autoList);
 
+  {
+    const box = h('div');
+    const put2 = (o) => { Object.assign(S.settings, o); store.set('settings', S.settings); saved(); };
+    const drawEco = () => {
+      box.innerHTML = '';
+      const c = cur();
+      const k = c ? teKey(c) : null;
+      const st = teGet();
+      const p = k ? st.prune[k] : null;
+      const proj = c ? projectOf(c) : null;
+      const where = proj ? L('No projeto {0}', proj.name) : L('Na pasta {0}', basename(wsOf(c) || S.ws.path || ''));
+      const cut = c ? pruneList(c) : [];
+      box.append(h('h4.set-sub', null, where));
+      box.append(h('div.field', null, h('label', null, L('Ferramentas guardadas')),
+        h('div', null, cut.length ? cut.join(', ') : p ? L('nenhuma ({0} pedidos observados; o corte começa em {1})', p.n, TE.pruneMin) : L('nenhuma ainda')),
+        cut.length ? h('button.btn.sm', { type: 'button', onclick: () => { const s2 = teGet(); delete s2.prune[k]; teSet(s2); if (c) c.pruned = []; drawEco(); } }, L('Restaurar todas')) : null));
+      const facts = (k && st.facts[k]) || [];
+      box.append(h('div.field', null, h('label', null, L('Fatos aprendidos')),
+        facts.length ? h('div.eco-facts', null, facts.map((f) => h('div.eco-fact', null,
+          h('span', null, f.text), h('small.muted', null, (f.convs || []).length >= TE.confirm ? L('ativo') : L('{0}/{1} conversas', (f.convs || []).length, TE.confirm)),
+          h('button.icon-btn', { type: 'button', title: L('Esquecer'), onclick: () => { const s2 = teGet(); s2.facts[k] = (s2.facts[k] || []).filter((x) => x.id !== f.id); teSet(s2); drawEco(); } }, ic('trash')))))
+          : h('div.muted', null, teOn('microSkills') ? L('nenhum ainda (a revisão roda a cada {0} conversas com falhas corrigidas, numa API de fundo)', TE.reviewK) : L('desligado')),
+        (st.ev[k] || []).length ? h('small', null, L('{0} correções esperando a próxima revisão', st.ev[k].length)) : null));
+    };
+    drawEco();
+    section('economy', L('Economia de tokens'), 'sparkles', L('O studio aprende com as conversas anteriores do mesmo projeto para gastar menos nas próximas, sem mexer no modelo. Adaptado do TokenEconomizer (Microsoft Research).'),
+      sw(L('Guardar ferramentas sem uso'), L('Ferramentas que ninguém usa no projeto há {0} pedidos (em 2+ conversas) ou há {1} conversas saem da lista enviada ao modelo. Ele pode trazer de volta quando precisar. Cada ferramenta a menos são centenas de tokens em todo pedido.', TE.pruneP, TE.pruneS), teOn('toolPrune'), (v) => put2({ toolPrune: v })),
+      sw(L('Juiz de laços'), L('Quando o agente repete a mesma ação ou o mesmo erro, um modelo rápido (a API do auditor ou de fundo) decide se ele travou. Só então ele recebe uma orientação para mudar de rumo; se continuar, a resposta para. Sem juiz, vale o aviso fixo.'), teOn('loopJudge'), (v) => put2({ loopJudge: v })),
+      sw(L('Aprender fatos do projeto'), L('Correções que o agente faz ("falhou assim, funcionou assado") viram fatos do projeto depois de confirmados em {0} conversas, e entram no começo das próximas. A revisão roda numa API de fundo.', TE.confirm), teOn('microSkills'), (v) => { put2({ microSkills: v }); drawEco(); }),
+      box);
+  }
+
   section('safety', L('Segurança'), 'shield', L('Quando o studio pede sua permissão antes de agir.'),
     field(L('Pedir confirmação antes de'), seg([['writes', L('O que altera algo')], ['all', L('Qualquer ferramenta')], ['never', L('Nunca perguntar')]], st.approval, (v) => put({ approval: v })), L('Arquivos, comandos e ações de conectores que alteram algo. Conectores marcados como confiáveis (escudo no cartão do conector) não perguntam.')),
     h('button.btn.sm', { type: 'button', style: { alignSelf: 'flex-start' }, onclick: () => setView('mcp') }, ic('plug'), L('Confiança e carregamento de cada conector')));
@@ -165,7 +197,7 @@ function renderSettings() {
 /* As configurações são um painel só: as subpáginas de ajuste e as páginas de recursos (servidor,
    conectores, habilidades...) ficam no mesmo menu. Os itens da barra lateral são atalhos para elas. */
 const SET_EMBED = [['server', L('Servidor'), 'server'], ['mcp', L('Conectores'), 'plug'], ['skills', L('Habilidades'), 'sparkles'], ['personas', L('Personalidades'), 'user'], ['tools', L('Utilitários'), 'wrench']];
-const SET_GROUPS = [[L('Geral'), ['set:model', 'set:tools', 'set:auto', 'set:context', 'set:api']], [L('Recursos'), ['v:server', 'v:mcp', 'v:skills', 'v:personas', 'v:tools']], [L('Segurança'), ['set:safety', 'set:auditor', 'set:sandbox']], [L('Sistema'), ['set:look', 'set:window', 'set:backup', 'set:cloud', 'set:share', 'set:updates', 'set:advanced', 'set:tests']]];
+const SET_GROUPS = [[L('Geral'), ['set:model', 'set:tools', 'set:auto', 'set:context', 'set:economy', 'set:api']], [L('Recursos'), ['v:server', 'v:mcp', 'v:skills', 'v:personas', 'v:tools']], [L('Segurança'), ['set:safety', 'set:auditor', 'set:sandbox']], [L('Sistema'), ['set:look', 'set:window', 'set:backup', 'set:cloud', 'set:share', 'set:updates', 'set:advanced', 'set:tests']]];
 let SET_PAGES = [];
 let setPage = null;
 function openSettings(page) { setPage = page; setView('settings'); }

@@ -108,6 +108,7 @@ async function execTool(name, args, info, tctx, tmsg) {
     if (name === 'video_captions') return await runVideoCaptions(args || {}, tctx, tmsg);
     if (name === 'recall_history') return recallHistory(args || {}, tctx.conv);
     if (name === 'update_todos') return await updateTodos(tctx.conv, args, tctx.signal);
+    if (name === 'restore_tools') return restoreTools(tctx.conv, args);
     if (name === 'notebook') return await notebookTool(tctx.conv, args);
     if (name === 'search_tools') {
       const names = Array.isArray(args?.names) ? args.names : typeof args?.names === 'string' ? args.names.split(/[\s,]+/).filter(Boolean) : [];

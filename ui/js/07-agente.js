@@ -248,7 +248,7 @@ const CONCISE_NOTE = L('Seja direto e econômico: responda só o que foi pedido,
 const LOOP_WARN = 3, LOOP_STOP = 4, ERR_WARN = 3, ERR_STOP = 5;
 function stepGuard(base) {
   return { base, limit: base, cap: base * 3, seen: new Map(), errs: new Map(), warned: new Set(), lastWarn: -99, writes: 0, mark: { done: 0, writes: 0 }, stop: '',
-    files: new Map(), lastWrite: -1, lastRun: -1, checked: false, preflown: false };
+    files: new Map(), lastWrite: -1, lastRun: -1, checked: false, preflown: false, relax: new Map(), judge: null, redirects: 0, fails: new Map() };
 }
 // mesmo arquivo editado tantas vezes numa resposta: o modelo provavelmente está consertando em pedaços o que quebrou
 const EDIT_WARN = 5;
@@ -325,22 +325,28 @@ function guardStep(conv, msg, meta, g, step) {
     }
     // mesma chamada, mesmos argumentos, mesmo resultado: não trouxe nada novo
     const sig = name + ' ' + normArgs(tc.function.arguments) + ' => ' + strHash(String(r.content || ''));
-    const n = (g.seen.get(sig) || 0) + 1; g.seen.set(sig, n);
-    if (n >= LOOP_STOP && g.warned.has(sig)) { g.stop = L('{0} repetido {1} vezes com o mesmo resultado, mesmo depois do aviso', name, n); continue; }
-    if (n >= LOOP_WARN && !g.warned.has(sig)) {
-      g.warned.add(sig); warned = true;
-      noteOn(r, L('[Nota do studio: você já chamou {0} {1} vezes com os mesmos argumentos e recebeu o mesmo resultado. Repetir não traz nada novo: use o que já tem ou mude de abordagem.]', name, n));
-      conv.messages.push({ role: 'notice', icon: 'refresh', content: L('Repetição: {0} devolveu o mesmo resultado {1} vezes. O modelo foi avisado; se insistir, a resposta para.', name, n) });
+    const n0 = (g.seen.get(sig) || 0) + 1; g.seen.set(sig, n0);
+    const n = n0 - (g.relax.get(sig) || 0); // o juiz disse que não travou: conta de novo a partir dali
+    if (n >= LOOP_STOP && g.warned.has(sig)) { g.stop = L('{0} repetido {1} vezes com o mesmo resultado, mesmo depois do aviso', name, n0); continue; }
+    if (n >= LOOP_WARN && !g.warned.has(sig) && !g.judge) {
+      warned = true;
+      const fixed = L('[Nota do studio: você já chamou {0} {1} vezes com os mesmos argumentos e recebeu o mesmo resultado. Repetir não traz nada novo: use o que já tem ou mude de abordagem.]', name, n0);
+      const notice = L('Repetição: {0} devolveu o mesmo resultado {1} vezes. O modelo foi avisado; se insistir, a resposta para.', name, n0);
+      if (teOn('loopJudge')) g.judge = { sig, n: n0, r, fixed, notice, kind: 'loop' };
+      else { g.warned.add(sig); noteOn(r, fixed); conv.messages.push({ role: 'notice', icon: 'refresh', content: notice }); }
     }
     if (r.status !== 'error') continue;
     // o mesmo erro com argumentos diferentes: está tentando no escuro
     const esig = name + ' ' + String(r.content || '').replace(/\d+/g, '#').slice(0, 200);
-    const e = (g.errs.get(esig) || 0) + 1; g.errs.set(esig, e);
-    if (e >= ERR_STOP && g.warned.has(esig)) { g.stop = L('{0} falhou {1} vezes com o mesmo erro, mesmo depois do aviso', name, e); continue; }
-    if (e >= ERR_WARN && !g.warned.has(esig)) {
-      g.warned.add(esig); warned = true;
-      noteOn(r, L('[Nota do studio: {0} falhou {1} vezes com este mesmo erro. Pare e descubra a causa antes de tentar de novo; se não der, explique ao usuário o que está bloqueando.]', name, e));
-      conv.messages.push({ role: 'notice', icon: 'alert', content: L('Repetição: {0} falhou {1} vezes com o mesmo erro. O modelo foi avisado; se insistir, a resposta para.', name, e) });
+    const e0 = (g.errs.get(esig) || 0) + 1; g.errs.set(esig, e0);
+    const e = e0 - (g.relax.get(esig) || 0);
+    if (e >= ERR_STOP && g.warned.has(esig)) { g.stop = L('{0} falhou {1} vezes com o mesmo erro, mesmo depois do aviso', name, e0); continue; }
+    if (e >= ERR_WARN && !g.warned.has(esig) && !g.judge) {
+      warned = true;
+      const fixed = L('[Nota do studio: {0} falhou {1} vezes com este mesmo erro. Pare e descubra a causa antes de tentar de novo; se não der, explique ao usuário o que está bloqueando.]', name, e0);
+      const notice = L('Repetição: {0} falhou {1} vezes com o mesmo erro. O modelo foi avisado; se insistir, a resposta para.', name, e0);
+      if (teOn('loopJudge')) g.judge = { sig: esig, n: e0, r, fixed, notice, kind: 'err' };
+      else { g.warned.add(esig); noteOn(r, fixed); conv.messages.push({ role: 'notice', icon: 'alert', content: notice }); }
     }
   }
   if (warned) g.lastWarn = step;
@@ -410,6 +416,8 @@ async function runAgent(conv) {
     // skills: o catálogo das instaladas vai no prompt e o modelo carrega a que servir com use_skill; as ferramentas
     // que uma skill traz (tools.json) entram quando ela está ativa ou foi carregada
     const skillCat = S.settings.skillCatalog !== false && S.skills.length > 0;
+    if (!Array.isArray(conv.pruned)) conv.pruned = started ? [] : pruneList(conv);
+    if (!started || typeof conv.factsNote !== 'string') conv.factsNote = started ? '' : factsNote(conv);
     const fetchTools = () => api('/api/tools', { ...sel, skillCatalog: skillCat, skillTools: [...new Set([...sel.skills, ...(conv.usedSkills || [])])], apis: S.settings.apiTools === true, extra: conv.extraTools || [], lazy, eager: eagerList(sel.mcp, conv.auto?.eager || []), full: sel.mcp.filter((n) => mcpLoadOf(n) === 'eager') })
       .then((r) => {
         // numa API, o explore aponta para o multi_explore (a descrição padrão manda chamar explore várias vezes)
@@ -422,14 +430,16 @@ async function runAgent(conv) {
         }
         // analyze_image só com alguém que enxergue (o modelo da conversa ou uma API com visão)
         if (!visionOn(conv) && !visionQueue(mainApiForChat(conv)?.id).length) r.tools = (r.tools || []).filter((t) => t.function?.name !== 'analyze_image');
-        return r;
+        return applyPrune(conv, r);
       });
-    let [{ tools, meta, catalog }, ctx] = await Promise.all([
+    let [{ tools, meta, catalog, offered, savedTok }, ctx] = await Promise.all([
       fetchTools(),
       // o prompt de sistema precisa ficar idêntico entre mensagens para o llama-server reaproveitar o cache:
       // só a data (sem hora) e sem a lista de arquivos referenciados (eles já vão na própria mensagem)
       (S.settings.projMap === true ? ensureMap(conv) : Promise.resolve()).then(() => api('/api/context', { ws: wsOf(conv), skills: base, skillCatalog: skillCat, groups, refs: [], lazy, map: S.settings.projMap === true, packs: packLevels(), now: new Date().toLocaleDateString(LOCALE, { dateStyle: 'full' }) })),
     ]);
+    pruneTrack(conv, (offered || []).filter((n) => !(conv.pruned || []).includes(n)));
+    if (!started && conv.pruned.length && savedTok) conv.messages.push({ role: 'notice', icon: 'sparkles', content: L('Economia: {0} ferramentas sem uso neste projeto ficaram de fora (~{1} tokens a menos por pedido). Se precisar, o modelo traz de volta.', conv.pruned.length, savedTok) });
     // o catálogo dos conectores também fica congelado por conversa: conector ligado depois entra como nota
     // na mensagem; desligado continua listado (a chamada só falha) em vez de fazer o servidor reler tudo
     let catalogSys = catalog || '';
@@ -456,6 +466,7 @@ async function runAgent(conv) {
       groups.includes('explore') && preferMulti(conv) ? MULTI_NOTE : '',
       persona?.prompt?.trim() ? L('# Personalidade: {0}\n{1}', persona.name, persona.prompt.trim()) : '',
       proj?.instructions?.trim() ? L('# Instruções do projeto "{0}"\n{1}', proj.name, proj.instructions.trim()) : '',
+      conv.factsNote || '',
       ctx.text,
       catalogSys,
     ].filter(Boolean).join('\n\n');
@@ -622,7 +633,7 @@ async function runAgent(conv) {
         tmsg.ms = performance.now() - ts;
         tmsg.content = r.content; tmsg.isError = r.isError; if (r.data) tmsg.data = r.data; tmsg.status = r.isError ? 'error' : 'ok';
         if (r.images?.length) { tmsg._images = r.images; images.push({ name: tc.function.name, images: r.images }); }
-        if (tc.function.name === 'search_tools') refetch = true;
+        if (tc.function.name === 'search_tools' || tc.function.name === 'restore_tools') refetch = true;
         // skill carregada: fica marcada na conversa e as ferramentas dela entram no próximo passo
         if (tc.function.name === 'use_skill' && !r.isError) {
           const id = /<skill id="([^"]+)"/.exec(r.content || '')?.[1];
@@ -657,6 +668,9 @@ async function runAgent(conv) {
       conv._thinkNext = stepResults.some((m) => m.status === 'error' || m.status === 'denied');
       dedupeResults(conv, stepResults);
       if (guardStep(conv, msg, meta, g, step)) conv._thinkNext = true;
+      if (g.judge) await loopJudge(conv, g, ac.signal);
+      pruneUsed(conv, (msg.tool_calls || []).map((t) => t.function.name));
+      evidenceStep(conv, msg, g);
       if (images.length && visionOn(conv)) {
         for (const im of images) conv.messages.push({ role: 'user', hidden: true, content: L('[Imagem devolvida pela ferramenta {0}]', im.name), _images: im.images });
       }
@@ -708,6 +722,7 @@ function finishRun(conv, ac, forced) {
       for (const st of m.subs || []) if (st.status === 'running' || st.status === 'queued') st.status = stuck;
     }
     setTimeout(() => maybeSummarizeMap(conv), 1500); // pré-leitura: só quando o servidor ficar livre
+    setTimeout(() => reviewFacts(conv), 3000); // micro-habilidades: revisão a cada 3 conversas (numa API)
     const last = conv.messages[conv.messages.length - 1];
     if (last?.role === 'assistant' && !last.content && !last.reasoning && !last.tool_calls?.length) conv.messages.pop();
     if (S.runs.get(conv.id) === ac) S.runs.delete(conv.id);
@@ -916,6 +931,7 @@ async function executorRun(job) {
   const conv = S.convs.find((c) => c.id === job.conv);
   if (!conv) { await api('/api/jobs/done', { job: job.id, ok: false, note: L('Conversa não encontrada.') }).catch(() => {}); return; }
   S.curId = conv.id;
+  window.__execJob = job;
   conv.bg = { state: 'running', at: Date.now() };
   saveConvsNow(true);
   const asked = new Set();
@@ -957,4 +973,180 @@ async function executorLoop() {
       return;
     }
   }
+}
+
+/* ============================================================ economia de tokens
+   Adaptado das ideias do TokenEconomizer (Microsoft Research, Apache-2.0): aprender com as conversas
+   anteriores do mesmo projeto para gastar menos nas próximas, sem mexer no modelo.
+   1. Corte de ferramentas: as que não são usadas no projeto saem da lista (o modelo traz de volta com
+      restore_tools). Fica congelado por conversa, para não quebrar o cache do prompt.
+   2. Guarda de loop com juiz: quando a repetição dispara, um modelo rápido decide se o agente travou; só
+      então ele recebe uma orientação (uma vez por resposta). Sem juiz, vale o aviso fixo de antes.
+   3. Micro-habilidades (desligado por padrão): pares "falhou assim, funcionou assado" viram fatos do
+      projeto; a cada 3 conversas uma revisão curta confirma ou derruba; o fato só entra no começo das
+      conversas depois de visto em 3 conversas diferentes. */
+const TE_CORE = new Set(['read_file', 'list_directory', 'search_files', 'use_skill', 'search_tools', 'restore_tools', 'update_todos']);
+const TE = { pruneMin: 10, pruneP: 10, pruneM: 2, pruneS: 5, judgeConf: 0.7, redirects: 1, reviewK: 3, confirm: 3 };
+function teOn(k) { const v = S.settings[k]; return k === 'microSkills' ? v === true : v !== false; }
+function teKey(conv) { const p = projectOf(conv); return p ? 'p:' + p.id : 'w:' + (wsOf(conv) || '').toLowerCase(); }
+function teGet() { const v = store.get('te', null); return v && typeof v === 'object' ? { prune: {}, facts: {}, ev: {}, rev: {}, ...v } : { prune: {}, facts: {}, ev: {}, rev: {} }; }
+function teSet(st) { store.set('te', st); }
+
+/* ---- 1. corte de ferramentas ---- */
+function pruneList(conv) {
+  if (!teOn('toolPrune')) return [];
+  const p = teGet().prune[teKey(conv)];
+  if (!p || p.n < TE.pruneMin) return [];
+  return Object.entries(p.tools).filter(([n, e]) => !TE_CORE.has(n) && ((e.p >= TE.pruneP && e.s.length >= TE.pruneM) || e.s.length >= TE.pruneS)).map(([n]) => n);
+}
+/** Cada pedido: as ferramentas oferecidas e não usadas contam mais um pedido (e esta conversa). */
+function pruneTrack(conv, offered) {
+  const st = teGet(); const k = teKey(conv);
+  const p = (st.prune[k] ||= { n: 0, tools: {} });
+  p.n++;
+  for (const name of offered) {
+    const e = (p.tools[name] ||= { p: 0, s: [] });
+    e.p++;
+    if (!e.s.includes(conv.id)) { e.s.push(conv.id); if (e.s.length > 8) e.s.shift(); }
+  }
+  teSet(st);
+}
+/** Ferramentas usadas neste passo: zeram a contagem (e saem do corte, se estavam). */
+function pruneUsed(conv, names) {
+  if (!names.length) return;
+  const st = teGet(); const p = st.prune[teKey(conv)];
+  if (!p) return;
+  let ch = false;
+  for (const n of names) if (p.tools[n] && (p.tools[n].p || p.tools[n].s.length)) { p.tools[n] = { p: 0, s: [] }; ch = true; }
+  if (ch) teSet(st);
+}
+function restoreToolDef(names) {
+  return { type: 'function', function: { name: 'restore_tools', description: L('Ferramentas guardadas neste projeto por falta de uso: {0}. Se precisar de alguma, chame esta com os nomes; elas voltam no passo seguinte.', names.join(', ')),
+    parameters: { type: 'object', properties: { names: { type: 'array', items: { type: 'string' } } }, required: ['names'] } } };
+}
+/** Aplica o corte à lista de ferramentas devolvida pelo servidor. */
+function applyPrune(conv, r) {
+  // carregada de propósito (search_tools) não é cortada
+  const cut = (conv.pruned || []).filter((n) => !(conv.extraTools || []).includes(n));
+  r.offered = (r.tools || []).map((t) => t.function?.name).filter(Boolean);
+  if (!cut.length) return r;
+  const out = (r.tools || []).filter((t) => cut.includes(t.function?.name));
+  r.savedTok = Math.round(JSON.stringify(out).length / 4);
+  r.tools = (r.tools || []).filter((t) => !cut.includes(t.function?.name));
+  const really = out.map((t) => t.function.name);
+  if (really.length) { r.tools.push(restoreToolDef(really)); r.meta = { ...(r.meta || {}), restore_tools: { source: 'builtin', mutating: false } }; }
+  return r;
+}
+function restoreTools(conv, args) {
+  const want = (Array.isArray(args?.names) ? args.names : String(args?.names || '').split(/[\s,]+/)).filter(Boolean);
+  const got = want.filter((n) => (conv.pruned || []).includes(n));
+  if (!got.length) return { content: L('Nenhuma dessas está guardada. Guardadas: {0}.', (conv.pruned || []).join(', ') || L('nenhuma')), isError: true };
+  conv.pruned = conv.pruned.filter((n) => !got.includes(n));
+  pruneUsed(conv, got);
+  return { content: L('Restauradas: {0}. Já estão disponíveis no próximo passo.', got.join(', ')), isError: false };
+}
+
+/* ---- 2. guarda de loop com juiz ---- */
+function judgeApi(conv) { return apiFor('auditor') || apiFor('background') || mainApiForChat(conv)?.id || null; }
+async function loopJudge(conv, g, signal) {
+  const j = g.judge; g.judge = null;
+  if (!j) return;
+  const fixed = () => { noteOn(j.r, j.fixed); conv.messages.push({ role: 'notice', icon: j.kind === 'err' ? 'alert' : 'refresh', content: j.notice }); };
+  if (!teOn('loopJudge')) return fixed();
+  const lastUser = [...conv.messages].reverse().find((m) => m.role === 'user' && !m.hidden);
+  const trail = [];
+  for (const m of conv.messages.slice(-40)) {
+    if (m.role === 'assistant') for (const tc of m.tool_calls || []) trail.push('→ ' + tc.function.name + ' ' + String(tc.function.arguments || '').slice(0, 220));
+    else if (m.role === 'tool') trail.push('← ' + (m.isError ? 'ERRO ' : '') + String(m.content || '').replace(/\s+/g, ' ').slice(0, 260));
+  }
+  const sys = L('Você vigia um agente de IA que usa ferramentas. Diga se ele está TRAVADO (repetindo o mesmo erro ou a mesma ação sem avançar) ou se está progredindo (cada tentativa traz informação nova ou chega mais perto do objetivo). Responda só com JSON: {"stuck": true ou false, "confidence": número de 0 a 1, "why": "uma frase", "redirect": "se travado: 1 ou 2 frases dizendo o que fazer diferente"}.');
+  const user = L('PEDIDO DO USUÁRIO:\n{0}\n\nÚLTIMOS PASSOS (→ chamada, ← resultado):\n{1}\n\nGATILHO: {2}', String(lastUser?.content || '').slice(0, 1500), trail.slice(-16).join('\n'), j.notice);
+  const msg = { content: '', reasoning: '', tool_calls: [] };
+  let v = null;
+  try {
+    const p = judgeApi(conv);
+    const msgs = [{ role: 'system', content: sys }, { role: 'user', content: user }];
+    if (p) await streamApi(msgs, [], msg, signal, () => {}, { _p: p, temperature: 0, max_tokens: 400, _timeout: 45000, _bg: true });
+    else await streamRaw(msgs, [], msg, signal, () => {}, { temperature: 0, max_tokens: 400, _fixed: true });
+    const t = splitThink(msg.content || '').text;
+    v = JSON.parse((t.match(/\{[\s\S]*\}/) || ['null'])[0]);
+  } catch (e) { if (signal.aborted) throw e; }
+  if (!v || typeof v.stuck !== 'boolean') return fixed();
+  conv.judged = (conv.judged || 0) + 1;
+  if (v.stuck && Number(v.confidence) >= TE.judgeConf) {
+    g.warned.add(j.sig);
+    if ((g.redirects || 0) < TE.redirects) {
+      g.redirects = (g.redirects || 0) + 1;
+      noteOn(j.r, L('[Nota do studio: você parece travado ({0}). {1}]', String(v.why || '').slice(0, 200), String(v.redirect || L('Mude de abordagem antes de tentar de novo.')).slice(0, 400)));
+      conv.messages.push({ role: 'notice', icon: 'refresh', content: L('O juiz achou que o modelo travou ({0}). Ele recebeu uma orientação para mudar de rumo.', String(v.why || '').slice(0, 160)) });
+    } else {
+      conv.messages.push({ role: 'notice', icon: 'alert', content: L('Continua travado mesmo depois da orientação ({0}). Se não melhorar no próximo passo, a resposta para; você pode parar agora.', String(v.why || '').slice(0, 160)) });
+      if (EXECUTOR && window.__execJob) api('/api/jobs/ask', { job: window.__execJob.id }).catch(() => {});
+    }
+  } else {
+    // não travou: não gasta aviso nem para; só volta a olhar se repetir bem mais
+    g.relax.set(j.sig, j.n);
+  }
+}
+
+/* ---- 3. micro-habilidades ---- */
+function evidenceStep(conv, msg, g) {
+  if (!teOn('microSkills')) return;
+  for (const tc of msg.tool_calls || []) {
+    const r = conv.messages.find((m) => m.role === 'tool' && m.tool_call_id === tc.id);
+    if (!r || r.status === 'denied') continue;
+    const name = tc.function.name, args = String(tc.function.arguments || '').slice(0, 240);
+    if (r.status === 'error') { g.fails.set(name, { args, err: String(r.content || '').replace(/\s+/g, ' ').slice(0, 240) }); continue; }
+    const f = g.fails.get(name);
+    if (f && f.args !== args) {
+      g.fails.delete(name);
+      const st = teGet(); const k = teKey(conv);
+      const ev = (st.ev[k] ||= []);
+      ev.push({ tool: name, bad: f.args, err: f.err, good: args, conv: conv.id, t: Date.now() });
+      if (ev.length > 40) ev.splice(0, ev.length - 40);
+      teSet(st);
+    }
+  }
+}
+function factsNote(conv) {
+  if (!teOn('microSkills')) return '';
+  const fs = (teGet().facts[teKey(conv)] || []).filter((f) => (f.convs || []).length >= TE.confirm).slice(0, 12);
+  return fs.length ? L('# O que já se aprendeu neste projeto (confirmado em conversas anteriores)\n{0}', fs.map((f) => '- ' + f.text).join('\n')) : '';
+}
+/** Fim de uma resposta: a cada 3 conversas com evidência nova, uma revisão curta vira fatos. */
+async function reviewFacts(conv) {
+  if (!teOn('microSkills')) return;
+  const k = teKey(conv);
+  let st = teGet();
+  const rev = (st.rev[k] ||= { convs: [] });
+  if (!rev.convs.includes(conv.id)) { rev.convs.push(conv.id); teSet(st); }
+  const ev = st.ev[k] || [];
+  if (rev.convs.length < TE.reviewK || !ev.length) return;
+  const p = apiFor('background') || apiFor('auditor') || null;
+  if (!p) return; // revisão só numa API (não ocupa o modelo local)
+  rev.convs = []; teSet(st);
+  const facts = st.facts[k] || [];
+  const sys = L('Você extrai FATOS DO PROJETO a partir de falhas corrigidas por um agente de IA: coisas estáveis deste repositório que evitariam o erro da próxima vez (ex.: "use python -m pytest, não pytest"; "o build é cargo build --no-default-features"; "os testes ficam em tests/ordem"). Nada genérico, nada sobre uma tarefa específica. Responda só com JSON: {"facts": [{"text": "fato curto e imperativo", "from": [índices das evidências], "same_as": id de um fato existente ou null}], "contradicted": [ids de fatos existentes que as evidências desmentem]}.');
+  const user = L('FATOS JÁ CONHECIDOS:\n{0}\n\nEVIDÊNCIAS (falhou → funcionou):\n{1}', facts.map((f) => `[${f.id}] ${f.text}`).join('\n') || L('(nenhum)'), ev.map((e, i) => `${i}. ${e.tool}: ${e.bad} → ERRO ${e.err} → OK ${e.good}`).join('\n'));
+  const msg = { content: '', reasoning: '', tool_calls: [] };
+  try {
+    await streamApi([{ role: 'system', content: sys }, { role: 'user', content: user }], [], msg, new AbortController().signal, () => {}, { _p: p, temperature: 0.2, max_tokens: 1200, _timeout: 90000, _bg: true });
+    const v = JSON.parse((splitThink(msg.content || '').text.match(/\{[\s\S]*\}/) || ['null'])[0]);
+    if (!v) return;
+    st = teGet();
+    const list = st.facts[k] || [];
+    const gone = new Set((v.contradicted || []).map(String));
+    const keep = list.filter((f) => !gone.has(String(f.id)));
+    for (const f of v.facts || []) {
+      const text = String(f.text || '').trim().slice(0, 240);
+      if (!text) continue;
+      const convs = [...new Set((f.from || []).map((i) => ev[i]?.conv).filter(Boolean))];
+      const same = keep.find((x) => String(x.id) === String(f.same_as) || x.text.toLowerCase() === text.toLowerCase());
+      if (same) same.convs = [...new Set([...(same.convs || []), ...convs])];
+      else keep.push({ id: uid().slice(0, 6), text, convs, t: Date.now() });
+    }
+    st.facts[k] = keep.slice(-40);
+    st.ev[k] = [];
+    teSet(st);
+  } catch { /* fica para a próxima */ }
 }
