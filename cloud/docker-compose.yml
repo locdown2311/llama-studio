@@ -22,7 +22,7 @@ services:
     image: ${HUB_HUB_IMAGE:-ghcr.io/locdown2311/studio-hub:latest}
     restart: unless-stopped
     # só para o proxy desta máquina (nginx); nunca direto na internet
-    ports: ["127.0.0.1:${HUB_PORT:-8700}:8700"]
+    ports: ["${HUB_LISTEN:-127.0.0.1}:${HUB_PORT:-8700}:8700"]
     environment:
       HUB_PUBLIC_URL: https://${DOMAIN}
       HUB_DATA: ${HUB_DATA:-/srv/studio-hub}
