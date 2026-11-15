@@ -76,6 +76,13 @@ pub struct ApiProvider {
     pub name: String,
     pub base: String,
     pub key: String,
+    /// Rotação: várias chaves da mesma API. Quando uma acaba (limite do dia, cota, 429, chave recusada), o pedido
+    /// passa na hora para a próxima. Vazio = só `key`.
+    #[serde(default)]
+    pub keys: Vec<String>,
+    /// A API foi criada como "rotação de chaves" (a interface mostra a lista de chaves no lugar da chave única).
+    #[serde(default)]
+    pub rotate: bool,
     pub model: String,
     
     // Adicionar estes dois campos:

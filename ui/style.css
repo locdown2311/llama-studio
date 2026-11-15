@@ -1870,3 +1870,13 @@ details.verify.warn summary svg { color: var(--warn); }
 .mstats td:first-child { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mstats td.bad { color: var(--err); font-weight: 600; }
 .mstats tr.best td { background: var(--ok-soft); }
+.rot-box { display: flex; flex-direction: column; gap: 8px; }
+.rot-list { display: flex; flex-direction: column; gap: 4px; }
+.rot-key { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.rot-key.cur { border-color: var(--accent); }
+.rot-key.off { opacity: .75; }
+.rot-key .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rot-acts { display: flex; gap: 8px; }
+.rot-key > .mono { white-space: nowrap; flex: none; }
+.rot-key > .small { flex: 1; }
+.rot-key > .spacer { display: none; }

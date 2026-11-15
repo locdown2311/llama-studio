@@ -196,6 +196,7 @@ const API_PRESETS = [
   ['nvidia', 'NVIDIA NIM', 'https://integrate.api.nvidia.com/v1', 'https://build.nvidia.com/settings/api-keys'],
   ['cloudflare', 'Cloudflare Workers AI', 'https://api.cloudflare.com/client/v4/accounts/ID_DA_CONTA/ai/v1', 'https://dash.cloudflare.com/profile/api-tokens'],
   ['custom', L('Outro (compatível com OpenAI)'), '', ''],
+  ['rotation', L('Outro (rotação de chaves)'), '', ''],
 ];
 const API_ROLES = [
   ['auditor', L('Auditor'), L('Manda o seu pedido, o que o agente disse e os argumentos da ação (comandos, caminhos).')],
@@ -250,6 +251,31 @@ function recApply(a, rec) {
   if (rec.context && !a.contextSet) patch.context = rec.context;
   if (rec.preserve && !a.preserveThinking) patch.preserveThinking = true;
   return patch;
+}
+
+/** Rotação de chaves: a lista (só o fim de cada uma, como o servidor manda), o estado e como acrescentar. */
+function rotKeys(a, save) {
+  const list = a.keys?.list || [];
+  const fmt = (s) => (s >= 3600 ? L('{0} h', Math.ceil(s / 3600)) : s >= 60 ? L('{0} min', Math.ceil(s / 60)) : L('{0} s', s));
+  const rows = list.map((k, i) => h('div.rot-key' + (k.wait ? '.off' : i === a.keys.cur ? '.cur' : ''), null,
+    h('span.mono', null, `${i + 1}. ••••${k.tail}`),
+    h('span.small' + (k.wait ? '.err' : '.muted'), { title: k.why || '' }, k.wait ? L('esgotada, volta em {0}', fmt(k.wait)) + (k.why ? ` — ${k.why}` : '') : i === a.keys.cur ? L('em uso') : L('livre')),
+    h('span.spacer'),
+    h('button.icon-btn.sm', { type: 'button', title: L('Remover esta chave'), 'aria-label': L('Remover esta chave'), html: svg('trash'), onclick: async () => {
+      if (await confirmBox(L('Remover a chave ••••{0}?', k.tail), L('Remover'), true)) save({ apiProvider: { id: a.id, removeKey: i } });
+    } })));
+  const ta = h('textarea.textarea.mono', { rows: 3, placeholder: L('Cole uma ou mais chaves, uma por linha'), autocomplete: 'off', spellcheck: false });
+  const add = h('button.btn.sm', { type: 'button', onclick: () => {
+    const v = ta.value.trim();
+    if (!v) return;
+    save({ apiProvider: { id: a.id, addKeys: [v], rotate: true } });
+    ta.value = '';
+  } }, ic('plus'), L('Adicionar chaves'));
+  return h('div.field.rot-box', null,
+    h('label', null, L('Chaves (rotação)'), list.length ? h('span.muted', null, ` · ${list.length}`) : null),
+    rows.length ? h('div.rot-list', null, rows) : h('small.muted', null, L('Nenhuma chave ainda.')),
+    ta, h('div.rot-acts', null, add),
+    h('small', null, L('O studio usa uma chave até ela acabar (limite do dia, cota, crédito, 429 ou chave recusada) e passa na hora para a próxima. Cada chave tem a sua própria fila e o seu limite do dia. Chave esgotada volta sozinha: no tempo que o provedor pedir, à meia-noite UTC (limite do dia) ou em uma hora (chave recusada).')));
 }
 
 function apiSection(put, field, saved) {
@@ -404,6 +430,7 @@ function apiSection(put, field, saved) {
         ...roles.map((r) => h('span.tag.role', null, r)),
         a.vision ? h('span.tag', { title: L('Aceita imagens') }, ic('image'), L('imagens')) : null,
         isNimApi(a) ? h('span.tag', { title: L('Fila do NVIDIA NIM (40 pedidos por minuto)') }, 'NIM') : null,
+        a.keys?.list?.length ? h('span.tag', { title: L('Rotação de chaves: {0} esgotada(s) agora', a.keys.list.filter((k) => k.wait).length) }, L('{0} chaves', a.keys.list.length) + (a.keys.list.some((k) => k.wait) ? L(' · {0} esgotada(s)', a.keys.list.filter((k) => k.wait).length) : '')) : null,
         !isNimApi(a) && a.limited ? h('span.tag', { title: L('Limite configurado: a fila segura os pedidos antes do limite') }, [a.rpm ? L('{0}/min', a.rpm) : '', a.rpd ? L('{0}/dia', a.rpd) : ''].filter(Boolean).join(' · ') || L('limite da conta')) : null,
         u.calls ? h('span.tag.use', { title: L('Hoje: {0} pedidos, {1} tokens, {2} falhas (voltaram para o modelo local).', u.calls, u.tokens.toLocaleString(LOCALE), u.fails) }, L('{0} hoje', u.calls) + (u.fails ? ` · ${u.fails}×` : '')) : null),
       h('div.api-acts', null, pingBtn, del));
@@ -413,7 +440,8 @@ function apiSection(put, field, saved) {
       h('div.api-body', null,
         h('div.api-grid', null,
           field(L('Nome'), nome, L('Como aparece na lista de modelos. Vazio = id do modelo.')),
-          field(L('Chave'), key, pre?.[3] ? h('a.bin-link', { href: pre[3], target: '_blank', rel: 'noopener' }, ic('external'), L('Pegar uma chave grátis')) : null)),
+          a.rotate || a.keys ? null : field(L('Chave'), key, pre?.[3] ? h('a.bin-link', { href: pre[3], target: '_blank', rel: 'noopener' }, ic('external'), L('Pegar uma chave grátis')) : null)),
+        a.rotate || a.keys ? rotKeys(a, save) : null,
         cf ? field(L('ID da conta'), cfAcc, L('No painel da Cloudflare: Workers AI › Use REST API (ou a barra lateral da conta). O token precisa da permissão Workers AI.')) : pre ? null : field(L('Endereço'), base, L('O que vem antes de /chat/completions.')),
         field(L('Modelo'), h('div.api-model-row', null, model, dl, listBtn, test)),
         testOut,
@@ -443,6 +471,7 @@ function apiSection(put, field, saved) {
       const patch = { id: 'p' + n, base: p[2], name: p[0] === 'custom' ? '' : '' };
       API_OPEN.add(patch.id); store.set('apiOpen', [...API_OPEN]);
       if (p[0] === 'cloudflare') { patch.name = 'Cloudflare'; patch.model = CF_MODELS[0]; patch.context = 262144; }
+      if (p[0] === 'rotation') patch.rotate = true;
       save({ apiProvider: patch });
     });
     // por função: modelo local ou uma das APIs (só as prontas)

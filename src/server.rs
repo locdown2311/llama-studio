@@ -710,6 +710,30 @@ async fn set_config(State(app): S, b: Bytes) -> Res {
                         *f = x.trim().to_string();
                     }
                 }
+                if let Some(x) = p.get("rotate").and_then(Value::as_bool) {
+                    e.rotate = x;
+                }
+                // rotação: chaves novas entram no fim (sem repetir); removeKey tira pela posição. A interface nunca
+                // recebe as chaves, só o fim de cada uma.
+                if let Some(arr) = p.get("addKeys").and_then(Value::as_array) {
+                    if e.keys.is_empty() && !e.key.trim().is_empty() {
+                        e.keys.push(e.key.trim().to_string());
+                    }
+                    for k in arr.iter().filter_map(Value::as_str).flat_map(|t| t.split(['\n', ',', ';', ' '])).map(str::trim).filter(|k| k.len() >= 8) {
+                        if !e.keys.iter().any(|x| x == k) {
+                            e.keys.push(k.to_string());
+                        }
+                    }
+                    e.key = e.keys.first().cloned().unwrap_or_default();
+                }
+                if let Some(i) = p.get("removeKey").and_then(Value::as_u64) {
+                    let mut all = crate::remote::pool(e);
+                    if (i as usize) < all.len() {
+                        all.remove(i as usize);
+                    }
+                    e.keys = all;
+                    e.key = e.keys.first().cloned().unwrap_or_default();
+                }
                 if let Some(x) = p.get("vision").and_then(Value::as_bool) {
                     e.vision = x;
                 }
@@ -1043,7 +1067,20 @@ async fn nim_status_handler(State(app): S, Query(q): Query<HashMap<String, Strin
         None => cfg.api_providers.iter().find(|p| crate::remote::is_nim(p)),
     };
     ok(match p {
-        Some(p) => app.limits.status(&app, p),
+        // com rotação, o medidor mostra a fila da chave da vez (cada chave tem a sua)
+        Some(p) => {
+            let cur = crate::remote::current(p);
+            let mut v = app.limits.status(&app, &cur);
+            let keys = crate::remote::pool(p);
+            if keys.len() > 1 {
+                let i = keys.iter().position(|k| *k == cur.key).unwrap_or(0);
+                v["rot"] = json!({ "cur": i + 1, "n": keys.len() });
+                if v.get("limited").and_then(Value::as_bool) != Some(true) {
+                    v["limited"] = json!(true);
+                }
+            }
+            v
+        }
         None => json!({ "limited": false }),
     })
 }

@@ -119,7 +119,9 @@ pub fn public(app: &App) -> Value {
 
         "params": p.params,
         "thinkParams": p.think_params,
-        "hasKey": !p.key.trim().is_empty(),
+        "hasKey": !p.key.trim().is_empty() || !pool(p).is_empty(),
+        "rotate": p.rotate,
+        "keys": rot_public(p),
         "ready": ready(p)
     })).collect::<Vec<_>>())
 }
@@ -146,7 +148,7 @@ fn client() -> &'static reqwest::Client {
     })
 }
 /// `side`: pedido que não é a conversa (explorador, auditor, tarefa de fundo); na fila do NIM ele cede a vez.
-async fn send_with_retries(app: &App, c: &ApiProvider, model: &str, body_str: &str, max_retries: u32, side: bool) -> Result<reqwest::Response, SendErr> {
+async fn send_with_retries(app: &App, c: &ApiProvider, model: &str, body_str: &str, max_retries: u32, side: bool, rotating: bool) -> Result<reqwest::Response, SendErr> {
     let mut attempt = 0u32;
     let limited = crate::limits::rule(&app.cfg(), c).is_some();
 
@@ -155,7 +157,8 @@ async fn send_with_retries(app: &App, c: &ApiProvider, model: &str, body_str: &s
         if limited {
             let w = app.limits.model_wait(app, c, model);
             if !w.is_zero() {
-                if side && w.as_secs() > 20 {
+                // com rotação, outra chave pode estar livre: não espera esta
+                if rotating || (side && w.as_secs() > 20) {
                     return Err(SendErr::Limit(w.as_secs() + 1, label(c)));
                 }
                 tokio::time::sleep(w).await;
@@ -205,12 +208,14 @@ async fn send_with_retries(app: &App, c: &ApiProvider, model: &str, body_str: &s
                     .unwrap_or_else(|| body.chars().take(200).collect());
                 let why: String = why.trim().chars().take(200).collect();
                 app.limits.refused(app, c, model, secs, &why);
-                if attempt >= max_retries.max(1) {
+                if rotating || attempt >= max_retries.max(1) {
                     return Err(SendErr::Refused(secs, format!("{} ({model})", label(c)), why));
                 }
                 attempt += 1;
             }
 
+            // com rotação, 429 é com a próxima chave (não insiste nesta)
+            Ok(r) if rotating && r.status().as_u16() == 429 => return Ok(r),
             Ok(r) if matches!(r.status().as_u16(), 429 | 500 | 502 | 503 | 529) && attempt < max_retries => {
                 attempt += 1;
                 let delay = std::cmp::min(1000 * attempt as u64, 3000);
@@ -233,7 +238,7 @@ pub async fn call_provider_direct(app: &App, provider_id: &str, prompt: &str) ->
     });
 
     let max_retries = c.retries.unwrap_or(1).min(10);
-    let sent = send_with_retries(app, &c, c.model.trim(), &body.to_string(), max_retries, true).await;
+    let sent = send_with_retries(app, &c, c.model.trim(), &body.to_string(), max_retries, true, false).await;
 
     match sent {
         Ok(resp) => {
@@ -327,7 +332,40 @@ pub async fn chat(app: &App, id: &str, body: Bytes, side: bool) -> Response {
     };
 
     let max_retries = c.retries.unwrap_or(1).min(10);
-    let mut sent = send_with_retries(app, &c, c.model.trim(), &prep_body(&c.model), max_retries, side).await;
+    // rotação de chaves: tenta a chave da vez; se ela acabou, marca e passa na hora para a próxima
+    let keys = pool(&c);
+    if keys.len() > 1 {
+        let order = rot_order(&c, &keys);
+        let n = keys.len();
+        let mut last_err: Option<Response> = None;
+        for (pos, (i, key)) in order.iter().enumerate() {
+            let ck = ApiProvider { key: key.clone(), ..c.clone() };
+            let last = pos + 1 == order.len();
+            let (sent, used_fb) = attempt(app, &ck, &prep_body, max_retries, side, !last).await;
+            match exhausted(sent).await {
+                Outcome::Ok(resp) => {
+                    rot_ok(&c, *i);
+                    return respond(resp, &c, used_fb, Some((*i + 1, n)));
+                }
+                Outcome::Spent(secs, why, fallback) => {
+                    rot_block(&c, key, secs, &why);
+                    last_err = Some(fallback);
+                }
+                Outcome::Fail(resp) => return resp,
+            }
+        }
+        return last_err.unwrap_or_else(|| err(StatusCode::TOO_MANY_REQUESTS, LF!("Todas as {n} chaves de {} estão esgotadas.", "All {n} keys of {} are exhausted.", label(&c))));
+    }
+    let (sent, used_fallback) = attempt(app, &c, &prep_body, max_retries, side, false).await;
+    match sent {
+        Ok(resp) => respond(resp, &c, used_fallback, None),
+        Err(e) => send_err(e),
+    }
+}
+
+/// Um envio completo numa chave: o modelo principal e, se ele falhar, o reserva.
+async fn attempt(app: &App, c: &ApiProvider, prep_body: &(dyn Fn(&str) -> String + Sync), max_retries: u32, side: bool, rotating: bool) -> (Result<reqwest::Response, SendErr>, bool) {
+    let mut sent = send_with_retries(app, c, c.model.trim(), &prep_body(&c.model), max_retries, side, rotating).await;
     let mut used_fallback = false;
 
     let has_fallback = !c.fallback_model.trim().is_empty() && c.fallback_model.trim() != c.model.trim();
@@ -340,7 +378,7 @@ pub async fn chat(app: &App, id: &str, body: Bytes, side: bool) -> Response {
             Ok(r) => !r.status().is_success(),
         };
         if needs_fallback {
-            let fb_res = send_with_retries(app, &c, c.fallback_model.trim(), &prep_body(&c.fallback_model), max_retries, side).await;
+            let fb_res = send_with_retries(app, c, c.fallback_model.trim(), &prep_body(&c.fallback_model), max_retries, side, rotating).await;
             match fb_res {
                 // Usa 'ref r2' para apenas referenciar a resposta ao checar o status, sem movê-la
                 Ok(ref r2) if r2.status().is_success() => {
@@ -356,23 +394,30 @@ pub async fn chat(app: &App, id: &str, body: Bytes, side: bool) -> Response {
         }
     }
 
-    match sent {
-        Ok(resp) => {
-            let status = resp.status().as_u16();
-            let mut out = Response::builder().status(status);
-            for (k, val) in resp.headers() {
-                if matches!(k.as_str(), "content-type" | "retry-after" | "x-ratelimit-remaining-requests" | "x-ratelimit-remaining-tokens") {
-                    out = out.header(k, val);
-                }
-            }
-            if used_fallback {
-                out = out.header("x-studio-fallback-model", c.fallback_model.trim());
-            }
+    (sent, used_fallback)
+}
 
-            out.body(Body::from_stream(safe_stream(resp, label(&c)))).unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response())
+/// A resposta do provedor repassada para a interface (em fluxo).
+fn respond(resp: reqwest::Response, c: &ApiProvider, used_fallback: bool, key: Option<(usize, usize)>) -> Response {
+    let status = resp.status().as_u16();
+    let mut out = Response::builder().status(status);
+    for (k, val) in resp.headers() {
+        if matches!(k.as_str(), "content-type" | "retry-after" | "x-ratelimit-remaining-requests" | "x-ratelimit-remaining-tokens") {
+            out = out.header(k, val);
         }
+    }
+    if used_fallback {
+        out = out.header("x-studio-fallback-model", c.fallback_model.trim());
+    }
+    if let Some((i, n)) = key {
+        out = out.header("x-studio-key", format!("{i}/{n}"));
+    }
+    out.body(Body::from_stream(safe_stream(resp, label(c)))).unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response())
+}
 
-        Err(e @ (SendErr::Limit(..) | SendErr::Daily(..) | SendErr::Refused(..))) => {
+fn send_err(e: SendErr) -> Response {
+    match e {
+        e @ (SendErr::Limit(..) | SendErr::Daily(..) | SendErr::Refused(..)) => {
             let mut h = axum::http::HeaderMap::new();
             if let Ok(v) = e.wait().unwrap_or(30).to_string().parse::<axum::http::HeaderValue>() {
                 h.insert(axum::http::header::RETRY_AFTER, v);
@@ -380,8 +425,176 @@ pub async fn chat(app: &App, id: &str, body: Bytes, side: bool) -> Response {
             (StatusCode::TOO_MANY_REQUESTS, h, Json(json!({ "error": { "message": e.msg() } }))).into_response()
         }
 
-        Err(e) => err(StatusCode::BAD_GATEWAY, LF!("API externa indisponível ({}).", "External API unavailable ({}).", e.msg())),
+        e => err(StatusCode::BAD_GATEWAY, LF!("API externa indisponível ({}).", "External API unavailable ({}).", e.msg())),
     }
+}
+
+/* ---- rotação de chaves ----
+   A chave da vez fica fixa enquanto funciona (o cache do provedor é por chave). Quando ela acaba, fica de lado
+   pelo tempo que o provedor pediu (429), até a meia-noite UTC (limite do dia, cota, crédito) ou uma hora (chave
+   recusada), e a próxima entra na hora. Cada chave tem a própria fila e o próprio contador do dia. */
+
+use std::collections::HashMap;
+
+struct Rot {
+    cur: usize,
+    /// hash da chave -> (até quando, por quê)
+    blocked: HashMap<u64, (std::time::Instant, String)>,
+}
+static ROT: std::sync::Mutex<Option<HashMap<String, Rot>>> = std::sync::Mutex::new(None);
+
+fn khash(k: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    k.trim().hash(&mut h);
+    h.finish()
+}
+
+/// As chaves da API: a lista da rotação (sem vazias e repetidas) ou só a chave única.
+pub fn pool(c: &ApiProvider) -> Vec<String> {
+    let mut v: Vec<String> = vec![];
+    for k in c.keys.iter().chain(std::iter::once(&c.key)) {
+        let k = k.trim();
+        if !k.is_empty() && !v.iter().any(|x| x == k) {
+            v.push(k.to_string());
+        }
+    }
+    if !c.keys.is_empty() {
+        // com rotação, a ordem é a da lista; a chave única antiga só entra se não estiver nela
+        v.sort_by_key(|k| c.keys.iter().position(|x| x.trim() == k).unwrap_or(usize::MAX));
+    }
+    v
+}
+
+/// A ordem de tentativa: a da vez primeiro, depois as seguintes; as que estão de lado só no fim (a que volta antes primeiro).
+fn rot_order(c: &ApiProvider, keys: &[String]) -> Vec<(usize, String)> {
+    let mut g = ROT.lock().unwrap_or_else(|e| e.into_inner());
+    let r = g.get_or_insert_with(HashMap::new).entry(c.id.clone()).or_insert(Rot { cur: 0, blocked: HashMap::new() });
+    let now = std::time::Instant::now();
+    r.blocked.retain(|_, (t, _)| *t > now);
+    let n = keys.len();
+    let start = r.cur % n;
+    let (mut free, mut out): (Vec<(usize, String)>, Vec<(usize, String)>) = (vec![], vec![]);
+    for j in 0..n {
+        let i = (start + j) % n;
+        if r.blocked.contains_key(&khash(&keys[i])) { out.push((i, keys[i].clone())) } else { free.push((i, keys[i].clone())) }
+    }
+    out.sort_by_key(|(_, k)| r.blocked.get(&khash(k)).map(|x| x.0));
+    // todas de lado: tenta só a que volta antes (as outras acabariam do mesmo jeito)
+    if free.is_empty() {
+        out.truncate(1);
+    }
+    free.extend(out);
+    free
+}
+
+fn rot_ok(c: &ApiProvider, i: usize) {
+    let mut g = ROT.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(r) = g.get_or_insert_with(HashMap::new).get_mut(&c.id) {
+        r.cur = i;
+    }
+}
+
+fn rot_block(c: &ApiProvider, key: &str, secs: u64, why: &str) {
+    let mut g = ROT.lock().unwrap_or_else(|e| e.into_inner());
+    let r = g.get_or_insert_with(HashMap::new).entry(c.id.clone()).or_insert(Rot { cur: 0, blocked: HashMap::new() });
+    r.blocked.insert(khash(key), (std::time::Instant::now() + Duration::from_secs(secs.max(5)), why.chars().take(200).collect()));
+    let keys = pool(c);
+    if let Some(i) = keys.iter().position(|k| k == key) {
+        r.cur = (i + 1) % keys.len().max(1);
+    }
+}
+
+fn until_midnight_utc() -> u64 {
+    let s = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    86_400 - s % 86_400 + 30
+}
+
+enum Outcome {
+    Ok(reqwest::Response),
+    /// a chave acabou: segundos de lado, motivo, a resposta de erro (se for a última)
+    Spent(u64, String, Response),
+    /// erro que não é da chave (pedido inválido, servidor fora): volta como veio, sem trocar de chave
+    Fail(Response),
+}
+
+/// A chave acabou, deu certo ou é outro erro?
+async fn exhausted(sent: Result<reqwest::Response, SendErr>) -> Outcome {
+    match sent {
+        Ok(r) if r.status().is_success() => Outcome::Ok(r),
+        Ok(r) => {
+            let st = r.status().as_u16();
+            let ra = r.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.trim().parse::<u64>().ok());
+            let body = r.text().await.unwrap_or_default();
+            let low = body.to_lowercase();
+            let quota = ["quota", "exceeded", "insufficient", "credit", "balance", "daily", "per day", "billing", "limit"].iter().any(|w| low.contains(w));
+            let secs = match st {
+                // cota, crédito, limite do dia: até a meia-noite UTC
+                402 => until_midnight_utc(),
+                429 if ["day", "daily", "quota", "credit", "balance"].iter().any(|w| low.contains(w)) => until_midnight_utc(),
+                429 => ra.unwrap_or(60),
+                401 | 403 if quota => until_midnight_utc(),
+                // chave recusada (revogada, errada): uma hora
+                401 | 403 => 3600,
+                _ => return Outcome::Fail(passthrough(st, body)),
+            };
+            let msg: String = serde_json::from_str::<Value>(&body).ok()
+                .and_then(|v| v["error"]["message"].as_str().or(v["detail"].as_str()).or(v["message"].as_str()).map(str::to_string))
+                .unwrap_or_else(|| body.chars().take(200).collect());
+            let why = format!("{st}: {}", msg.trim().chars().take(200).collect::<String>());
+            let resp = err(StatusCode::TOO_MANY_REQUESTS, LF!("Todas as chaves recusaram; a última disse {why}.", "All keys were refused; the last one said {why}."));
+            Outcome::Spent(secs, why, resp)
+        }
+        Err(e @ (SendErr::Daily(..) | SendErr::Limit(..) | SendErr::Refused(..))) => {
+            let secs = match &e {
+                SendErr::Daily(..) => until_midnight_utc(),
+                SendErr::Limit(s, _) | SendErr::Refused(s, _, _) => (*s).max(5),
+                _ => 60,
+            };
+            let why = e.msg();
+            let mut h = axum::http::HeaderMap::new();
+            if let Ok(v) = secs.min(86_400).to_string().parse::<axum::http::HeaderValue>() {
+                h.insert(axum::http::header::RETRY_AFTER, v);
+            }
+            let resp = (StatusCode::TOO_MANY_REQUESTS, h, Json(json!({ "error": { "message": why.clone() } }))).into_response();
+            Outcome::Spent(secs, why, resp)
+        }
+        Err(e) => Outcome::Fail(send_err(e)),
+    }
+}
+
+/// Repassa um erro do provedor que não é de chave (400, 500...) como veio.
+fn passthrough(st: u16, body: String) -> Response {
+    Response::builder().status(st).header("content-type", "application/json").body(Body::from(body)).unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response())
+}
+
+/// Para a interface: as chaves mascaradas (só o fim), qual é a da vez e as que estão de lado.
+fn rot_public(c: &ApiProvider) -> Value {
+    let keys = pool(c);
+    if keys.len() < 2 && !c.rotate {
+        return Value::Null;
+    }
+    let g = ROT.lock().unwrap_or_else(|e| e.into_inner());
+    let r = g.as_ref().and_then(|m| m.get(&c.id));
+    let now = std::time::Instant::now();
+    json!({
+        "cur": r.map(|r| r.cur % keys.len().max(1)).unwrap_or(0),
+        "list": keys.iter().map(|k| {
+            let tail: String = k.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect();
+            let b = r.and_then(|r| r.blocked.get(&khash(k))).filter(|(t, _)| *t > now);
+            json!({ "tail": tail, "wait": b.map(|(t, _)| t.saturating_duration_since(now).as_secs()), "why": b.map(|(_, w)| w.clone()) })
+        }).collect::<Vec<_>>(),
+    })
+}
+
+/// A chave da vez (para listar modelos, testar e o medidor).
+pub fn current(c: &ApiProvider) -> ApiProvider {
+    let keys = pool(c);
+    if keys.len() < 2 {
+        return c.clone();
+    }
+    let i = rot_order(c, &keys).first().map(|x| x.0).unwrap_or(0);
+    ApiProvider { key: keys[i].clone(), ..c.clone() }
 }
 
 /// Abre a conexão com o provedor antes do primeiro pedido (TLS pronto quando o auditor ou o explorador
@@ -395,7 +608,7 @@ pub async fn warm(app: &App, id: &str) {
 
 /// Testa se a API responde (ping leve). Retorna Ok se a API está online.
 pub async fn ping(app: &App, id: &str) -> Result<(), String> {
-    let c = provider(app, id).ok_or_else(|| L!("API não encontrada.", "API not found.").to_string())?;
+    let c = current(&provider(app, id).ok_or_else(|| L!("API não encontrada.", "API not found.").to_string())?);
     if c.base.trim().is_empty() || c.model.trim().is_empty() {
         return Err(L!("Configuração incompleta.", "Incomplete configuration.").into());
     }
@@ -424,7 +637,7 @@ pub async fn ping(app: &App, id: &str) -> Result<(), String> {
 
 /// Lista os modelos do provedor (GET /models), para escolher sem digitar.
 pub async fn models(app: &App, id: &str) -> Result<Vec<String>, String> {
-    let c = provider(app, id).ok_or_else(|| L!("API não encontrada.", "API not found.").to_string())?;
+    let c = current(&provider(app, id).ok_or_else(|| L!("API não encontrada.", "API not found.").to_string())?);
     if c.base.trim().is_empty() {
         return Err(L!("Informe o endereço da API.", "Enter the API address.").into());
     }

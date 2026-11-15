@@ -1981,6 +1981,14 @@ function drawNimMeter() {
   const wait = Math.max(0, (d.wait_secs || 0) - age);
   const dayOut = d.rpd > 0 && d.day >= d.rpd;
   const perMin = d.max > 0;
+  // rotação de chaves sem limite configurado: o medidor só diz qual chave está em uso
+  const rot = d.rot ? L(" · chave {0}/{1}", d.rot.cur, d.rot.n) : "";
+  if (d.rot && !perMin && !(d.rpd > 0)) {
+    el.hidden = false; el.className = "nim-meter lo";
+    el.innerHTML = `<i style="width:0%"></i><span>${esc((a.name || a.id) + rot)}</span>`;
+    el.title = L("{0}: rotação de chaves, usando a chave {1} de {2}. Quando uma acaba, a próxima entra na hora.", a.name || a.id, d.rot.cur, d.rot.n);
+    return;
+  }
   const budget = d.budget || d.max || 1;
   const pct = dayOut ? 100 : perMin ? Math.min(100, (d.used / budget) * 100) : Math.min(100, (d.day / d.rpd) * 100);
   // 429 do provedor para este modelo com a fila folgada: não é a sua cota, é o modelo (sobrecarregado ou com limite próprio)
@@ -1995,7 +2003,7 @@ function drawNimMeter() {
     : !perMin ? L("{0} hoje {1}/{2}", name, d.day, d.rpd)
     : wait > 0 ? L("{0} {1}/{2} · {3}s", name, d.used, d.max, wait) + day
     : L("{0} {1}/{2}", name, d.used, d.max) + day;
-  el.innerHTML = `<i style="width:${pct.toFixed(0)}%"></i><span>${esc(txt)}</span>`;
+  el.innerHTML = `<i style="width:${pct.toFixed(0)}%"></i><span>${esc(txt + rot)}</span>`;
   el.title = (dayOut
     ? L("{0}: os {1} pedidos do dia acabaram. Até a meia-noite UTC os pedidos vão para outra API ou para o modelo local.", full, d.rpd)
     : !perMin ? L("{0}: {1} de {2} pedidos hoje (renova à meia-noite UTC).", full, d.day, d.rpd)
