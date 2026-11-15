@@ -95,7 +95,7 @@ function personaOf(c) {
     ? S.draftPersona
     : S.settings.defaultPersona;
 
-  return id ? S.personas.find((p) => p.id === id) || null : null;
+  return id ? allPersonas().find((p) => p.id === id) || null : null;
 }
 
 /** Pasta de trabalho da conversa: a do projeto ou a geral. */
@@ -967,7 +967,7 @@ async function editProject(p) {
     "select.select",
     null,
     h("option", { value: "" }, L("Nenhuma (usa a padrão)")),
-    S.personas.map((x) => h("option", { value: x.id }, x.name))
+    allPersonas().map((x) => h("option", { value: x.id }, x.plugin ? `${x.name} (${x.plugin})` : x.name))
   );
 
   persona.value = p?.personaId || "";
@@ -1406,7 +1406,7 @@ function fillPersonaPop() {
     )
   );
 
-  for (const p of S.personas) {
+  for (const p of allPersonas()) {
     pop.append(
       h(
         "button.menu-item" + (curP?.id === p.id ? ".hl" : ""),
@@ -1415,8 +1415,8 @@ function fillPersonaPop() {
         h(
           "span.mi-main",
           null,
-          p.name,
-          h("span.mi-sub", null, p.prompt.split("\n")[0])
+          p.plugin ? `${p.name} (${p.plugin})` : p.name,
+          h("span.mi-sub", null, (p.description || p.prompt).split("\n")[0])
         )
       )
     );

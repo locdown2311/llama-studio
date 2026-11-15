@@ -768,8 +768,8 @@ const promptSlug = (t) => String(t || '').toLowerCase().normalize('NFD').replace
 
 function promptItems(q) {
   const f = promptSlug(q);
-  return PROMPTS.filter((p) => !f || p.id.includes(f) || promptSlug(p.title).includes(f))
-    .slice(0, 12).map((p) => ({ kind: 'prompt', id: p.id, name: p.title, desc: p.text.replace(/\s+/g, ' ').slice(0, 90), prompt: p }));
+  return [...PROMPTS.filter((p) => !f || p.id.includes(f) || promptSlug(p.title).includes(f))
+    .map((p) => ({ kind: 'prompt', id: p.id, name: p.title, desc: p.text.replace(/\s+/g, ' ').slice(0, 90), prompt: p })), ...plugCommandItems(f)].slice(0, 12);
 }
 
 function promptVars(text) {
@@ -779,6 +779,7 @@ function promptVars(text) {
 }
 
 async function usePrompt(p) {
+  if (p.plugin) return usePluginCommand(p.plugin);
   const vars = promptVars(p.text);
   let text = p.text;
   if (vars.length) {

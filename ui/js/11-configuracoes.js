@@ -196,8 +196,8 @@ function renderSettings() {
 
 /* As configurações são um painel só: as subpáginas de ajuste e as páginas de recursos (servidor,
    conectores, habilidades...) ficam no mesmo menu. Os itens da barra lateral são atalhos para elas. */
-const SET_EMBED = [['server', L('Servidor'), 'server'], ['mcp', L('Conectores'), 'plug'], ['skills', L('Habilidades'), 'sparkles'], ['personas', L('Personalidades'), 'user'], ['tools', L('Utilitários'), 'wrench']];
-const SET_GROUPS = [[L('Geral'), ['set:model', 'set:tools', 'set:auto', 'set:context', 'set:economy', 'set:api']], [L('Recursos'), ['v:server', 'v:mcp', 'v:skills', 'v:personas', 'v:tools']], [L('Segurança'), ['set:safety', 'set:auditor', 'set:sandbox']], [L('Sistema'), ['set:look', 'set:window', 'set:backup', 'set:cloud', 'set:share', 'set:updates', 'set:advanced', 'set:tests']]];
+const SET_EMBED = [['server', L('Servidor'), 'server'], ['mcp', L('Conectores'), 'plug'], ['plugins', L('Plugins'), 'puzzle'], ['skills', L('Habilidades'), 'sparkles'], ['personas', L('Personalidades'), 'user'], ['tools', L('Utilitários'), 'wrench']];
+const SET_GROUPS = [[L('Geral'), ['set:model', 'set:tools', 'set:auto', 'set:context', 'set:economy', 'set:api']], [L('Recursos'), ['v:server', 'v:mcp', 'v:plugins', 'v:skills', 'v:personas', 'v:tools']], [L('Segurança'), ['set:safety', 'set:auditor', 'set:sandbox']], [L('Sistema'), ['set:look', 'set:window', 'set:backup', 'set:cloud', 'set:share', 'set:updates', 'set:advanced', 'set:tests']]];
 let SET_PAGES = [];
 let setPage = null;
 function openSettings(page) { setPage = page; setView('settings'); }

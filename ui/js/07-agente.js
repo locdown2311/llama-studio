@@ -404,6 +404,18 @@ async function runAgent(conv) {
     // skills que entram no meio da conversa vão como nota na mensagem do usuário, não no prompt de sistema:
     // mudar o prompt faria o llama-server reler a conversa inteira
     const started = conv.messages.some((m) => m.role === 'assistant');
+    // plugins: SessionStart uma vez por conversa (fica congelado no prompt de sistema) e UserPromptSubmit
+    // uma vez por mensagem (bloqueia ou soma contexto à mensagem)
+    if (!started && conv.hookStart === undefined && plugHas('SessionStart')) {
+      const r = await plugHook('SessionStart', conv, { source: 'startup' });
+      conv.hookStart = (r?.context || []).join('\n\n');
+    }
+    if (lastUserMsg && !lastUserMsg.hooked && plugHas('UserPromptSubmit')) {
+      lastUserMsg.hooked = true;
+      const r = await plugHook('UserPromptSubmit', conv, { prompt: userContent(lastUserMsg), transcript: plugTranscript(conv) });
+      if (r?.block || r?.stop) { conv.messages.push({ role: 'error', content: L('Um plugin bloqueou esta mensagem: {0}', r.reason || r.stopReason || '') }); saveConvs(); return; }
+      if (r?.context?.length) lastUserMsg.hookNote = r.context.join('\n\n');
+    }
     const base = started && Array.isArray(conv.skillBase) ? conv.skillBase.filter((id) => sel.skills.includes(id)) : sel.skills.slice();
     conv.skillBase = base;
     const noted = new Set(conv.messages.flatMap((m) => m.skillIds || []));
@@ -466,6 +478,7 @@ async function runAgent(conv) {
       groups.includes('explore') && preferMulti(conv) ? MULTI_NOTE : '',
       persona?.prompt?.trim() ? L('# Personalidade: {0}\n{1}', persona.name, persona.prompt.trim()) : '',
       proj?.instructions?.trim() ? L('# Instruções do projeto "{0}"\n{1}', proj.name, proj.instructions.trim()) : '',
+      conv.hookStart || '',
       conv.factsNote || '',
       ctx.text,
       catalogSys,
@@ -492,6 +505,8 @@ async function runAgent(conv) {
         await describeImgs(conv, ac.signal);
       }
       if (ac.signal.aborted) throw new DOMException('abort', 'AbortError');
+      // ganchos assíncronos (asyncRewake) que terminaram: o retorno entra antes do próximo passo
+      for (const n of await plugPending(conv)) conv.messages.splice(conv.messages.length - 1, 0, { role: 'user', hidden: true, note: true, content: n });
       await maybeCompact(conv, system, tools, ac.signal);
       // enquanto o modelo ainda escreve a chamada de ferramenta, abre a conexão com a API do auditor (e a dos
       // exploradores, se ele chamar explore): o primeiro pedido não espera o aperto de mão TLS
@@ -545,10 +560,29 @@ async function runAgent(conv) {
           saveConvs(); scheduleRender();
           continue;
         }
+        // plugins: um gancho Stop pode mandar continuar (com o motivo como próxima instrução)
+        if (plugHas('Stop') && step < g.limit - 1) {
+          const r = await plugHook('Stop', conv, { stopActive: !!g.stopHooked, last: splitThink(msg.content || '').text, transcript: plugTranscript(conv) });
+          if (r?.block && r.reason && !r.stop && (g.stopHooks = (g.stopHooks || 0) + 1) <= 25) {
+            g.stopHooked = true;
+            conv.messages.push({ role: 'user', hidden: true, note: true, content: L('(Um plugin pediu para continuar antes de terminar.)\n\n{0}', r.reason) });
+            conv.messages.push({ role: 'notice', icon: 'puzzle', content: L('Plugin: continuar. {0}', r.reason.split('\n')[0].slice(0, 160)) });
+            saveConvs(); scheduleRender();
+            continue;
+          }
+        }
         break;
       }
       // JSON quebrado, nome de parâmetro trocado, número como texto...: conserta pelo esquema antes de executar
       repairCalls(msg.tool_calls, tools);
+      // plugins: PreToolUse de todas as chamadas do passo (bloquear, pedir/dispensar permissão, trocar argumentos)
+      const preHook = new Map();
+      if (plugHas('PreToolUse')) await Promise.all(msg.tool_calls.filter((tc) => !tc.bad).map(async (tc) => {
+        const r = await plugHook('PreToolUse', conv, { tool: tc.function.name, args: parseArgs(tc.function.arguments) || {}, toolUseId: tc.id });
+        if (!r) return;
+        if (r.args && !r.block && r.permission !== 'deny') tc.function.arguments = JSON.stringify(r.args);
+        preHook.set(tc.id, r);
+      }));
 
       const parallel = [];
       const explores = [];
@@ -576,8 +610,16 @@ async function runAgent(conv) {
         if (tc.fix) noteOn(tmsg, L('[Nota do studio: ajustei esta chamada ({0}). Da próxima vez use os nomes e tipos do esquema.]', tc.fix.join('; ')));
         // chamada que não dá para executar como veio: o erro explica o que a ferramenta espera
         if (tc.bad) { tmsg.status = 'error'; tmsg.isError = true; tmsg.content = tc.bad; saveConvs(); scheduleRender(); continue; }
+        const ph = preHook.get(tc.id);
+        if (ph?.context?.length) noteOn(tmsg, ph.context.join('\n'));
+        if (ph && (ph.block || ph.permission === 'deny')) {
+          tmsg.status = 'denied'; tmsg.isError = true;
+          tmsg.content = L('Bloqueado por um plugin: {0}', ph.permissionReason || ph.reason || L('sem motivo informado'));
+          saveConvs(); scheduleRender(); continue;
+        }
+        const hookAsk = ph?.permission === 'ask', hookAllow = ph?.permission === 'allow';
         // leituras vão para a mesma fila paralela dos exploradores; o que altera algo espera elas terminarem
-        if (PARALLEL_READS.has(tc.function.name) && !needsApproval(info, conv) && !shouldAudit(info, conv)) {
+        if (PARALLEL_READS.has(tc.function.name) && !needsApproval(info, conv) && !shouldAudit(info, conv) && !hookAsk) {
           tmsg.status = 'running'; scheduleRender();
           const ts = performance.now();
           reads.push(execTool(tc.function.name, parseArgs(tc.function.arguments) ?? tc.function.arguments, info, tctx, tmsg).then((r) => {
@@ -616,8 +658,9 @@ async function runAgent(conv) {
           if (ac.signal.aborted) { tmsg.status = 'denied'; tmsg.content = L('Cancelado pelo usuário.'); throw new DOMException('abort', 'AbortError'); }
           audited = tmsg.audit.approve;
         }
-        if (!audited && (needsApproval(info, conv) || tmsg.audit || forceAsk)) {
+        if (hookAsk || (!audited && ((needsApproval(info, conv) && !hookAllow) || tmsg.audit || forceAsk))) {
           tmsg.status = 'approval'; scheduleRender();
+          plugHook('Notification', conv, { message: L('O agente precisa da sua permissão para usar {0}', tc.function.name) });
           S.waiting.add(conv.id); renderConvList();
           if (conv.id !== S.curId || S.view !== 'chat') toast(L('"{0}" está esperando sua permissão', conv.title));
           const ans = await waitApproval(tc.id, ac.signal);
@@ -665,7 +708,17 @@ async function runAgent(conv) {
       if (parallel.length || reads.length) await Promise.all([...parallel, ...reads]);
       // econômico: depois de um erro o modelo volta a pensar no passo seguinte
       const stepResults = msg.tool_calls.map((tc) => conv.messages.find((m) => m.role === 'tool' && m.tool_call_id === tc.id)).filter(Boolean);
-      conv._thinkNext = stepResults.some((m) => m.status === 'error' || m.status === 'denied');
+      // plugins: PostToolUse / PostToolUseFailure (o retorno vira nota no resultado, que o modelo lê)
+      let hookNoted = false;
+      if (plugHas('PostToolUse') || plugHas('PostToolUseFailure')) await Promise.all(stepResults.filter((tm) => tm.status === 'ok' || tm.status === 'error').map(async (tm) => {
+        const tc = msg.tool_calls.find((t) => t.id === tm.tool_call_id);
+        const r = await plugHook(tm.isError ? 'PostToolUseFailure' : 'PostToolUse', conv, { tool: tc.function.name, args: parseArgs(tc.function.arguments) || {}, result: String(tm.content || '').slice(0, 50000), toolUseId: tc.id });
+        if (!r) return;
+        const notes = [...(r.block && r.reason ? [r.reason] : []), ...(r.context || [])];
+        if (notes.length) { noteOn(tm, L('[Plugin] {0}', notes.join('\n'))); hookNoted = true; }
+        if (r.stop) g.stop = r.stopReason || L('um plugin pediu para parar');
+      }));
+      conv._thinkNext = hookNoted || stepResults.some((m) => m.status === 'error' || m.status === 'denied');
       dedupeResults(conv, stepResults);
       if (guardStep(conv, msg, meta, g, step)) conv._thinkNext = true;
       if (g.judge) await loopJudge(conv, g, ac.signal);

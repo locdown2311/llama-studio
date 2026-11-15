@@ -391,7 +391,7 @@ fn kind_of(cfg: &Value) -> &'static str {
 fn headers_of(cfg: &Value) -> Vec<(String, String)> {
     cfg.get("headers")
         .and_then(Value::as_object)
-        .map(|o| o.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect())
+        .map(|o| o.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), if cfg.get("_plugin").is_some() { crate::plugins::expand_env(s) } else { s.to_string() }))).collect())
         .unwrap_or_default()
 }
 
@@ -441,7 +441,28 @@ impl Mcp {
     /// Conecta os servidores novos/alterados e remove os que saíram do mcp.json.
     pub async fn sync(&self, http: &reqwest::Client, file: &std::path::Path) {
         let cfg = Self::read_config(file);
-        let wanted = cfg["mcpServers"].as_object().cloned().unwrap_or_default();
+        let mut wanted = cfg["mcpServers"].as_object().cloned().unwrap_or_default();
+        // conectores dos plugins ligados (o do mcp.json vence se tiver o mesmo nome)
+        if let Some(root) = file.parent() {
+            for (k, mut v) in crate::plugins::mcp_servers(root) {
+                // entrada "_override" no mcp.json: só liga/desliga e esconde ferramentas do conector do plugin
+                match wanted.get(&k) {
+                    Some(o) if o.get("_override").is_some() => {
+                        for f in ["disabled", "disabledTools"] {
+                            if let Some(x) = o.get(f) {
+                                v[f] = x.clone();
+                            }
+                        }
+                        wanted.insert(k, v);
+                    }
+                    Some(_) => {}
+                    None => {
+                        wanted.insert(k, v);
+                    }
+                }
+            }
+        }
+        wanted.retain(|_, v| v.get("_override").is_none() || v.get("_plugin").is_some());
         let mut todo = vec![];
         {
             let mut map = self.servers.write().unwrap();
@@ -630,14 +651,17 @@ fn resolve_command(cmd: &str) -> std::path::PathBuf {
 
 async fn connect_stdio(e: &Arc<Entry>, http: reqwest::Client) -> Result<Arc<Conn>, String> {
     let command = e.cfg.get("command").and_then(Value::as_str).ok_or("Falta o campo \"command\".")?;
-    let mut c = tokio::process::Command::new(resolve_command(command));
+    // conector de plugin: ${VAR} e ${VAR:-padrão} com as variáveis de ambiente (como no Claude Code)
+    let plug = e.cfg.get("_plugin").is_some();
+    let x = |s: String| if plug { crate::plugins::expand_env(&s) } else { s };
+    let mut c = tokio::process::Command::new(resolve_command(&x(command.to_string())));
     if let Some(args) = e.cfg.get("args").and_then(Value::as_array) {
-        c.args(args.iter().map(|a| a.as_str().map(str::to_string).unwrap_or_else(|| a.to_string())));
+        c.args(args.iter().map(|a| x(a.as_str().map(str::to_string).unwrap_or_else(|| a.to_string()))));
     }
     c.env("PATH", crate::bins::path_env());
     if let Some(env) = e.cfg.get("env").and_then(Value::as_object) {
         for (k, v) in env {
-            c.env(k, v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string()));
+            c.env(k, x(v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string())));
         }
     }
     if let Some(cwd) = e.cfg.get("cwd").and_then(Value::as_str).filter(|s| !s.is_empty()) {

@@ -28,6 +28,7 @@
       <button class="nav-item" id="nav-new" data-view="chat"></button>
       <button class="nav-item" data-view="skills"></button>
       <button class="nav-item" data-view="mcp"></button>
+      <button class="nav-item" data-view="plugins"></button>
       <button class="nav-item" data-view="personas"></button>
       <button class="nav-item" data-view="tools"></button>
       <button class="nav-item" data-view="server"></button>
@@ -204,6 +205,19 @@
     </div>
   </section>
 
+  <!-- ===================== PLUGINS ===================== -->
+  <section class="view" id="view-plugins">
+    <div class="page">
+      <header class="page-head">
+        <div>
+          <h1>Plugins</h1>
+          <p class="lead">Pacotes no formato do Claude Code: trazem skills, comandos /, agentes, ganchos e conectores de uma vez.</p>
+        </div>
+      </header>
+      <div id="plugins-root"></div>
+    </div>
+  </section>
+
   <!-- ===================== PERSONALIDADES ===================== -->
   <section class="view" id="view-personas">
     <div class="page">
@@ -326,6 +340,7 @@
 <script src="/js/07-agente.js"></script>
 <script src="/js/08-ferramentas.js"></script>
 <script src="/js/09-arquivos.js"></script>
+<script src="/js/10-plugins.js"></script>
 <script src="/js/10-recursos.js"></script>
 <script src="/js/11-configuracoes.js"></script>
 <script src="/js/12-servidor.js"></script>

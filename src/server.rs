@@ -98,6 +98,17 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/locate", post(locate_h))
         .route("/api/remember", post(remember))
         .route("/api/stat", post(stat))
+        .route("/api/plugins", get(plugins_list))
+        .route("/api/plugins/add", post(plugins_add))
+        .route("/api/plugins/market/remove", post(plugins_market_remove))
+        .route("/api/plugins/catalog", get(plugins_catalog))
+        .route("/api/plugins/install", post(plugins_install))
+        .route("/api/plugins/update", post(plugins_update))
+        .route("/api/plugins/enable", post(plugins_enable))
+        .route("/api/plugins/uninstall", post(plugins_uninstall))
+        .route("/api/plugins/hook", post(plugins_hook))
+        .route("/api/plugins/pending", get(plugins_pending))
+        .route("/api/plugins/command", post(plugins_command))
         .route("/api/skills", get(skills_list))
         .route("/api/skills/get", get(skills_get))
 .route("/api/nim-status", get(nim_status_handler))
@@ -1124,6 +1135,67 @@ async fn stat(State(app): S, b: Bytes) -> Res {
     }
 }
 
+// ---------------------------------------------------------------- plugins (formato do Claude Code)
+
+/// Depois de mudar plugins: os conectores deles entram ou saem.
+async fn plugins_changed(app: &Arc<App>) -> Res {
+    app.mcp.sync(&app.http, &app.mcp_file()).await;
+    ok(crate::plugins::summary(&app.root))
+}
+async fn plugins_list(State(app): S) -> Res {
+    ok(crate::plugins::summary(&app.root))
+}
+async fn plugins_add(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let r = crate::plugins::add(&app, st(&v, "source")).await.map_err(bad)?;
+    let mut out = plugins_changed(&app).await?.0;
+    out["result"] = r;
+    ok(out)
+}
+async fn plugins_market_remove(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    crate::plugins::remove_market(&app, st(&v, "name")).map_err(bad)?;
+    ok(crate::plugins::summary(&app.root))
+}
+async fn plugins_catalog(State(app): S, Query(qs): Q) -> Res {
+    ok(crate::plugins::catalog(&app, q(&qs, "market")).map_err(bad)?)
+}
+async fn plugins_install(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let r = crate::plugins::install(&app, st(&v, "market"), st(&v, "name")).await.map_err(bad)?;
+    let mut out = plugins_changed(&app).await?.0;
+    out["result"] = r;
+    ok(out)
+}
+async fn plugins_update(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let r = crate::plugins::update(&app, st(&v, "id")).await.map_err(bad)?;
+    let mut out = plugins_changed(&app).await?.0;
+    out["result"] = r;
+    ok(out)
+}
+async fn plugins_enable(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    crate::plugins::set_enabled(&app, st(&v, "id"), v["on"].as_bool().unwrap_or(true)).map_err(bad)?;
+    plugins_changed(&app).await
+}
+async fn plugins_uninstall(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    crate::plugins::uninstall(&app, st(&v, "id"), v["keepData"].as_bool().unwrap_or(false)).map_err(bad)?;
+    plugins_changed(&app).await
+}
+async fn plugins_hook(State(app): S, b: Bytes) -> Res {
+    ok(crate::plugins::hook(&app, &body(&b)).await)
+}
+async fn plugins_pending(Query(qs): Q) -> Res {
+    ok(json!({"notes": crate::plugins::take_pending(q(&qs, "session"))}))
+}
+async fn plugins_command(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let text = crate::plugins::render_command(&app, st(&v, "id"), st(&v, "args"), st(&v, "ws"), st(&v, "session")).await.map_err(bad)?;
+    ok(json!({"text": text}))
+}
+
 // ---------------------------------------------------------------- habilidades
 
 async fn skills_list(State(app): S) -> Res {
@@ -1338,6 +1410,7 @@ async fn mcp_delete(State(app): S, b: Bytes) -> Res {
 async fn mcp_toggle(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     let mut cfg = crate::mcp::Mcp::read_config(&app.mcp_file());
+    plugin_override(&app, &mut cfg, st(&v, "name"));
     let s = cfg["mcpServers"].get_mut(st(&v, "name")).filter(|s| s.is_object()).ok_or_else(|| bad(L!("Servidor não encontrado", "Server not found")))?;
     if v.get("disabled").and_then(Value::as_bool).unwrap_or(false) {
         s["disabled"] = json!(true);
@@ -1353,6 +1426,7 @@ async fn mcp_toggle(State(app): S, b: Bytes) -> Res {
 async fn mcp_hide(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     let mut cfg = crate::mcp::Mcp::read_config(&app.mcp_file());
+    plugin_override(&app, &mut cfg, st(&v, "name"));
     let s = cfg["mcpServers"].get_mut(st(&v, "name")).filter(|s| s.is_object()).ok_or_else(|| bad(L!("Servidor não encontrado", "Server not found")))?;
     let mut names = strs(&v, "hidden");
     names.sort();
@@ -1365,6 +1439,13 @@ async fn mcp_hide(State(app): S, b: Bytes) -> Res {
     write_mcp(&app, &cfg)?;
     app.mcp.sync(&app.http, &app.mcp_file()).await;
     ok(json!({"servers": app.mcp.status_json()}))
+}
+
+/// Conector de plugin (não está no mcp.json): cria a entrada "_override" que guarda só liga/desliga e ferramentas escondidas.
+fn plugin_override(app: &App, cfg: &mut Value, name: &str) {
+    if cfg["mcpServers"].get(name).is_none() && crate::plugins::mcp_servers(&app.root).contains_key(name) {
+        cfg["mcpServers"][name] = json!({"_override": true});
+    }
 }
 
 async fn mcp_reconnect(State(app): S, b: Bytes) -> Res {

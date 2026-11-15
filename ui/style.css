@@ -1929,3 +1929,32 @@ details.verify.warn summary svg { color: var(--warn); }
 .eco-fact { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; }
 .eco-fact > span { flex: 1; min-width: 0; }
 .eco-fact > small { white-space: nowrap; }
+
+/* ============================================================ plugins */
+.plug-add { display: flex; gap: 8px; margin-bottom: 8px; }
+.plug-add .input { flex: 1; min-width: 0; }
+.plug-sugg { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 18px; }
+.plug-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.srv.plug.off { opacity: .72; }
+.plug-det { margin-top: 8px; display: grid; gap: 6px; }
+.plug-det > summary { cursor: pointer; color: var(--muted); font-size: 12.5px; display: flex; align-items: center; gap: 4px; }
+.plug-det > summary svg { width: 13px; height: 13px; }
+.plug-det[open] > summary svg { transform: rotate(90deg); }
+.plug-runs { display: grid; gap: 6px; margin: 8px 0; max-height: 50vh; overflow: auto; }
+.plug-run { display: grid; gap: 2px; font-size: 12.5px; }
+.plug-run code { white-space: pre-wrap; word-break: break-all; background: var(--bg2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font-size: 12px; }
+.plug-cat { display: grid; gap: 6px; max-height: 60vh; overflow: auto; }
+.plug-item { display: flex; gap: 10px; align-items: center; justify-content: space-between; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.plug-item-main { min-width: 0; display: grid; gap: 2px; }
+.plug-item-main .small { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.plug-item .tag { margin-left: 6px; }
+.tag.ok { color: var(--ok, #2f9e58); border-color: currentColor; }
+@media (max-width: 640px) {
+  .plug-add { flex-wrap: wrap; }
+  .plug-item { flex-wrap: wrap; }
+  .srv.plug .srv-head { flex-wrap: wrap; }
+  .srv.plug .srv-ico { display: none; }
+  .srv.plug .srv-main { flex: 1 1 100%; }
+  .srv.plug .srv-actions { margin-left: auto; }
+  .srv.plug .srv-name .tag { white-space: nowrap; }
+}

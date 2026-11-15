@@ -408,15 +408,15 @@ function drawMcpList() {
       h('div.srv-head', null,
         h('div.srv-ico', { html: svg(s.config?.url ? 'globe' : 'terminal') }),
         h('div.srv-main', null,
-          h('div.srv-name', null, s.name, h('span.tag', null, s.kind === 'stdio' ? 'local' : s.kind === 'sse' ? 'SSE' : 'HTTP'),
+          h('div.srv-name', null, s.name, h('span.tag', null, s.kind === 'stdio' ? 'local' : s.kind === 'sse' ? 'SSE' : 'HTTP'), s.config?._plugin ? h('span.tag', { title: L('Vem de um plugin: edite ou remova pela página Plugins') }, 'plugin ' + s.config._plugin) : null,
             s.mem ? h('span.tag', { title: L('Memória em uso pelo processo do conector e pelos que ele abriu') }, L('{0} de RAM', fmtBytes(s.mem))) : null),
           h('div.srv-cmd', { title: cmdLine(s.config || {}) }, cmdLine(s.config || {}))),
         h('div.srv-status', null, h('span.dot.' + st.dot), s.status === 'connected' ? (s.hidden?.length ? L('{0} de {1} ferramentas', s.tools.length - s.tools.filter((t) => s.hidden.includes(t.name)).length, s.tools.length) : L('{0} ferramentas', s.tools.length)) : s.status === 'connecting' && s.since ? L('conectando... {0} s', Math.max(0, Math.round((Date.now() - s.since) / 1000))) : st.label),
         h('div.srv-actions', null,
           (() => { const on = (S.settings.trustedMcp || []).includes(s.name); return h('button.icon-btn.sm' + (on ? '.on' : ''), { title: on ? L('Confiável: as ferramentas que alteram algo rodam sem pedir confirmação. Clique para voltar a pedir.') : L('Pede confirmação antes das ferramentas que alteram algo. Clique para confiar neste conector.'), 'aria-label': L('Confiar no conector'), html: svg('shield'), onclick: () => { trustMcp(s.name, !on); drawMcpList(); toast(on ? L('{0}: volta a pedir confirmação', s.name) : L('{0}: confiável', s.name)); } }); })(),
           h('button.icon-btn.sm', { title: L('Reconectar'), 'aria-label': L('Reconectar'), html: svg('refresh'), onclick: async () => { s.status = 'connecting'; drawMcpList(); try { await api('/api/mcp/reconnect', { name: s.name }); } catch (e) { toast(e.message, 'err'); } loadMcp(); } }),
-          h('button.icon-btn.sm', { title: L('Editar'), 'aria-label': L('Editar'), html: svg('edit'), onclick: () => editServer(s.name, s.config) }),
-          h('button.icon-btn.sm', { title: L('Remover'), 'aria-label': L('Remover'), html: svg('trash'), onclick: async () => {
+          s.config?._plugin ? null : h('button.icon-btn.sm', { title: L('Editar'), 'aria-label': L('Editar'), html: svg('edit'), onclick: () => editServer(s.name, s.config) }),
+          s.config?._plugin ? null : h('button.icon-btn.sm', { title: L('Remover'), 'aria-label': L('Remover'), html: svg('trash'), onclick: async () => {
             if (!(await confirmBox(L('Remover o conector "{0}"?', s.name), L('Remover'), true))) return;
             await api('/api/mcp/delete', { name: s.name }); S.sel.mcp = S.sel.mcp.filter((x) => x !== s.name); saveSel(); loadMcp();
           } })),

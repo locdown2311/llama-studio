@@ -120,17 +120,30 @@ pub fn roots(app: &App) -> Vec<(PathBuf, String)> {
 
 pub fn list(app: &App) -> Vec<Skill> {
     let mut out: Vec<Skill> = vec![];
+    // (pasta da skill, origem, id): as das pastas de skills e as dos plugins ligados (id plugin:skill)
+    let mut found: Vec<(PathBuf, String, String)> = vec![];
     for (dir, source) in roots(app) {
         let Ok(rd) = std::fs::read_dir(&dir) else { continue };
-        for e in rd.flatten() {
-            let sdir = e.path();
+        let mut v: Vec<_> = rd.flatten().collect();
+        v.sort_by_key(|e| e.file_name());
+        for e in v {
+            let fname = e.file_name().to_string_lossy().into_owned();
+            let id = if source == "studio" { fname.clone() } else { format!("{}:{}", slug(&crate::app::file_name(&dir)), fname) };
+            found.push((e.path(), source.clone(), id));
+        }
+    }
+    for (sdir, plugin) in crate::plugins::skill_dirs(&app.root) {
+        let id = format!("{}:{}", plugin, crate::app::file_name(&sdir));
+        found.push((sdir, format!("plugin:{plugin}"), id));
+    }
+    {
+        for (sdir, source, id) in found {
             if !sdir.is_dir() {
                 continue;
             }
             let file = sdir.join("SKILL.md");
             let Ok(text) = std::fs::read_to_string(&file) else { continue };
-            let fname = e.file_name().to_string_lossy().into_owned();
-            let id = if source == "studio" { fname.clone() } else { format!("{}:{}", slug(&crate::app::file_name(&dir)), fname) };
+            let fname = crate::app::file_name(&sdir);
             if out.iter().any(|s| s.id == id) {
                 continue;
             }

@@ -123,6 +123,7 @@ fn exe_name(n: &str) -> String {
 /// PATH com a pasta das ferramentas na frente.
 pub fn path_env() -> OsString {
     let mut v = vec![dir()];
+    v.extend(crate::plugins::bin_dirs());
     if let Some(p) = std::env::var_os("PATH") {
         v.extend(std::env::split_paths(&p));
     }

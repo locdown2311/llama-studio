@@ -10,8 +10,8 @@ async function init() {
     $('#set-pane').append(h('div.set-embed', { dataset: { v }, hidden: true }, page));
     sec.remove();
   }
-  const navIcons = { chat: 'chat', skills: 'sparkles', mcp: 'plug', personas: 'user', tools: 'wrench', server: 'server', settings: 'gear', calendar: 'calendar', videos: 'film' };
-  const navLabels = { chat: L('Nova conversa'), skills: L('Habilidades'), mcp: L('Conectores'), personas: L('Personalidades'), tools: L('Utilitários'), server: L('Servidor'), settings: L('Configurações'), calendar: L('Calendário'), videos: L('Vídeos') };
+  const navIcons = { chat: 'chat', skills: 'sparkles', mcp: 'plug', plugins: 'puzzle', personas: 'user', tools: 'wrench', server: 'server', settings: 'gear', calendar: 'calendar', videos: 'film' };
+  const navLabels = { chat: L('Nova conversa'), skills: L('Habilidades'), mcp: L('Conectores'), plugins: L('Plugins'), personas: L('Personalidades'), tools: L('Utilitários'), server: L('Servidor'), settings: L('Configurações'), calendar: L('Calendário'), videos: L('Vídeos') };
   $$('.nav-item').forEach((b) => {
     b.innerHTML = svg(navIcons[b.dataset.view]) + `<span>${navLabels[b.dataset.view]}</span>`;
     b.addEventListener('click', () => {
@@ -116,7 +116,7 @@ async function init() {
   renderConvList();
   renderChat();
   renderTree();
-  await Promise.all([loadSkills(), loadMcp(), checkHealth(), loadModels()]);
+  await Promise.all([loadSkills(), loadMcp(), checkHealth(), loadModels(), loadPlugins()]);
   if (!EXECUTOR) setTimeout(() => maybeOnboard(), 600);
   // tela de abertura enquanto o modelo carrega (o servidor pode estar subindo agora)
   for (let i = 0; i < 4 && S.llama && S.llama.state === 'stopped' && S.llama.config?.AutoStart; i++) { await new Promise((r) => setTimeout(r, 400)); await checkHealth(); }
