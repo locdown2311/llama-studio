@@ -478,21 +478,43 @@ function pickUpload(accept) {
   input.click();
 }
 
+/** Barra enxuta (nuvem no celular): os botões escondidos da barra viram itens do menu +. */
+function compactBar() { return !!S.info?.cloud && matchMedia('(max-width: 640px)').matches; }
+function compactOpts() {
+  if (!compactBar()) return [];
+  const c = cur();
+  // abre o menu do botão escondido (no celular os menus da barra são uma folha embaixo, não dependem do botão)
+  const open = (id) => () => { closePops(); setTimeout(() => $(id).click(), 0); };
+  const sk = S.sel.skills.length, mc = S.sel.mcp.length;
+  return [
+    h('div.menu-sep'),
+    h('div.pop-head', null, h('span', null, L('Opções da conversa'))),
+    h('button.menu-item', { onclick: () => { closePops(); togglePlan(); } }, ic('list'), h('span.mi-main', null, L('Modo plano'), h('span.mi-sub', null, planOf(c) ? L('Ligado: o modelo só investiga e propõe') : L('Desligado')))),
+    h('button.menu-item', { onclick: open('#pick-think') }, ic('brain'), h('span.mi-main', null, L('Raciocínio'), h('span.mi-sub', null, (THINK_OPTS.find((o) => o[0] === thinkOf(c)) || [, String(thinkOf(c))])[1]))),
+    h('button.menu-item', { onclick: open('#pick-auto') }, ic('sliders'), h('span.mi-main', null, L('Automático'), h('span.mi-sub', null, L('O que o studio escolhe sozinho')))),
+    h('button.menu-item', { onclick: open('#pick-skills') }, ic('sparkles'), h('span.mi-main', null, L('Habilidades'), h('span.mi-sub', null, sk ? L('{0} ativa(s)', sk) : L('Nenhuma ativa')))),
+    h('button.menu-item', { onclick: open('#pick-mcp') }, ic('plug'), h('span.mi-main', null, L('Conectores'), h('span.mi-sub', null, mc ? L('{0} ativo(s)', mc) : L('Nenhum ativo')))),
+    h('button.menu-item', { onclick: open('#pick-ws') }, ic('folder'), h('span.mi-main', null, L('Pasta e projeto'), h('span.mi-sub', null, L('Pasta de trabalho desta conversa')))),
+  ];
+}
+
 function fillPlusPop() {
   const pop = $('#pop-plus'); pop.innerHTML = '';
   pop.append(h('div.pop-head', null, h('span', null, L('Inserir na mensagem'))),
     h('button.menu-item', { onclick: () => { closePops(); pickUpload(); } }, ic('paperclip'), h('span.mi-main', null, L('Enviar arquivos'), h('span.mi-sub', null, HUB ? L('Deste aparelho para a pasta anexos do studio') : L('Copia para a pasta anexos do espaço de trabalho')))),
     h('button.menu-item', { onclick: () => { closePops(); pickUpload('image/*'); } }, ic('image'), h('span.mi-main', null, L('Foto ou imagem'), h('span.mi-sub', null, L('Da galeria ou da câmera')))),
-    h('button.menu-item', { onclick: async () => {
+    compactBar() ? '' : h('button.menu-item', { onclick: async () => {
       closePops();
       const p = await pickPath({ title: L('Referenciar arquivo ou pasta'), mode: 'any', start: S.ws.path });
       if (p) { const st = await api('/api/stat', { path: p, ws: S.ws.path }); addRef({ name: basename(p), path: st.path, dir: st.dir }); }
     } }, ic('pin'), h('span.mi-main', null, L('Arquivo ou pasta do computador'), h('span.mi-sub', null, L('Entra o caminho completo, sem enviar o arquivo')))),
     h('button.menu-item', { onclick: () => { closePops(); focusEditor(); document.execCommand('insertText', false, '@'); checkMention(); } }, ic('sparkles'), h('span.mi-main', null, L('Habilidade ou conector'), h('span.mi-sub', null, L('O mesmo que digitar @')))),
     h('button.menu-item', { onclick: () => { closePops(); if (editor().textContent.trim()) { managePrompts(); return; } focusEditor(); document.execCommand('insertText', false, '/'); checkMention(); } }, ic('bookmark'), h('span.mi-main', null, L('Prompt salvo'), h('span.mi-sub', null, L('O mesmo que digitar / no começo da mensagem')))),
-    h('div.menu-sep'),
-    h('button.menu-item', { onclick: () => { closePops(); setView('skills'); } }, ic('download'), L('Importar habilidades')),
-    h('button.menu-item', { onclick: () => { closePops(); setView('mcp'); } }, ic('plus'), L('Adicionar conector MCP')));
+    ...compactOpts(),
+    ...(compactBar() ? [] : [
+      h('div.menu-sep'),
+      h('button.menu-item', { onclick: () => { closePops(); setView('skills'); } }, ic('download'), L('Importar habilidades')),
+      h('button.menu-item', { onclick: () => { closePops(); setView('mcp'); } }, ic('plus'), L('Adicionar conector MCP'))]));
 }
 
 /* ------------------------------------------------------------ arquivos arrastados */

@@ -1958,3 +1958,11 @@ details.verify.warn summary svg { color: var(--warn); }
   .srv.plug .srv-actions { margin-left: auto; }
   .srv.plug .srv-name .tag { white-space: nowrap; }
 }
+
+/* nuvem no celular: só o essencial na tela (opções da conversa vão para o menu +, sem o painel de arquivos) */
+@media (max-width: 640px) {
+  .cloud #toggle-ws, .cloud #ws,
+  .cloud #pick-plan, .cloud #pick-auto, .cloud #pick-think, .cloud #pick-skills, .cloud #pick-mcp, .cloud #pick-ws { display: none !important; }
+  .cloud .bar { flex-wrap: nowrap; }
+  .cloud #pick-model b { max-width: 150px; }
+}
