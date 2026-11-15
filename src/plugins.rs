@@ -562,11 +562,65 @@ fn unpack(bytes: &[u8], name: &str, out: &Path) -> Result<PathBuf, String> {
             return Err(L!("Não consegui extrair o .tar.gz.", "Couldn't extract the .tar.gz.").into());
         }
     } else {
-        let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| LF!("Não consegui abrir o .zip: {e}", "Couldn't open the .zip: {e}"))?;
-        z.extract(out).map_err(|e| LF!("Não consegui extrair o .zip: {e}", "Couldn't extract the .zip: {e}"))?;
+        extract_zip(bytes, out).map_err(|e| LF!("Não consegui extrair o .zip: {e}", "Couldn't extract the .zip: {e}"))?;
     }
     let entries: Vec<_> = std::fs::read_dir(out).map_err(|e| e.to_string())?.flatten().filter(|e| e.file_name() != "__MACOSX").collect();
     Ok(if entries.len() == 1 && entries[0].path().is_dir() { entries[0].path() } else { out.to_path_buf() })
+}
+
+/// Extrai o .zip sem criar links simbólicos (no Windows eles exigem privilégio de administrador, erro 1314):
+/// cada link vira uma cópia do arquivo ou da pasta para onde aponta, se estiver dentro do pacote.
+fn extract_zip(bytes: &[u8], out: &Path) -> Result<(), String> {
+    use std::io::Read;
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| e.to_string())?;
+    let mut links: Vec<(PathBuf, String)> = vec![];
+    for i in 0..z.len() {
+        let mut f = z.by_index(i).map_err(|e| e.to_string())?;
+        let Some(rel) = f.enclosed_name() else { continue };
+        let dst = out.join(rel);
+        if f.is_dir() {
+            std::fs::create_dir_all(&dst).map_err(|e| e.to_string())?;
+            continue;
+        }
+        if let Some(p) = dst.parent() {
+            std::fs::create_dir_all(p).map_err(|e| e.to_string())?;
+        }
+        if f.is_symlink() {
+            let mut t = String::new();
+            f.read_to_string(&mut t).map_err(|e| e.to_string())?;
+            links.push((dst, t));
+            continue;
+        }
+        let mut w = std::fs::File::create(&dst).map_err(|e| format!("{}: {e}", dst.display()))?;
+        std::io::copy(&mut f, &mut w).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        if let Some(m) = f.unix_mode() {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&dst, std::fs::Permissions::from_mode(m & 0o777));
+        }
+    }
+    // links depois (o alvo pode vir depois no pacote); link que aponta para outro link resolve na rodada seguinte
+    for _ in 0..4 {
+        let mut left = vec![];
+        for (dst, t) in links {
+            let src = normalize(&dst.parent().unwrap_or(out).join(t.trim()));
+            if !is_inside(out, &src) {
+                continue; // aponta para fora do pacote: ignora
+            }
+            if src.is_dir() {
+                let _ = crate::app::copy_dir(&src, &dst);
+            } else if src.is_file() {
+                let _ = std::fs::copy(&src, &dst);
+            } else {
+                left.push((dst, t));
+            }
+        }
+        if left.is_empty() {
+            break;
+        }
+        links = left;
+    }
+    Ok(())
 }
 
 async fn git(args: &[&str], cwd: Option<&Path>) -> Result<(), String> {
@@ -1399,6 +1453,29 @@ mod tests {
         let (n, a) = to_cc("run_command", &json!({"command": "ls", "timeout": 5}), &ws);
         assert_eq!((n.as_str(), a["command"].as_str(), a["timeout"].as_i64()), ("Bash", Some("ls"), Some(5)));
         assert_eq!(to_cc("gh__issue", &json!({}), &ws).0, "mcp__gh__issue");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn zip_with_symlinks() {
+        let d = std::env::temp_dir().join(format!("plz-{}", now_ms()));
+        let src = d.join("src/p");
+        std::fs::create_dir_all(src.join("skills/a")).unwrap();
+        std::fs::write(src.join("skills/a/SKILL.md"), "x").unwrap();
+        std::os::unix::fs::symlink("skills/a/SKILL.md", src.join("link.md")).unwrap();
+        std::os::unix::fs::symlink("skills", src.join("sk2")).unwrap();
+        std::os::unix::fs::symlink("link.md", src.join("chain.md")).unwrap();
+        std::os::unix::fs::symlink("../../../etc/passwd", src.join("fora")).unwrap();
+        let z = d.join("p.zip");
+        assert!(std::process::Command::new("zip").current_dir(d.join("src")).args(["-qry", z.to_str().unwrap(), "p"]).status().unwrap().success());
+        let out = d.join("out");
+        let top = unpack(&std::fs::read(&z).unwrap(), "p.zip", &out).unwrap();
+        assert_eq!(std::fs::read_to_string(top.join("link.md")).unwrap(), "x");
+        assert_eq!(std::fs::read_to_string(top.join("chain.md")).unwrap(), "x");
+        assert!(top.join("sk2/a/SKILL.md").is_file());
+        assert!(!top.join("link.md").is_symlink());
+        assert!(!top.join("fora").exists());
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
