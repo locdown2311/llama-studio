@@ -1,10 +1,13 @@
-# Llama Studio na nuvem: Caddy (HTTPS) -> studio-hub -> PC do usuário ou o contêiner dele.
+# Llama Studio na nuvem: HTTPS (seu nginx, ou o Caddy daqui) -> studio-hub -> PC do usuário ou o contêiner dele.
 # Uso: veja cloud/README.md
+#   com o seu nginx:  docker compose up -d                  (o hub fica em 127.0.0.1:8700; use cloud/nginx.conf)
+#   com o Caddy:      docker compose --profile caddy up -d
 name: llama-studio-cloud
 
 services:
   caddy:
     image: caddy:2
+    profiles: [caddy]
     restart: unless-stopped
     ports: ["80:80", "443:443", "443:443/udp"]
     environment:
@@ -18,6 +21,8 @@ services:
   hub:
     image: ${HUB_HUB_IMAGE:-ghcr.io/locdown2311/studio-hub:latest}
     restart: unless-stopped
+    # só para o proxy desta máquina (nginx); nunca direto na internet
+    ports: ["127.0.0.1:${HUB_PORT:-8700}:8700"]
     environment:
       HUB_PUBLIC_URL: https://${DOMAIN}
       HUB_DATA: ${HUB_DATA:-/srv/studio-hub}

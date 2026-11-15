@@ -7,7 +7,7 @@ O studio no celular e em qualquer navegador, com a sua conta:
 - **App**: abra o endereço no celular e escolha "Adicionar à tela inicial" (Android e iPhone).
 
 ```
-celular/navegador ──HTTPS──► Caddy ──► studio-hub ──┬─► túnel ──► studio do seu PC
+celular/navegador ──HTTPS──► nginx (ou Caddy) ──► studio-hub ──┬─► túnel ──► studio do seu PC
                                                     └─► contêiner do usuário (studio sem llama.cpp)
                                                           └─ internet só pelo proxy do hub
 ```
@@ -29,10 +29,30 @@ celular/navegador ──HTTPS──► Caddy ──► studio-hub ──┬─�
 3. Suba:
    ```sh
    docker compose pull
-   docker compose up -d
+   docker compose up -d                   # com o seu nginx (veja abaixo)
+   # ou: docker compose --profile caddy up -d   (sem nginx: o Caddy cuida do HTTPS sozinho)
    ```
    As imagens prontas (`ghcr.io/locdown2311/studio-hub` e `llama-studio-cloud`) têm ARM64 e x86_64. O hub baixa a do studio sozinho no primeiro uso e confere se há versão nova a cada 6 h. Cada studio troca de versão quando desliga; as pastas continuam.
 4. Abra `https://SEU_DOMINIO`, crie a sua conta e, se quiser fechar o cadastro depois, ponha `HUB_SIGNUP=closed` no `.env` e rode `docker compose up -d`.
+
+### Com o nginx que você já tem
+
+O hub fica em `127.0.0.1:8700`, acessível só pela própria máquina. Use o modelo `cloud/nginx.conf`:
+
+```sh
+sudo cp nginx.conf /etc/nginx/sites-available/studio      # troque o domínio e os certificados
+sudo ln -s /etc/nginx/sites-available/studio /etc/nginx/sites-enabled/
+sudo certbot --nginx -d studio.seudominio.com             # se ainda não tem certificado
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+O modelo já tem o que o studio precisa:
+
+- WebSocket para o túnel do PC;
+- `proxy_buffering off`, para o chat aparecer enquanto é gerado;
+- timeouts longos;
+- limite de 200 MB nos envios;
+- `X-Forwarded-For` só com o IP real.
 
 ### Compilar no próprio servidor (em vez de baixar)
 
