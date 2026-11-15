@@ -33,9 +33,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
       - name: Imagens
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           owner=$(echo "${{ github.repository_owner }}" | tr 'A-Z' 'a-z')
-          docker build -f cloud/Dockerfile.studio -t ghcr.io/$owner/llama-studio-cloud:${{ matrix.arch }} .
+          # a API do GitHub sem token tem limite por IP (os runners dividem): resolve aqui, autenticado
+          ghidra=$(gh api repos/NationalSecurityAgency/ghidra/releases/latest -q '[.assets[] | select(.name | endswith(".zip")) | .browser_download_url][0]')
+          echo "Ghidra: $ghidra"
+          docker build -f cloud/Dockerfile.studio --build-arg GHIDRA_URL="$ghidra" -t ghcr.io/$owner/llama-studio-cloud:${{ matrix.arch }} .
           docker build -f cloud/Dockerfile.hub -t ghcr.io/$owner/studio-hub:${{ matrix.arch }} .
           docker push ghcr.io/$owner/llama-studio-cloud:${{ matrix.arch }}
           docker push ghcr.io/$owner/studio-hub:${{ matrix.arch }}
