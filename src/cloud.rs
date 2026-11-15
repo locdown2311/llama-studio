@@ -87,7 +87,7 @@ fn local() -> &'static reqwest::Client {
 }
 
 /// Vincula este PC à conta (e-mail e senha só passam por aqui, para a central devolver o token).
-pub async fn link(app: &App, url: &str, email: &str, password: &str, device: &str) -> Result<(), String> {
+pub async fn link(app: &App, url: &str, email: &str, password: &str, code: &str, device: &str) -> Result<(), String> {
     let b = base(url);
     if b.starts_with("http://") && !b.contains("://127.0.0.1") && !b.contains("://localhost") {
         return Err(L!("Use https:// (a senha e o acesso ao PC não podem trafegar sem criptografia).", "Use https:// (your password and PC access must not travel unencrypted).").into());
@@ -96,7 +96,7 @@ pub async fn link(app: &App, url: &str, email: &str, password: &str, device: &st
     let r = web()
         .post(format!("{b}/hub/api/pair"))
         .header("content-type", "application/json")
-        .body(json!({ "email": email.trim(), "password": password, "name": device }).to_string())
+        .body(json!({ "email": email.trim(), "password": password, "code": code.trim(), "name": device }).to_string())
         .send()
         .await
         .map_err(|e| LF!("Não consegui falar com a nuvem: {e}", "Couldn't reach the cloud: {e}"))?;
@@ -361,6 +361,29 @@ async fn serve(port: u16, id: u32, p: Pending, tx: &mpsc::UnboundedSender<Messag
         }
     }
     let _ = tx.send(frame(RES_END, id, &[]));
+}
+
+/// Manda as APIs deste PC (com as chaves) para o studio da nuvem da conta.
+pub async fn push_apis(app: &App) -> Result<Value, String> {
+    let c = app.cfg();
+    if c.cloud.token.is_empty() {
+        return Err(L!("Este PC não está vinculado.", "This PC isn't linked.").into());
+    }
+    let list = serde_json::to_value(&c.api_providers).map_err(|e| e.to_string())?;
+    let r = web()
+        .post(format!("{}/hub/sync/apis", base(&c.cloud.url)))
+        .header("authorization", format!("Bearer {}", c.cloud.token))
+        .header("content-type", "application/json")
+        .body(json!({ "apiProviders": list }).to_string())
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let ok = r.status().is_success();
+    let v: Value = r.bytes().await.ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    if !ok {
+        return Err(v["error"].as_str().unwrap_or("erro").to_string());
+    }
+    Ok(v)
 }
 
 /// Acerta as duas cópias: a mais nova de cada chave vence; lápides apagam do outro lado.

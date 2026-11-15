@@ -1880,3 +1880,27 @@ details.verify.warn summary svg { color: var(--warn); }
 .rot-key > .mono { white-space: nowrap; flex: none; }
 .rot-key > .small { flex: 1; }
 .rot-key > .spacer { display: none; }
+
+/* ------------------------------------------------------------ celular */
+@media (max-width: 640px) {
+  /* a barra do compositor quebra em duas linhas em vez de espremer os ícones */
+  .bar { flex-wrap: wrap; row-gap: 6px; column-gap: 4px; padding: 6px 8px 8px; }
+  .bar .pick-wrap, .bar > .bar-btn, .bar > .mic-btn, .bar > .send { flex-shrink: 0; }
+  .bar-btn { height: 36px; }
+  .bar-btn.icon-only, .bar-btn.round { width: 36px; }
+  .bar-btn.icon-only > svg { width: 18px; height: 18px; }
+  #pick-model b { max-width: 120px; }
+  .mic-btn { width: 36px; height: 36px; }
+  .send { width: 40px; height: 40px; }
+  .editor { font-size: 16px; } /* menos que 16 px faz o iPhone dar zoom ao tocar */
+  .composer-wrap { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+  /* menus da barra viram uma folha embaixo, na largura da tela */
+  .composer .popover, .popover.mention {
+    position: fixed; left: 8px !important; right: 8px !important; bottom: max(8px, env(safe-area-inset-bottom)); top: auto;
+    width: auto; max-width: none; max-height: 62vh; border-radius: 14px; z-index: 80;
+  }
+  .popover .opt, .popover .item { min-height: 40px; }
+  /* botões de ação das mensagens com área de toque maior */
+  .msg-actions button, .msg-acts button { min-height: 34px; }
+  .icon-btn { min-width: 36px; min-height: 36px; }
+}

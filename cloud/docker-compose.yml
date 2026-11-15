@@ -32,7 +32,7 @@ services:
       HUB_TRUST_PROXY: "1"
       HUB_SIGNUP: ${HUB_SIGNUP:-open}
       HUB_SIGNUPS_PER_IP: ${HUB_SIGNUPS_PER_IP:-3}
-      HUB_MEM: ${HUB_MEM:-1g}
+      HUB_MEM: ${HUB_MEM:-2g}
       HUB_CPUS: ${HUB_CPUS:-1}
       HUB_DISK_MB: ${HUB_DISK_MB:-2048}
       HUB_IDLE_MIN: ${HUB_IDLE_MIN:-20}

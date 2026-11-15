@@ -9,17 +9,39 @@ COPY ui ui
 COPY assets assets
 RUN cargo build --release --locked --no-default-features && strip target/release/llama-studio
 
-FROM debian:bookworm-slim
+# Ghidra (análise estática com o PC desligado). No ARM64 o decompilador nativo é compilado aqui, se a versão
+# baixada não trouxer pronto. GHIDRA_URL fixa uma versão; vazio = a última publicada.
+FROM debian:trixie-slim AS ghidra
+ARG GHIDRA_URL=
+ARG GRADLE_VERSION=8.14.3
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl unzip jq openjdk-21-jdk-headless build-essential \
+    && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    url="${GHIDRA_URL:-$(curl -fsSL https://api.github.com/repos/NationalSecurityAgency/ghidra/releases/latest | jq -r '.assets[] | select(.name | endswith(".zip")) | .browser_download_url' | head -1)}"; \
+    echo "Ghidra: $url"; curl -fsSL -o /tmp/g.zip "$url"; unzip -q /tmp/g.zip -d /opt; rm /tmp/g.zip; mv /opt/ghidra_* /opt/ghidra; \
+    arch=$(uname -m); \
+    if [ "$arch" = "aarch64" ] && [ ! -e /opt/ghidra/Ghidra/Features/Decompiler/os/linux_arm_64/decompile ]; then \
+      curl -fsSL -o /tmp/gradle.zip "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"; \
+      unzip -q /tmp/gradle.zip -d /opt; export PATH="/opt/gradle-${GRADLE_VERSION}/bin:$PATH"; \
+      cd /opt/ghidra/support && ./buildNatives; \
+      rm -rf /opt/gradle-* /tmp/gradle.zip /root/.gradle; \
+    fi; \
+    ls /opt/ghidra/Ghidra/Features/Decompiler/os/
+
+FROM debian:trixie-slim
 # ferramentas que os agentes usam na pasta da nuvem (engenharia reversa estática incluída)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates libssl3 python3 python3-pip python3-venv git curl wget unzip xz-utils zip file \
-      binutils binutils-multiarch procps less jq nodejs npm ripgrep fd-find \
+      ca-certificates libssl3t64 python3 python3-pip python3-venv git curl wget unzip xz-utils zip file \
+      binutils binutils-multiarch procps less jq nodejs npm ripgrep fd-find openjdk-21-jre-headless \
     && pip3 install --no-cache-dir --break-system-packages pefile capstone lief pyelftools \
     && ln -s /usr/bin/fdfind /usr/local/bin/fd \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -u 1000 -m -d /data/home studio
+COPY --from=ghidra /opt/ghidra /opt/ghidra
+COPY cloud/ghidra/Decompile.java cloud/ghidra/ListFunctions.java /opt/studio-ghidra/
+COPY --chmod=755 cloud/ghidra/ghidra-decompile /usr/local/bin/ghidra-decompile
 COPY --from=build /src/target/release/llama-studio /usr/local/bin/llama-studio
-ENV STUDIO_CLOUD=1 STUDIO_DIR=/data STUDIO_PORT=8080 STUDIO_NO_OPEN=1 HOME=/data/home
+ENV STUDIO_CLOUD=1 STUDIO_DIR=/data STUDIO_PORT=8080 STUDIO_NO_OPEN=1 HOME=/data/home GHIDRA_INSTALL_DIR=/opt/ghidra
 USER 1000:1000
 WORKDIR /data
 EXPOSE 8080

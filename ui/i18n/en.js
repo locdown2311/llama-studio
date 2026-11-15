@@ -2251,4 +2251,11 @@ const I18N_EN = {
   "Este PC: {0}": "This PC: {0}",
   "Na nuvem o studio conversa pelas APIs. Adicione uma para começar.": "In the cloud the studio talks through APIs. Add one to get started.",
   "Rodou pela API {0} ({1})": "Ran on the API {0} ({1})",
+  "só se a conta tiver duas etapas": "only if the account has two-step verification",
+  "Código de duas etapas": "Two-step code",
+  "O código do app autenticador, ou um de recuperação.": "The code from the authenticator app, or a recovery code.",
+  "Nenhuma API configurada neste PC.": "No API set up on this PC.",
+  "Enviar as {0} APIs deste PC, com as chaves, para o studio da nuvem? As de mesmo nome lá são substituídas. Se o studio da nuvem estiver ligado, ele reinicia.": "Send this PC's {0} APIs, with their keys, to the cloud studio? Ones with the same name there are replaced. If the cloud studio is running, it restarts.",
+  "{0} APIs enviadas para a nuvem.": "{0} APIs sent to the cloud.",
+  "Enviar minhas APIs para a nuvem": "Send my APIs to the cloud",
 };

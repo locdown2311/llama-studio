@@ -15,6 +15,17 @@ pub fn open(path: &std::path::Path) -> rusqlite::Result<Connection> {
             hash TEXT UNIQUE NOT NULL, created INTEGER NOT NULL, last_seen INTEGER NOT NULL DEFAULT 0);
          CREATE TABLE IF NOT EXISTS signups(ip TEXT NOT NULL, day INTEGER NOT NULL, n INTEGER NOT NULL, PRIMARY KEY(ip, day));",
     )?;
+    // colunas novas (bancos de versões anteriores)
+    for col in [
+        "totp_secret TEXT",
+        "totp_on INTEGER NOT NULL DEFAULT 0",
+        "recovery TEXT",
+        "is_admin INTEGER NOT NULL DEFAULT 0",
+        "quota_mb INTEGER NOT NULL DEFAULT 0",
+        "last_login INTEGER NOT NULL DEFAULT 0",
+    ] {
+        let _ = c.execute(&format!("ALTER TABLE users ADD COLUMN {col}"), []);
+    }
     Ok(c)
 }
 
@@ -88,8 +99,27 @@ pub fn cli(c: &Connection, args: &[String]) -> i32 {
             println!("{n}");
             (n == 0) as i32
         }
+        "admin" if args.len() > 1 => {
+            let n = c.execute("UPDATE users SET is_admin = 1 WHERE email = ?1", params![args[1].to_lowercase()]).unwrap_or(0);
+            println!("{n}");
+            (n == 0) as i32
+        }
+        "reset2fa" if args.len() > 1 => {
+            let n = c.execute("UPDATE users SET totp_on = 0, totp_secret = NULL, recovery = NULL WHERE email = ?1", params![args[1].to_lowercase()]).unwrap_or(0);
+            println!("{n}");
+            (n == 0) as i32
+        }
+        "passwd" if args.len() > 2 => {
+            use argon2::password_hash::{PasswordHasher, SaltString};
+            let salt = SaltString::encode_b64(token().as_bytes().get(..16).unwrap_or(b"0123456789abcdef")).expect("salt");
+            let Ok(ph) = argon2::Argon2::default().hash_password(args[2].as_bytes(), &salt) else { return 1 };
+            let n = c.execute("UPDATE users SET pass = ?1 WHERE email = ?2", params![ph.to_string(), args[1].to_lowercase()]).unwrap_or(0);
+            let _ = c.execute("DELETE FROM sessions WHERE uid IN (SELECT id FROM users WHERE email = ?1)", params![args[1].to_lowercase()]);
+            println!("{n}");
+            (n == 0) as i32
+        }
         _ => {
-            eprintln!("uso: studio-hub [users | disable <email> | enable <email>]");
+            eprintln!("uso: studio-hub [users | disable <email> | enable <email> | admin <email> | reset2fa <email> | passwd <email> <senha nova>]");
             2
         }
     }

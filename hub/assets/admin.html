@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Administração · Llama Studio</title>
+<link rel="icon" href="/hub/icon.svg">
+<meta name="theme-color" content="#17181c">
+<style>
+:root { --bg:#f6f6f8; --card:#fff; --text:#1d1e22; --muted:#6b6e78; --line:#e3e4e8; --accent:#5b5bd6; --ok:#2f9e58; --err:#c0392b; --warn:#b7791f; }
+@media (prefers-color-scheme: dark) { :root { --bg:#17181c; --card:#1f2025; --text:#e9e9ee; --muted:#9a9ca6; --line:#2e3037; --accent:#8b8bf0; --ok:#5cc483; --err:#ff7b6b; --warn:#e0b04d; } }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; padding:16px; padding-bottom:max(16px, env(safe-area-inset-bottom)); }
+header { display:flex; align-items:center; gap:10px; max-width:1100px; margin:0 auto 16px; }
+header img { width:28px; height:28px; }
+h1 { font-size:19px; margin:0; flex:1; }
+a.back { color:var(--accent); text-decoration:none; font-size:14px; }
+main { max-width:1100px; margin:0 auto; }
+.stats { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:16px; }
+.stat { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+.stat b { display:block; font-size:22px; font-weight:650; }
+.stat span { color:var(--muted); font-size:12.5px; }
+.bar { display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
+.bar input { flex:1; min-width:180px; padding:9px 12px; border:1px solid var(--line); border-radius:9px; background:var(--card); color:var(--text); font:inherit; }
+.list { display:grid; gap:10px; }
+.u { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+.u.off { opacity:.6; }
+.top { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.top .em { font-weight:600; word-break:break-all; flex:1; min-width:180px; }
+.tag { font-size:11.5px; padding:2px 8px; border-radius:99px; border:1px solid var(--line); color:var(--muted); white-space:nowrap; }
+.tag.on { color:var(--ok); border-color:currentColor; }
+.tag.bad { color:var(--err); border-color:currentColor; }
+.tag.adm { color:var(--accent); border-color:currentColor; }
+.meta { color:var(--muted); font-size:12.5px; margin:6px 0 8px; display:flex; gap:14px; flex-wrap:wrap; }
+.disk { height:6px; background:var(--line); border-radius:3px; overflow:hidden; margin:2px 0 10px; }
+.disk i { display:block; height:100%; background:var(--accent); }
+.disk i.full { background:var(--err); }
+.acts { display:flex; gap:6px; flex-wrap:wrap; }
+button { border:1px solid var(--line); background:var(--card); color:var(--text); border-radius:8px; padding:7px 11px; font:inherit; font-size:13px; cursor:pointer; min-height:36px; }
+button:hover { border-color:var(--accent); }
+button.danger { color:var(--err); }
+.err { color:var(--err); margin:10px 0; }
+.toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); background:#222; color:#fff; padding:8px 14px; border-radius:9px; font-size:13px; opacity:0; transition:opacity .2s; pointer-events:none; }
+.toast.on { opacity:1; }
+.cfg { color:var(--muted); font-size:12.5px; margin:-6px 0 14px; }
+</style>
+</head>
+<body>
+<header><img src="/hub/icon.svg" alt=""><h1 id="title"></h1><a class="back" href="/" id="back"></a></header>
+<main>
+  <div class="stats" id="stats"></div>
+  <div class="cfg" id="cfg"></div>
+  <div class="bar"><input id="q" type="search" autocomplete="off"><button id="reload"></button></div>
+  <div class="err" id="err" role="alert"></div>
+  <div class="list" id="list"></div>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+const en = !/^pt/i.test(navigator.language || '');
+const T = en ? {
+  title: 'Administration', back: 'Back to the studio', search: 'Search by e-mail', reload: 'Refresh', users: 'accounts', running: 'cloud studios on', pcs: 'PCs online', disk: 'disk in use',
+  signupOpen: 'sign-up open', signupClosed: 'sign-up closed', cfg: (s) => `Per studio: ${s.mem} RAM, ${s.cpus} CPU, turns off after ${s.idleMin} min idle, default quota ${s.defaultQuotaMb} MB. Image: ${s.image}`,
+  created: 'created', last: 'last sign-in', never: 'never', devices: 'linked PCs', on: 'cloud on', pc: 'PC online', twofa: '2FA', admin: 'admin', disabled: 'blocked',
+  disable: 'Block', enable: 'Unblock', stop: 'Turn off cloud', logout: 'End sessions', reset2fa: 'Reset 2FA', setQuota: 'Disk quota', setPassword: 'New password', makeAdmin: 'Make admin', removeAdmin: 'Remove admin', del: 'Delete',
+  askQuota: 'Disk quota in MB (0 = server default):', askPass: 'New password for {0} (min. 8 characters). Their sessions are ended:', askDel: 'Delete {0} and ALL their cloud files? Type APAGAR to confirm:', sure: 'Are you sure? ({0})', done: 'Done',
+} : {
+  title: 'Administração', back: 'Voltar ao studio', search: 'Buscar por e-mail', reload: 'Atualizar', users: 'contas', running: 'studios ligados na nuvem', pcs: 'PCs online', disk: 'disco em uso',
+  signupOpen: 'cadastro aberto', signupClosed: 'cadastro fechado', cfg: (s) => `Cada studio: ${s.mem} de RAM, ${s.cpus} CPU, desliga após ${s.idleMin} min parado, cota padrão de ${s.defaultQuotaMb} MB. Imagem: ${s.image}`,
+  created: 'criada', last: 'último login', never: 'nunca', devices: 'PCs vinculados', on: 'nuvem ligada', pc: 'PC online', twofa: 'duas etapas', admin: 'admin', disabled: 'bloqueada',
+  disable: 'Bloquear', enable: 'Desbloquear', stop: 'Desligar a nuvem', logout: 'Encerrar sessões', reset2fa: 'Zerar duas etapas', setQuota: 'Cota de disco', setPassword: 'Nova senha', makeAdmin: 'Tornar admin', removeAdmin: 'Tirar admin', del: 'Apagar',
+  askQuota: 'Cota de disco em MB (0 = a padrão do servidor):', askPass: 'Senha nova para {0} (mín. 8 caracteres). As sessões dela são encerradas:', askDel: 'Apagar {0} e TODOS os arquivos dela na nuvem? Digite APAGAR para confirmar:', sure: 'Tem certeza? ({0})', done: 'Feito',
+};
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmtDate = (t) => t ? new Date(t * 1000).toLocaleString(en ? 'en' : 'pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : T.never;
+const fmtMb = (mb) => mb >= 1024 ? (mb / 1024).toFixed(1) + ' GB' : mb + ' MB';
+$('title').textContent = T.title; $('back').textContent = T.back; $('q').placeholder = T.search; $('reload').textContent = T.reload;
+let data = null;
+function toast(m) { const t = $('toast'); t.textContent = m; t.classList.add('on'); setTimeout(() => t.classList.remove('on'), 1800); }
+async function load() {
+  $('err').textContent = '';
+  try {
+    const r = await fetch('/hub/api/admin/users', { cache: 'no-store' });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    data = j; draw();
+  } catch (e) { $('err').textContent = e.message; }
+}
+async function act(u, action, extra = {}) {
+  const r = await fetch('/hub/api/admin/action', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-hub': '1' }, body: JSON.stringify({ id: u.id, action, ...extra }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $('err').textContent = j.error || r.statusText; return; }
+  toast(T.done); load();
+}
+function draw() {
+  const s = data.stats;
+  $('stats').innerHTML = [[s.users, T.users], [`${s.running}/${s.maxRunning}`, T.running], [s.pcs, T.pcs], [fmtMb(s.diskMb), T.disk], [s.signupOpen ? '✓' : '×', s.signupOpen ? T.signupOpen : T.signupClosed]]
+    .map(([b, l]) => `<div class="stat"><b>${esc(b)}</b><span>${esc(l)}</span></div>`).join('');
+  $('cfg').textContent = T.cfg(s);
+  const q = $('q').value.trim().toLowerCase();
+  const list = $('list'); list.innerHTML = '';
+  for (const u of data.users.filter((u) => !q || u.email.includes(q))) {
+    const pct = Math.min(100, Math.round(100 * u.diskMb / Math.max(1, u.quotaMb)));
+    const el = document.createElement('div');
+    el.className = 'u' + (u.disabled ? ' off' : '');
+    el.innerHTML = `<div class="top"><span class="em">${esc(u.email)}</span>
+      ${u.admin ? `<span class="tag adm">${T.admin}</span>` : ''}${u.disabled ? `<span class="tag bad">${T.disabled}</span>` : ''}
+      ${u.twofa ? `<span class="tag on">${T.twofa}</span>` : ''}${u.running ? `<span class="tag on">${T.on}</span>` : ''}${u.pc ? `<span class="tag on">${T.pc}: ${esc(u.pc)}</span>` : ''}</div>
+      <div class="meta"><span>#${u.id}</span><span>${T.created} ${fmtDate(u.created)}</span><span>${T.last} ${fmtDate(u.lastLogin)}</span><span>${T.devices}: ${u.devices}</span><span>${fmtMb(u.diskMb)} / ${fmtMb(u.quotaMb)}</span></div>
+      <div class="disk"><i class="${pct >= 100 ? 'full' : ''}" style="width:${pct}%"></i></div>
+      <div class="acts"></div>`;
+    const acts = el.querySelector('.acts');
+    const btn = (label, fn, danger) => { const b = document.createElement('button'); b.textContent = label; if (danger) b.className = 'danger'; b.onclick = fn; acts.append(b); };
+    const sure = (label, action) => () => { if (confirm(T.sure.replace('{0}', label))) act(u, action); };
+    if (u.running) btn(T.stop, () => act(u, 'stop'));
+    btn(T.setQuota, () => { const v = prompt(T.askQuota, u.customQuota ? u.quotaMb : 0); if (v != null) act(u, 'setQuota', { quotaMb: parseInt(v, 10) || 0 }); });
+    btn(T.setPassword, () => { const v = prompt(T.askPass.replace('{0}', u.email)); if (v) act(u, 'setPassword', { password: v }); });
+    if (u.twofa) btn(T.reset2fa, sure(T.reset2fa, 'reset2fa'));
+    btn(T.logout, () => act(u, 'logout'));
+    if (u.id === data.me) { list.append(el); continue; }
+    btn(u.admin ? T.removeAdmin : T.makeAdmin, sure(u.admin ? T.removeAdmin : T.makeAdmin, u.admin ? 'removeAdmin' : 'makeAdmin'));
+    btn(u.disabled ? T.enable : T.disable, u.disabled ? () => act(u, 'enable') : sure(T.disable, 'disable'), !u.disabled);
+    btn(T.del, () => { const v = prompt(T.askDel.replace('{0}', u.email)); if (v) act(u, 'delete', { confirm: v }); }, true);
+    list.append(el);
+  }
+}
+$('q').oninput = () => data && draw();
+$('reload').onclick = load;
+load();
+setInterval(() => { if (!document.hidden) load(); }, 30000);
+</script>
+</body>
+</html>

@@ -15,6 +15,9 @@ fn file(ct: &'static str, body: &'static [u8], cache: &'static str) -> Response 
 pub async fn login() -> Response {
     file("text/html; charset=utf-8", include_bytes!("../assets/login.html"), "no-store")
 }
+pub fn admin_html() -> Response {
+    file("text/html; charset=utf-8", include_bytes!("../assets/admin.html"), "no-store")
+}
 pub async fn client_js() -> Response {
     file("text/javascript; charset=utf-8", include_bytes!("../assets/client.js"), "no-cache")
 }

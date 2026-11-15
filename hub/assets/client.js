@@ -5,13 +5,25 @@
   window.__hub = true;
   const en = !/^pt/i.test(document.documentElement.lang || navigator.language || '');
   const T = en
-    ? { pc: 'PC', cloud: 'Cloud', onPc: 'Running on your PC', onCloud: 'Running in the cloud', pcBack: 'Your PC is online.', openPc: 'Open on PC', pcGone: 'Your PC disconnected.', goCloud: 'Continue in the cloud', useCloud: 'Use the cloud instead', logout: 'Sign out', devices: 'Linked PCs', none: 'No PC linked yet. On your PC: Settings → Cloud.', remove: 'Unlink', since: 'connected', cloudStop: 'Turn off cloud studio', disk: 'Cloud folder' }
-    : { pc: 'PC', cloud: 'Nuvem', onPc: 'Rodando no seu PC', onCloud: 'Rodando na nuvem', pcBack: 'Seu PC está online.', openPc: 'Abrir no PC', pcGone: 'O PC desconectou.', goCloud: 'Continuar na nuvem', useCloud: 'Usar a nuvem', logout: 'Sair', devices: 'PCs vinculados', none: 'Nenhum PC vinculado ainda. No PC: Configurações → Nuvem.', remove: 'Desvincular', since: 'conectado', cloudStop: 'Desligar o studio na nuvem', disk: 'Pasta na nuvem' };
+    ? { pc: 'PC', cloud: 'Cloud', onPc: 'Running on your PC', onCloud: 'Running in the cloud', pcBack: 'Your PC is online.', openPc: 'Open on PC', pcGone: 'Your PC disconnected.', goCloud: 'Continue in the cloud', useCloud: 'Use the cloud instead', logout: 'Sign out', devices: 'Linked PCs', none: 'No PC linked yet. On your PC: Settings → Cloud.', remove: 'Unlink', since: 'connected', cloudStop: 'Turn off cloud studio', disk: 'Cloud folder', account: 'Account and security', admin: 'Administration', close: 'Close',
+      twofa: 'Two-step verification', twofaOn: 'On. Signing in asks for a code from your authenticator app.', twofaOff: 'Off. Turn it on: your account can control your PC.', enable: 'Turn on', disable: 'Turn off', newRec: 'New recovery codes', left: '{0} recovery codes left',
+      scan: '1. Scan with an authenticator app (Google Authenticator, Authy, 1Password, Aegis...) or type the key:', type: '2. Type the 6-digit code it shows:', confirm: 'Confirm', saveRec: 'Save these recovery codes somewhere safe. Each works once if you lose your phone. They won\'t be shown again.', copy: 'Copy', copied: 'Copied',
+      pass: 'Account password', code: 'Code (or recovery code)', changePass: 'Change password', cur: 'Current password', newPass: 'New password (min. 8)', save: 'Save', ok: 'Done' }
+    : { pc: 'PC', cloud: 'Nuvem', onPc: 'Rodando no seu PC', onCloud: 'Rodando na nuvem', pcBack: 'Seu PC está online.', openPc: 'Abrir no PC', pcGone: 'O PC desconectou.', goCloud: 'Continuar na nuvem', useCloud: 'Usar a nuvem', logout: 'Sair', devices: 'PCs vinculados', none: 'Nenhum PC vinculado ainda. No PC: Configurações → Nuvem.', remove: 'Desvincular', since: 'conectado', cloudStop: 'Desligar o studio na nuvem', disk: 'Pasta na nuvem', account: 'Conta e segurança', admin: 'Administração', close: 'Fechar',
+      twofa: 'Duas etapas', twofaOn: 'Ligada. Entrar pede o código do app autenticador.', twofaOff: 'Desligada. Ligue: sua conta controla o seu PC.', enable: 'Ligar', disable: 'Desligar', newRec: 'Novos códigos de recuperação', left: 'Restam {0} códigos de recuperação',
+      scan: '1. Leia com um app autenticador (Google Authenticator, Authy, 1Password, Aegis...) ou digite a chave:', type: '2. Digite o código de 6 dígitos que ele mostra:', confirm: 'Confirmar', saveRec: 'Guarde estes códigos de recuperação num lugar seguro. Cada um vale uma vez se você perder o celular. Eles não aparecem de novo.', copy: 'Copiar', copied: 'Copiado',
+      pass: 'Senha da conta', code: 'Código (ou de recuperação)', changePass: 'Trocar a senha', cur: 'Senha atual', newPass: 'Senha nova (mín. 8)', save: 'Salvar', ok: 'Feito' };
   const host = document.createElement('div');
-  host.style.cssText = 'position:fixed;z-index:2147483000;left:50%;top:max(8px, env(safe-area-inset-top));transform:translateX(-50%);pointer-events:none';
+  // no celular fica à direita, logo abaixo do cabeçalho (no meio, cobria o título)
+  const narrow = matchMedia('(max-width: 860px)');
+  const place = () => { host.style.cssText = narrow.matches
+    ? 'position:fixed;z-index:2147483000;right:10px;top:calc(64px + env(safe-area-inset-top));pointer-events:none'
+    : 'position:fixed;z-index:2147483000;left:50%;top:max(8px, env(safe-area-inset-top));transform:translateX(-50%);pointer-events:none'; };
+  place(); narrow.addEventListener('change', place);
   const root = host.attachShadow({ mode: 'open' });
   root.innerHTML = `<style>
     :host { all: initial; }
+    @media (max-width: 860px) { .wrap { align-items: flex-end; } }
     * { box-sizing: border-box; font: 12px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
     .wrap { display:flex; flex-direction:column-reverse; align-items:center; gap:6px; pointer-events:none; }
     .pill, .bar, .menu { pointer-events:auto; background:rgba(30,31,36,.92); color:#eee; border:1px solid rgba(255,255,255,.12); backdrop-filter: blur(6px); }
@@ -29,13 +41,33 @@
     .row { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:4px 0; }
     .muted { color:#999; }
     .sep { height:1px; background:rgba(255,255,255,.1); margin:8px 0; }
+    .sheet-back { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:center; justify-content:center; padding:16px; pointer-events:auto; }
+    .sheet-back.on { display:flex; }
+    .sheet { background:#1f2025; color:#eee; border:1px solid rgba(255,255,255,.12); border-radius:14px; width:min(440px, 100%); max-height:90vh; overflow:auto; padding:16px; box-shadow:0 10px 40px rgba(0,0,0,.5); }
+    .sheet * { font-size:13.5px; }
+    .sheet h3 { margin:0 0 12px; font-size:16px; font-weight:650; }
+    .sheet h5 { margin:14px 0 6px; font-size:14px; font-weight:600; }
+    .sheet p { margin:6px 0; color:#bbb; }
+    .sheet input { width:100%; padding:9px 11px; border-radius:8px; border:1px solid rgba(255,255,255,.18); background:#16171b; color:#eee; margin:4px 0; }
+    .sheet button { min-height:36px; margin:4px 4px 0 0; }
+    .sheet .qr { background:#fff; border-radius:10px; padding:8px; width:200px; margin:8px 0; }
+    .sheet .qr svg { width:100%; height:auto; display:block; }
+    .sheet code, .sheet .codes { font-family: ui-monospace, Consolas, monospace; }
+    .sheet .codes { display:grid; grid-template-columns:1fr 1fr; gap:4px 12px; background:#16171b; border-radius:8px; padding:10px; margin:8px 0; letter-spacing:1px; }
+    .sheet .err { color:#ff7b6b; min-height:18px; }
+    .sheet .key { word-break:break-all; background:#16171b; padding:6px 8px; border-radius:6px; display:block; }
   </style>
   <div class="wrap">
     <div class="menu" id="menu"></div>
     <div class="bar" id="bar"><span id="barText"></span><button id="barGo"></button><button class="ghost" id="barX">×</button></div>
     <div class="pill" id="pill"><span class="dot" id="dot"></span><span id="where"></span></div>
   </div>`;
-  const $ = (id) => root.getElementById(id);
+  // a janela da conta fica num elemento próprio (o da etiqueta tem transform, que prenderia o position:fixed)
+  const sheetHost = document.createElement('div');
+  sheetHost.style.cssText = 'position:fixed;inset:0;z-index:2147483001;pointer-events:none';
+  const sroot = sheetHost.attachShadow({ mode: 'open' });
+  sroot.innerHTML = root.innerHTML.split('</style>')[0] + '</style><div class="sheet-back" id="sheetBack"><div class="sheet" id="sheet"></div></div>';
+  const $ = (id) => root.getElementById(id) || sroot.getElementById(id);
   const mark = () => {
     $('dot').className = 'dot' + (TARGET === 'pc' ? ' pc' : '');
     $('where').textContent = TARGET === 'pc' ? T.pc : T.cloud;
@@ -84,11 +116,69 @@
       }
     } catch { /* ok */ }
     add('<div class="sep"></div>');
+    const acc = add(`<div class="row"><button class="ghost" id="acc">${T.account}${me?.user?.twofa ? '' : ' ⚠'}</button>${me?.user?.admin ? `<button class="ghost" id="adm">${T.admin}</button>` : ''}</div>`);
+    acc.querySelector('#acc').onclick = () => { m.classList.remove('on'); account(); };
+    acc.querySelector('#adm')?.addEventListener('click', () => { location.href = '/hub/admin'; });
     const f = add(`<div class="row"><button class="ghost" id="stop">${T.cloudStop}</button><button class="ghost" id="out">${T.logout}</button></div>`);
     f.querySelector('#out').onclick = async () => { await post('/hub/api/logout'); location.href = '/hub/login'; };
     f.querySelector('#stop').onclick = async () => { await post('/hub/api/cloud/stop'); m.classList.remove('on'); };
     m.classList.add('on');
   }
+  /* conta: duas etapas e senha */
+  const escH = (x) => String(x ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const call = async (u, b) => { const r = await post(u, b); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.statusText); return j; };
+  function showCodes(box, codes) {
+    box.innerHTML = `<p>${T.saveRec}</p><div class="codes">${codes.map((c) => `<span>${escH(c)}</span>`).join('')}</div><button id="cp">${T.copy}</button><button class="ghost" id="dn">${T.ok}</button>`;
+    box.querySelector('#cp').onclick = async (e) => { try { await navigator.clipboard.writeText(codes.join('\n')); e.target.textContent = T.copied; } catch { /* sem permissão */ } };
+    box.querySelector('#dn').onclick = () => account();
+  }
+  async function account() {
+    try { const r = await fetch('/hub/api/me', { cache: 'no-store' }); if (r.ok) me = await r.json(); } catch { /* ok */ }
+    const back = $('sheetBack'), sh = $('sheet');
+    back.classList.add('on');
+    back.onclick = (e) => { if (e.target === back) back.classList.remove('on'); };
+    const on = !!me?.user?.twofa;
+    sh.innerHTML = `<h3>${T.account}</h3><p>${escH(me?.user?.email || '')}</p>
+      <h5>${T.twofa}</h5><p>${on ? T.twofaOn : T.twofaOff}</p>${on ? `<p>${T.left.replace('{0}', me.user.recoveryLeft)}</p>` : ''}
+      <div id="tf"></div><div class="err" id="tfErr"></div>
+      <h5>${T.changePass}</h5>
+      <input type="password" id="pc" placeholder="${T.cur}" autocomplete="current-password"><input type="password" id="pn" placeholder="${T.newPass}" autocomplete="new-password">
+      <button id="ps">${T.save}</button><div class="err" id="psErr"></div>
+      <div class="sep"></div><button class="ghost" id="cl">${T.close}</button>`;
+    sh.querySelector('#cl').onclick = () => back.classList.remove('on');
+    sh.querySelector('#ps').onclick = async () => {
+      try { await call('/hub/api/password', { current: sh.querySelector('#pc').value, password: sh.querySelector('#pn').value }); sh.querySelector('#psErr').textContent = ''; sh.querySelector('#pn').value = sh.querySelector('#pc').value = ''; sh.querySelector('#ps').textContent = T.ok; }
+      catch (e) { sh.querySelector('#psErr').textContent = e.message; }
+    };
+    const tf = sh.querySelector('#tf'), tfErr = sh.querySelector('#tfErr');
+    if (!on) {
+      tf.innerHTML = `<button id="en">${T.enable}</button>`;
+      tf.querySelector('#en').onclick = async () => {
+        try {
+          const s = await call('/hub/api/2fa/setup');
+          tf.innerHTML = `<p>${T.scan}</p><div class="qr">${s.qr}</div><code class="key">${escH(s.secret.replace(/(.{4})/g, '$1 ').trim())}</code>
+            <p>${T.type}</p><input id="cd" inputmode="numeric" autocomplete="one-time-code" maxlength="6"><button id="ok">${T.confirm}</button>`;
+          tf.querySelector('#cd').focus();
+          tf.querySelector('#ok').onclick = async () => {
+            try { const r = await call('/hub/api/2fa/enable', { code: tf.querySelector('#cd').value }); tfErr.textContent = ''; showCodes(tf, r.recovery); }
+            catch (e) { tfErr.textContent = e.message; }
+          };
+        } catch (e) { tfErr.textContent = e.message; }
+      };
+    } else {
+      tf.innerHTML = `<input type="password" id="dp" placeholder="${T.pass}" autocomplete="current-password"><input id="dc" placeholder="${T.code}" autocomplete="one-time-code">
+        <button class="ghost" id="nr">${T.newRec}</button><button class="ghost" id="ds">${T.disable}</button>`;
+      tf.querySelector('#ds').onclick = async () => {
+        try { await call('/hub/api/2fa/disable', { password: tf.querySelector('#dp').value, code: tf.querySelector('#dc').value }); account(); }
+        catch (e) { tfErr.textContent = e.message; }
+      };
+      tf.querySelector('#nr').onclick = async () => {
+        try { const r = await call('/hub/api/2fa/recovery', { code: tf.querySelector('#dc').value }); tfErr.textContent = ''; showCodes(tf, r.recovery); }
+        catch (e) { tfErr.textContent = e.message; }
+      };
+    }
+  }
+
   // um pedido que volta dizendo que o PC caiu mostra o aviso na hora
   const f0 = window.fetch;
   window.fetch = async (...a) => {
@@ -98,7 +188,7 @@
     return r;
   };
   const start = () => {
-    document.body.append(host);
+    document.body.append(host, sheetHost);
     mark();
     $('pill').onclick = menu;
     poll();

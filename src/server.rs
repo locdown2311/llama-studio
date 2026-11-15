@@ -73,6 +73,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/cloud/enable", post(cloud_enable))
         .route("/api/cloud/unlink", post(cloud_unlink))
         .route("/api/cloud/sync", post(cloud_sync))
+        .route("/api/cloud/push-apis", post(cloud_push_apis))
         .route("/api/config", post(set_config))
         .route("/api/bins", get(bins_list))
         .route("/api/bins/install", post(bins_install))
@@ -635,8 +636,13 @@ async fn remote_ping(State(app): S, Query(qs): Q) -> Res {
 
 // ---------------------------------------------------------------- estado e config
 
-async fn ui_all(State(app): S) -> Res {
-    ok(crate::uistate::all(&app))
+async fn ui_all(State(app): S, Query(qs): Q) -> Res {
+    if let Some(t) = qs.get("since").and_then(|s| s.parse::<u64>().ok()) {
+        return ok(crate::uistate::since(&app, t));
+    }
+    let mut v = crate::uistate::all(&app);
+    v["now"] = json!(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0));
+    ok(v)
 }
 async fn ui_put(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
@@ -681,7 +687,7 @@ async fn cloud_status(State(app): S) -> Res {
 
 async fn cloud_link(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
-    crate::cloud::link(&app, st(&v, "url"), st(&v, "email"), st(&v, "password"), st(&v, "device")).await.map_err(bad)?;
+    crate::cloud::link(&app, st(&v, "url"), st(&v, "email"), st(&v, "password"), st(&v, "code"), st(&v, "device")).await.map_err(bad)?;
     ok(crate::cloud::status(&app))
 }
 
@@ -694,6 +700,10 @@ async fn cloud_enable(State(app): S, b: Bytes) -> Res {
 async fn cloud_unlink(State(app): S) -> Res {
     crate::cloud::unlink(&app);
     ok(crate::cloud::status(&app))
+}
+
+async fn cloud_push_apis(State(app): S) -> Res {
+    ok(crate::cloud::push_apis(&app).await.map_err(bad)?)
 }
 
 async fn cloud_sync(State(app): S) -> Res {

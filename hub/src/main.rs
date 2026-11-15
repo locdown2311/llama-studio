@@ -6,6 +6,7 @@
 //!   limites de CPU/RAM/disco, desligado quando fica parado e sem rede direta (a saída passa pelo proxy daqui).
 //! - Sincroniza conversas, projetos e personalidades entre o PC e a nuvem.
 
+mod admin;
 mod auth;
 mod boxes;
 mod db;
@@ -13,6 +14,7 @@ mod link;
 mod pages;
 mod proxy;
 mod sync;
+mod totp;
 
 use axum::body::Body;
 use axum::extract::{Request, State};
@@ -129,6 +131,16 @@ async fn main() {
         .route("/sw.js", get(pages::sw))
         .route("/hub/api/signup", post(auth::signup))
         .route("/hub/api/login", post(auth::login))
+        .route("/hub/api/login/2fa", post(auth::login_2fa))
+        .route("/hub/api/password", post(auth::change_password))
+        .route("/hub/api/2fa/setup", post(totp::setup))
+        .route("/hub/api/2fa/enable", post(totp::enable))
+        .route("/hub/api/2fa/disable", post(totp::disable))
+        .route("/hub/api/2fa/recovery", post(totp::new_recovery))
+        .route("/hub/admin", get(admin::page))
+        .route("/hub/api/admin/users", get(admin::users))
+        .route("/hub/api/admin/action", post(admin::action))
+        .route("/hub/sync/apis", post(sync::push_apis))
         .route("/hub/api/logout", post(auth::logout))
         .route("/hub/api/me", get(auth::me))
         .route("/hub/api/pair", post(auth::pair))

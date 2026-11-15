@@ -30,7 +30,12 @@ fn session_cookie(h: &crate::Hub, tok: &str, max_age: i64) -> HeaderValue {
 
 fn new_session(h: &crate::Hub, uid: i64) -> Response {
     let tok = db::token();
-    let _ = h.db.lock().unwrap().execute("INSERT INTO sessions(hash, uid, expires) VALUES(?1, ?2, ?3)", params![db::sha(&tok), uid, now() + SESSION_DAYS * 86_400]);
+    {
+        let db = h.db.lock().unwrap();
+        let _ = db.execute("INSERT INTO sessions(hash, uid, expires) VALUES(?1, ?2, ?3)", params![db::sha(&tok), uid, now() + SESSION_DAYS * 86_400]);
+        let _ = db.execute("UPDATE users SET last_login = ?1 WHERE id = ?2", params![now(), uid]);
+        let _ = db.execute("DELETE FROM sessions WHERE expires < ?1", params![now()]);
+    }
     let mut r = Json(json!({ "ok": true })).into_response();
     r.headers_mut().insert(header::SET_COOKIE, session_cookie(h, &tok, SESSION_DAYS * 86_400));
     r
@@ -126,6 +131,10 @@ pub async fn signup(State(h): State<H>, ConnectInfo(peer): ConnectInfo<SocketAdd
         let _ = db.execute("INSERT INTO signups(ip, day, n) VALUES(?1, ?2, 1) ON CONFLICT(ip, day) DO UPDATE SET n = n + 1", params![ip, day]);
         db.last_insert_rowid()
     };
+    // o número de uma conta apagada pode voltar: nada dela pode sobrar para a nova
+    h.boxes.remove(&h, uid).await;
+    let d = crate::boxes::dir(&h, uid);
+    let _ = tokio::task::spawn_blocking(move || std::fs::remove_dir_all(d)).await;
     new_session(&h, uid)
 }
 
@@ -149,15 +158,90 @@ async fn verify(h: &H, ip: &str, v: &Value) -> Result<i64, Response> {
     }
 }
 
+/// Login com duas etapas: a senha certa devolve um bilhete de 5 minutos, trocado pela sessão com o código.
+fn tickets() -> &'static std::sync::Mutex<std::collections::HashMap<String, (i64, std::time::Instant, u32)>> {
+    static T: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, (i64, std::time::Instant, u32)>>> = std::sync::OnceLock::new();
+    T.get_or_init(Default::default)
+}
+
 pub async fn login(State(h): State<H>, ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap, Json(v): Json<Value>) -> Response {
     if !csrf_ok(&headers) {
         return err(StatusCode::FORBIDDEN, "x-hub");
     }
     let ip = crate::client_ip(&h, &headers, Some(peer));
     match verify(&h, &ip, &v).await {
-        Ok(uid) => new_session(&h, uid),
+        Ok(uid) => {
+            if crate::totp::get(&h.db.lock().unwrap(), uid).on {
+                let t = db::token();
+                let mut m = tickets().lock().unwrap();
+                m.retain(|_, (_, at, _)| at.elapsed().as_secs() < 300);
+                m.insert(t.clone(), (uid, std::time::Instant::now(), 0));
+                return Json(json!({ "need2fa": true, "ticket": t })).into_response();
+            }
+            new_session(&h, uid)
+        }
         Err(r) => r,
     }
+}
+
+pub async fn login_2fa(State(h): State<H>, headers: HeaderMap, Json(v): Json<Value>) -> Response {
+    if !csrf_ok(&headers) {
+        return err(StatusCode::FORBIDDEN, "x-hub");
+    }
+    let t = v["ticket"].as_str().unwrap_or("").to_string();
+    let uid = {
+        let mut m = tickets().lock().unwrap();
+        match m.get_mut(&t) {
+            Some((uid, at, tries)) if at.elapsed().as_secs() < 300 && *tries < 5 => {
+                *tries += 1;
+                *uid
+            }
+            _ => {
+                m.remove(&t);
+                return err(StatusCode::UNAUTHORIZED, "Tempo esgotado. Entre de novo.");
+            }
+        }
+    };
+    if !crate::totp::verify(&h, uid, v["code"].as_str().unwrap_or("")) {
+        return err(StatusCode::UNAUTHORIZED, "Código incorreto.");
+    }
+    tickets().lock().unwrap().remove(&t);
+    new_session(&h, uid)
+}
+
+/// Confere a senha da conta (desligar as duas etapas, trocar a senha).
+pub async fn password_ok(h: &H, uid: i64, pass: &str) -> bool {
+    let stored: Option<String> = h.db.lock().unwrap().query_row("SELECT pass FROM users WHERE id = ?1", params![uid], |r| r.get(0)).optional().ok().flatten();
+    match stored {
+        Some(s) => check_pass(pass.to_string(), s).await,
+        None => false,
+    }
+}
+
+/// Trocar a senha: pede a atual e derruba as outras sessões.
+pub async fn change_password(State(h): State<H>, headers: HeaderMap, Json(v): Json<Value>) -> Response {
+    let Some(u) = user(&h, &headers) else { return err(StatusCode::UNAUTHORIZED, "login") };
+    if !csrf_ok(&headers) {
+        return err(StatusCode::FORBIDDEN, "x-hub");
+    }
+    if !password_ok(&h, u.id, v["current"].as_str().unwrap_or("")).await {
+        return err(StatusCode::UNAUTHORIZED, "Senha atual incorreta.");
+    }
+    let new = v["password"].as_str().unwrap_or("").to_string();
+    if new.chars().count() < 8 || new.len() > 256 {
+        return err(StatusCode::BAD_REQUEST, "A senha precisa de pelo menos 8 caracteres.");
+    }
+    let Some(ph) = hash_pass(new).await else { return err(StatusCode::INTERNAL_SERVER_ERROR, "hash") };
+    let db = h.db.lock().unwrap();
+    let _ = db.execute("UPDATE users SET pass = ?1 WHERE id = ?2", params![ph, u.id]);
+    if let Some(tok) = crate::cookie(&headers, "hub_s") {
+        let _ = db.execute("DELETE FROM sessions WHERE uid = ?1 AND hash != ?2", params![u.id, db::sha(&tok)]);
+    }
+    Json(json!({ "ok": true })).into_response()
+}
+
+pub async fn set_password_hash(p: String) -> Option<String> {
+    hash_pass(p).await
 }
 
 pub async fn logout(State(h): State<H>, headers: HeaderMap) -> Response {
@@ -176,7 +260,12 @@ pub async fn me(State(h): State<H>, headers: HeaderMap) -> Response {
     let Some(u) = user(&h, &headers) else { return Json(json!({ "user": null, "signupOpen": h.cfg.signup_open })).into_response() };
     let pc = h.links.lock().unwrap().get(&u.id).map(|l| json!({ "name": l.name, "secs": l.since.elapsed().as_secs() }));
     let cloud = h.boxes.info(u.id);
-    Json(json!({ "user": { "email": u.email }, "pc": pc, "cloud": cloud, "target": crate::cookie(&headers, "hub_t") })).into_response()
+    let (twofa, admin, left) = {
+        let db = h.db.lock().unwrap();
+        let t = crate::totp::get(&db, u.id);
+        (t.on, crate::admin::is_admin(&db, u.id), t.recovery.len())
+    };
+    Json(json!({ "user": { "email": u.email, "twofa": twofa, "recoveryLeft": left, "admin": admin }, "pc": pc, "cloud": cloud, "target": crate::cookie(&headers, "hub_t") })).into_response()
 }
 
 /// O studio do PC troca e-mail e senha por um token próprio (a senha não fica guardada no PC).
@@ -186,6 +275,15 @@ pub async fn pair(State(h): State<H>, ConnectInfo(peer): ConnectInfo<SocketAddr>
         Ok(uid) => uid,
         Err(r) => return r,
     };
+    if crate::totp::get(&h.db.lock().unwrap(), uid).on {
+        let code = v["code"].as_str().unwrap_or("");
+        if code.trim().is_empty() {
+            return (StatusCode::UNAUTHORIZED, Json(json!({ "error": "Digite o código das duas etapas.", "need2fa": true }))).into_response();
+        }
+        if !crate::totp::verify(&h, uid, code) {
+            return (StatusCode::UNAUTHORIZED, Json(json!({ "error": "Código das duas etapas incorreto.", "need2fa": true }))).into_response();
+        }
+    }
     let name: String = v["name"].as_str().unwrap_or("PC").chars().filter(|c| !c.is_control()).take(60).collect();
     let tok = db::token();
     let _ = h.db.lock().unwrap().execute("INSERT INTO devices(uid, name, hash, created) VALUES(?1, ?2, ?3, ?4)", params![uid, if name.trim().is_empty() { "PC".into() } else { name }, db::sha(&tok), now()]);

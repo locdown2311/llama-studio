@@ -104,16 +104,30 @@ No celular, uma etiqueta no topo mostra onde o studio está rodando (**PC** ou *
 
 ## Administrar
 
-Os comandos rodam dentro do contêiner do hub:
+O painel fica em `https://SEU_DOMINIO/hub/admin`. Abrem por ele a primeira conta criada, as contas marcadas como admin e os e-mails listados em `HUB_ADMINS`. Lá dá para:
+
+- ver as contas, o disco de cada uma, os studios ligados e os PCs online;
+- bloquear e desbloquear contas;
+- trocar a senha de alguém e zerar as duas etapas;
+- mudar a cota de disco;
+- desligar o studio da nuvem de alguém;
+- apagar uma conta.
+
+Os mesmos controles também existem na linha de comando, que roda dentro do contêiner do hub:
 
 ```sh
 docker compose exec hub studio-hub users              # lista as contas
 docker compose exec hub studio-hub disable a@b.com    # bloqueia (e derruba as sessões)
 docker compose exec hub studio-hub enable a@b.com
+docker compose exec hub studio-hub passwd a@b.com 'senha-nova'   # quem esqueceu a senha
+docker compose exec hub studio-hub reset2fa a@b.com              # quem perdeu o celular e os códigos
+docker compose exec hub studio-hub admin a@b.com
 docker ps --filter label=studio-hub=1                 # studios ligados agora
 ```
 
 ## Segurança
+
+- **Duas etapas**: no menu da etiqueta **PC/Nuvem**, abra "Conta e segurança" e ative. Funciona com qualquer app autenticador (Google Authenticator, Authy, 1Password, Aegis) e gera 10 códigos de recuperação. Com as duas etapas ligadas, o vínculo do PC também pede o código.
 
 - Senhas com argon2. Sessão em cookie `HttpOnly`/`Secure`. Tokens de PC e sessões são guardados só como hash.
 - Proteção contra força bruta: 10 tentativas erradas por IP ou por conta seguram o login por 15 minutos.
@@ -123,6 +137,7 @@ docker ps --filter label=studio-hub=1                 # studios ligados agora
 
 ## Limitações conhecidas
 
+- O Ghidra vem na imagem (`ghidra-decompile`, com uma habilidade pronta para os agentes) e precisa de memória: use `HUB_MEM=2g`.
 - Na nuvem não há modelo local, navegador do studio nem controle do computador. Executar binários x86 num servidor ARM precisa de emulação, então a análise estática funciona e a dinâmica fica para o PC.
 - Projetos ligados a pastas do PC aparecem na nuvem, mas a pasta não existe lá. Use projetos da pasta da nuvem quando o PC estiver desligado.
 - Se a mesma conversa for editada nos dois lados antes de sincronizar, vale a versão mais recente.

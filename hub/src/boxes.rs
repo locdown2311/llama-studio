@@ -84,6 +84,20 @@ impl Boxes {
         self.locks.lock().unwrap().entry(uid).or_default().clone()
     }
 
+    pub fn running(&self, uid: i64) -> bool {
+        self.st.lock().unwrap().get(&uid).is_some_and(|s| s.running)
+    }
+
+    pub async fn disk_now(&self, h: &crate::Hub, uid: i64) -> u64 {
+        self.disk(h, uid).await
+    }
+
+    /// Apaga o contêiner (a conta foi removida).
+    pub async fn remove(&self, h: &crate::Hub, uid: i64) {
+        let _ = docker(h, &["rm", "-f", &name(uid)]).await;
+        self.st.lock().unwrap().remove(&uid);
+    }
+
     pub fn info(&self, uid: i64) -> Value {
         let st = self.st.lock().unwrap();
         let s = st.get(&uid);
@@ -126,9 +140,10 @@ impl Boxes {
         let lock = self.lock_for(u.id);
         let _g = lock.lock().await;
         let mb = self.disk(h, u.id).await;
-        if mb > h.cfg.disk_mb {
+        let quota = crate::admin::quota_mb(h, u.id);
+        if mb > quota {
             self.stop(h, u.id).await;
-            return Err(format!("Sua pasta na nuvem passou do limite ({mb} MB de {} MB). Apague arquivos pelo PC ou peça mais espaço.", h.cfg.disk_mb));
+            return Err(format!("Sua pasta na nuvem passou do limite ({mb} MB de {quota} MB). Apague arquivos pelo PC ou peça mais espaço."));
         }
         let n = name(u.id);
         let want = match docker(h, &["image", "inspect", "-f", "{{.Id}}", &h.cfg.image]).await {
@@ -199,6 +214,18 @@ impl Boxes {
         mkdir_owned(&h.cfg.data.join("users"));
         mkdir_owned(&d);
         mkdir_owned(&d.join("home"));
+        // habilidade do Ghidra (a imagem traz o Ghidra); só se a pessoa ainda não tiver uma com esse nome
+        let sk = d.join("skills").join("ghidra");
+        if !sk.exists() {
+            mkdir_owned(&d.join("skills"));
+            mkdir_owned(&sk);
+            let f = sk.join("SKILL.md");
+            let _ = std::fs::write(&f, include_str!("../assets/skill-ghidra.md"));
+            #[cfg(unix)]
+            {
+                let _ = std::os::unix::fs::chown(&f, Some(UID), Some(UID));
+            }
+        }
         let proxy_port = h.cfg.proxy_bind.rsplit(':').next().unwrap_or("3128");
         let proxy = format!("http://u{}:{}@{}:{proxy_port}", u.id, u.secret, h.cfg.hub_host);
         let vol = format!("{}:/data", d.display());
@@ -312,7 +339,7 @@ pub async fn reaper(h: H) {
             h.boxes.stop(&h, id).await;
         }
         for id in live {
-            if h.boxes.disk(&h, id).await > h.cfg.disk_mb {
+            if h.boxes.disk(&h, id).await > crate::admin::quota_mb(&h, id) {
                 h.boxes.stop(&h, id).await;
             }
         }

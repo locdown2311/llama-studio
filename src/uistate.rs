@@ -57,6 +57,30 @@ pub fn put(app: &App, key: &str, t: u64, v: &Value) -> Result<bool, String> {
     Ok(true)
 }
 
+/// O que mudou no disco depois de `since` (ms do relógio do studio, não o "t" de quem gravou: o que chega da
+/// nuvem pela sincronização tem o "t" de quando foi escrito lá). Para duas telas abertas se acompanharem.
+pub fn since(app: &App, since: u64) -> Value {
+    let mut items = serde_json::Map::new();
+    if let Ok(rd) = std::fs::read_dir(dir(app)) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            let Some(key) = name.strip_suffix(".json") else { continue };
+            if !valid_key(key) {
+                continue;
+            }
+            let m = e.metadata().ok().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+            if m <= since {
+                continue;
+            }
+            if let Some(v) = std::fs::read_to_string(e.path()).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
+                items.insert(key.to_string(), v);
+            }
+        }
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+    json!({ "items": items, "tombs": tombs(app), "now": now })
+}
+
 /// Lápides: chaves apagadas e quando (a sincronização com a nuvem não traz de volta o que foi apagado).
 pub fn tombs(app: &App) -> serde_json::Map<String, Value> {
     std::fs::read_to_string(dir(app).join(".tombs.json")).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.as_object().cloned()).unwrap_or_default()

@@ -587,16 +587,17 @@ async function drawCloud(box) {
     const email = h('input.input', { type: 'email', value: r.email || '', autocomplete: 'email' });
     const pass = h('input.input', { type: 'password', autocomplete: 'current-password' });
     const dev = h('input.input', { value: r.device || '', placeholder: L('Nome deste PC') });
+    const code = h('input.input.mono', { inputmode: 'numeric', autocomplete: 'one-time-code', placeholder: L('só se a conta tiver duas etapas') });
     const go = h('button.btn.primary', { type: 'button', onclick: async () => {
       go.disabled = true; go.textContent = L('Vinculando...');
-      try { await api('/api/cloud/link', { url: url.value.trim(), email: email.value.trim(), password: pass.value, device: dev.value.trim() }); toast(L('PC vinculado à nuvem')); }
+      try { await api('/api/cloud/link', { url: url.value.trim(), email: email.value.trim(), password: pass.value, code: code.value.trim(), device: dev.value.trim() }); toast(L('PC vinculado à nuvem')); }
       catch (e) { toast(e.message, 'err'); }
       drawCloud(box);
     } }, ic('cloud'), L('Vincular este PC'));
     box.append(
       field2(L('Endereço da nuvem'), url, L('O endereço do seu studio-hub (o mesmo que você abre no celular).')),
       h('div.row', null, field2(L('E-mail da conta'), email), field2(L('Senha'), pass, L('Só para vincular: o PC recebe um token próprio e a senha não fica guardada.'))),
-      field2(L('Nome deste PC'), dev),
+      h('div.row', null, field2(L('Nome deste PC'), dev), field2(L('Código de duas etapas'), code, L('O código do app autenticador, ou um de recuperação.'))),
       h('div.backup-now', null, go));
     return;
   }
@@ -610,6 +611,14 @@ async function drawCloud(box) {
     try { const x = await api('/api/cloud/sync', {}); toast(L('Sincronizado: {0} trazidas, {1} enviadas', x.pulled, x.pushed)); } catch (e) { toast(e.message, 'err'); }
     drawCloud(box);
   } }, ic('refresh'), L('Sincronizar agora'));
+  const apis = h('button.btn', { type: 'button', onclick: async () => {
+    const n = (S.info.apis || []).length;
+    if (!n) { toast(L('Nenhuma API configurada neste PC.'), 'err'); return; }
+    if (!(await confirmBox(L('Enviar as {0} APIs deste PC, com as chaves, para o studio da nuvem? As de mesmo nome lá são substituídas. Se o studio da nuvem estiver ligado, ele reinicia.', n), L('Enviar')))) return;
+    apis.disabled = true;
+    try { const x = await api('/api/cloud/push-apis', {}); toast(L('{0} APIs enviadas para a nuvem.', x.count)); } catch (e) { toast(e.message, 'err'); }
+    apis.disabled = false;
+  } }, ic('cloud'), L('Enviar minhas APIs para a nuvem'));
   const unlink = h('button.btn', { type: 'button', onclick: async () => {
     if (!(await confirmBox(L('Desvincular este PC? Ele para de receber o chat de outros aparelhos e de sincronizar. As conversas continuam aqui e na nuvem.'), L('Desvincular'), true))) return;
     call('/api/cloud/unlink', {}, unlink);
@@ -618,7 +627,7 @@ async function drawCloud(box) {
     h('div.field', null, h('label', null, L('Conta')), h('div', null, h('b', null, r.email || '-'), h('span.muted', null, ' · ', r.url)), h('small', null, L('Este PC: {0}', r.device || '-'))),
     h('label.tcard', null, h('span.tc-main', null, h('span.tc-title', null, L('Receber o chat de outros aparelhos')), h('span.tc-desc', null, L('Ligado, quem entra na sua conta usa este PC por inteiro: modelo, ferramentas, comandos e arquivos. Desligue quando não quiser acesso remoto.'))), h('span.switch', null, on, h('span'))),
     h('div.backup-now', null, state, r.connected ? h('small.muted', null, L('{0} pedidos pelo túnel', r.requests)) : null),
-    h('div.backup-now', null, sync, unlink, r.syncAgo != null ? h('small.muted', null, L('Última sincronização há {0}', cloudAgo(r.syncAgo))) : null));
+    h('div.backup-now', null, sync, apis, unlink, r.syncAgo != null ? h('small.muted', null, L('Última sincronização há {0}', cloudAgo(r.syncAgo))) : null));
   // atualiza o estado enquanto a página estiver aberta
   setTimeout(() => { if (box.isConnected) drawCloud(box); }, 5000);
 }

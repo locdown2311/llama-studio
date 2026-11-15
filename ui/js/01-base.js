@@ -146,15 +146,18 @@ function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTi
    WebView2 grava no disco com atraso (fechar o app logo depois perde a mudança), tem limite de uns 10 MB (as
    conversas passam disso e a gravação falha) e é separado por porta e por navegador. Ao abrir, vale a cópia mais
    nova; se o navegador não conseguiu gravar uma chave, vale a do servidor. */
-const UI = { srv: {}, t: {}, timers: new Map(), loaded: false };
-try { UI.t = JSON.parse(localStorage.getItem('studio.__t') || '{}') || {}; } catch { UI.t = {}; }
+const UI = { srv: {}, t: {}, timers: new Map(), loaded: false, now: 0 };
+/* Aberto pela central (celular, outro navegador): o mesmo endereço serve ora o PC, ora a nuvem, então o
+   localStorage deste navegador mistura os dois lados. Aí só vale o servidor. */
+const HUB = typeof window.__hubTarget === 'string';
+try { UI.t = HUB ? {} : JSON.parse(localStorage.getItem('studio.__t') || '{}') || {}; } catch { UI.t = {}; }
 try {
   // síncrono de propósito: o estado (S) é montado logo abaixo a partir do que está guardado
   const x = new XMLHttpRequest();
   x.open('GET', '/api/ui', false);
   x.setRequestHeader('X-Studio', '1');
   x.send();
-  if (x.status === 200) { UI.srv = JSON.parse(x.responseText).items || {}; UI.loaded = true; }
+  if (x.status === 200) { const j = JSON.parse(x.responseText); UI.srv = j.items || {}; UI.now = j.now || 0; UI.loaded = true; }
 } catch { /* servidor fora: só o navegador */ }
 function uiSaveT() { try { localStorage.setItem('studio.__t', JSON.stringify(UI.t)); } catch { /* cheio */ } }
 function uiSend(k, keepalive) {
@@ -179,7 +182,7 @@ function uiFlush() {
 window.uiFlush = uiFlush;
 /** Primeira vez com a cópia no servidor: manda o que só existe no navegador. */
 function uiMigrate() {
-  if (!UI.loaded) return;
+  if (!UI.loaded || HUB) return;
   for (let i = 0; i < localStorage.length; i++) {
     const full = localStorage.key(i);
     if (!full || !full.startsWith('studio.') || full === 'studio.__t') continue;
@@ -190,10 +193,59 @@ function uiMigrate() {
 }
 addEventListener('pagehide', () => { uiFlush(); });
 
+/* Duas telas na mesma conta (o PC e o celular, ou duas janelas): a cada poucos segundos traz o que mudou no
+   servidor. Conversa que está rodando aqui não é trocada; a que está aberta é redesenhada. */
+let uiPolling = false;
+async function uiPoll() {
+  if (uiPolling || !UI.loaded || document.hidden) return;
+  uiPolling = true;
+  try {
+    const r = await fetch('/api/ui?since=' + Math.max(0, UI.now - 2000), { headers: { 'X-Studio': '1' }, cache: 'no-store' });
+    if (!r.ok) return;
+    const j = await r.json();
+    UI.now = j.now || UI.now;
+    let list = false, open = false;
+    const busy = (id) => S.runs.has(id);
+    for (const [k, it] of Object.entries(j.items || {})) {
+      if (!it || UI.timers.has(k)) continue; // mudança daqui ainda não enviada: a daqui vale
+      if ((UI.srv[k]?.t || 0) >= (it.t || 0)) continue;
+      if (k.startsWith('c-')) {
+        const id = k.slice(2);
+        if (busy(id) || !it.v || !Array.isArray(it.v.messages)) continue;
+        UI.srv[k] = it;
+        CONV_SAVED.set(id, JSON.stringify(it.v));
+        const i = S.convs.findIndex((c) => c.id === id);
+        if (i >= 0) S.convs[i] = Object.assign(it.v, Object.fromEntries(Object.entries(S.convs[i]).filter(([f]) => f.startsWith('_'))));
+        else S.convs.push(it.v);
+        list = true;
+        if (id === S.curId) open = true;
+      } else if (k !== 'convOrder' && k !== 'cur') {
+        UI.srv[k] = it;
+      }
+    }
+    for (const [k, t] of Object.entries(j.tombs || {})) {
+      if (!k.startsWith('c-') || UI.srv[k]?.del || (UI.srv[k]?.t || 0) > t || UI.timers.has(k)) continue;
+      const id = k.slice(2);
+      const i = S.convs.findIndex((c) => c.id === id);
+      if (i < 0 || busy(id)) continue;
+      S.convs.splice(i, 1);
+      CONV_SAVED.delete(id);
+      UI.srv[k] = { t, del: true };
+      if (id === S.curId) { S.curId = S.convs[0]?.id || null; open = true; }
+      list = true;
+    }
+    if (list && typeof renderConvList === 'function') renderConvList();
+    // não redesenha no meio de uma edição de mensagem
+    if (open && typeof renderChat === 'function' && !document.querySelector('.msg.editing, .msg-edit')) renderChat();
+  } catch { /* sem rede: tenta na próxima */ } finally { uiPolling = false; }
+}
+setInterval(uiPoll, HUB ? 4000 : 8000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) uiPoll(); });
+
 const store = {
   get(k, d) {
     let lv = null;
-    try { lv = localStorage.getItem('studio.' + k); } catch { /* sem acesso */ }
+    try { if (!HUB) lv = localStorage.getItem('studio.' + k); } catch { /* sem acesso */ }
     const sv = UI.srv[k];
     if (sv?.del) return d;
     if (sv && (lv == null || (sv.t || 0) > (UI.t[k] || 0))) return sv.v ?? d;
@@ -202,8 +254,8 @@ const store = {
   },
   set(k, v) {
     const t = Math.max(Date.now(), (UI.srv[k]?.t || 0) + 1);
-    let ok = true;
-    try { localStorage.setItem('studio.' + k, JSON.stringify(v)); } catch (e) { ok = false; console.warn('localStorage', k, e); }
+    let ok = !HUB;
+    if (!HUB) try { localStorage.setItem('studio.' + k, JSON.stringify(v)); } catch (e) { ok = false; console.warn('localStorage', k, e); }
     // gravou no navegador: vale a mesma hora do servidor; não gravou (cheio): na próxima abertura vale o servidor
     UI.t[k] = ok ? t : 0; uiSaveT();
     UI.srv[k] = { t, v };
@@ -457,7 +509,12 @@ function loadConvs() {
   const order = store.get('convOrder', null);
   let list;
   if (Array.isArray(order)) {
-    list = order.map((id) => store.get('c-' + id, null)).filter((c) => c && Array.isArray(c.messages));
+    // a ordem é uma chave só: se o PC e a nuvem criaram conversas ao mesmo tempo, a ordem de um lado não tem as
+    // do outro. Toda conversa guardada entra, mesmo fora da ordem (a lista ordena pela última mudança).
+    const ids = [...order];
+    const seen = new Set(ids);
+    for (const k of Object.keys(UI.srv)) if (k.startsWith('c-') && !UI.srv[k].del && !seen.has(k.slice(2))) { ids.push(k.slice(2)); seen.add(k.slice(2)); }
+    list = ids.map((id) => store.get('c-' + id, null)).filter((c) => c && Array.isArray(c.messages));
     for (const c of list) CONV_SAVED.set(c.id, JSON.stringify(c));
   } else {
     // formato antigo (todas numa chave só): passa para uma por conversa no primeiro salvamento

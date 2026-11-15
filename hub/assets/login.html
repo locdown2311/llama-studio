@@ -11,6 +11,7 @@
 :root { --bg:#f8f8fa; --card:#fff; --text:#1d1e22; --muted:#6b6e78; --line:#e3e4e8; --accent:#5b5bd6; --err:#c0392b; }
 @media (prefers-color-scheme: dark) { :root { --bg:#17181c; --card:#1f2025; --text:#e9e9ee; --muted:#9a9ca6; --line:#2e3037; --accent:#8b8bf0; --err:#ff7b6b; } }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { margin:0; min-height:100vh; display:grid; place-items:center; background:var(--bg); color:var(--text); font:15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; padding:16px; }
 .card { width:100%; max-width:380px; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:28px 24px; }
 .brand { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
@@ -27,6 +28,8 @@ button.go { width:100%; margin-top:20px; padding:11px; border:0; border-radius:9
 button.go:disabled { opacity:.6; }
 .msg { min-height:20px; margin-top:12px; font-size:13px; color:var(--err); }
 .foot { margin-top:16px; font-size:12px; color:var(--muted); }
+.hint { display:block; color:var(--muted); font-size:12px; margin-top:6px; }
+#code { font-size:22px; letter-spacing:4px; text-align:center; }
 </style>
 </head>
 <body>
@@ -38,6 +41,11 @@ button.go:disabled { opacity:.6; }
   <input id="email" type="email" autocomplete="email" required>
   <label for="pass" id="lp"></label>
   <input id="pass" type="password" autocomplete="current-password" minlength="8" required>
+  <div id="two" hidden>
+    <label for="code" id="lc"></label>
+    <input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="11" autocapitalize="off" spellcheck="false">
+    <small class="hint" id="hc"></small>
+  </div>
   <button class="go" id="go"></button>
   <div class="msg" id="msg" role="alert"></div>
   <div class="foot" id="foot"></div>
@@ -45,10 +53,11 @@ button.go:disabled { opacity:.6; }
 <script>
 const en = !/^pt/i.test(navigator.language || '');
 const T = en
-  ? { sub: 'Your studio on any device. With your PC on, everything runs on it; otherwise, in the cloud.', login: 'Sign in', signup: 'Create account', email: 'E-mail', pass: 'Password', go1: 'Sign in', go2: 'Create account', closed: 'Sign-ups are closed.', foot: 'Bring your own API keys. Your PC connects from Settings → Cloud.' }
-  : { sub: 'Seu studio em qualquer aparelho. Com o PC ligado, tudo roda nele; senão, na nuvem.', login: 'Entrar', signup: 'Criar conta', email: 'E-mail', pass: 'Senha', go1: 'Entrar', go2: 'Criar conta', closed: 'O cadastro está fechado.', foot: 'Use suas próprias chaves de API. O PC se conecta em Configurações → Nuvem.' };
-let mode = 'login', open = true;
+  ? { sub: 'Your studio on any device. With your PC on, everything runs on it; otherwise, in the cloud.', login: 'Sign in', signup: 'Create account', email: 'E-mail', pass: 'Password', go1: 'Sign in', go2: 'Create account', closed: 'Sign-ups are closed.', foot: 'Bring your own API keys. Your PC connects from Settings → Cloud.', code: 'Code from the authenticator app', hint: 'Lost the phone? Use one of the recovery codes (xxxxx-xxxxx).', verify: 'Verify' }
+  : { sub: 'Seu studio em qualquer aparelho. Com o PC ligado, tudo roda nele; senão, na nuvem.', login: 'Entrar', signup: 'Criar conta', email: 'E-mail', pass: 'Senha', go1: 'Entrar', go2: 'Criar conta', closed: 'O cadastro está fechado.', foot: 'Use suas próprias chaves de API. O PC se conecta em Configurações → Nuvem.', code: 'Código do app autenticador', hint: 'Perdeu o celular? Use um dos códigos de recuperação (xxxxx-xxxxx).', verify: 'Confirmar' };
+let mode = 'login', open = true, ticket = null;
 const $ = (id) => document.getElementById(id);
+$('lc').textContent = T.code; $('hc').textContent = T.hint;
 $('sub').textContent = T.sub; $('le').textContent = T.email; $('lp').textContent = T.pass; $('foot').textContent = T.foot;
 const tabs = [...document.querySelectorAll('#tabs button')];
 tabs[0].textContent = T.login; tabs[1].textContent = T.signup;
@@ -65,9 +74,21 @@ $('f').onsubmit = async (e) => {
   e.preventDefault();
   $('go').disabled = true; $('msg').textContent = '';
   try {
-    const r = await fetch('/hub/api/' + mode, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-hub': '1' }, body: JSON.stringify({ email: $('email').value, password: $('pass').value }) });
+    const r = ticket
+      ? await fetch('/hub/api/login/2fa', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-hub': '1' }, body: JSON.stringify({ ticket, code: $('code').value }) })
+      : await fetch('/hub/api/' + mode, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-hub': '1' }, body: JSON.stringify({ email: $('email').value, password: $('pass').value }) });
     const j = await r.json().catch(() => ({}));
+    if (r.ok && j.need2fa) {
+      // senha certa: agora o código
+      ticket = j.ticket;
+      $('two').hidden = false; $('tabs').hidden = true;
+      for (const id of ['email', 'pass', 'le', 'lp']) $(id).hidden = true;
+      $('pass').required = false; $('email').required = false;
+      $('go').textContent = T.verify; $('go').disabled = false; $('code').focus();
+      return;
+    }
     if (r.ok) { location.replace('/'); return; }
+    if (ticket && /Entre de novo|again/i.test(j.error || '')) setTimeout(() => location.reload(), 1500);
     $('msg').textContent = j.error || r.statusText;
   } catch (err) { $('msg').textContent = String(err); }
   $('go').disabled = false;

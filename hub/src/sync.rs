@@ -107,3 +107,40 @@ pub async fn put_item(State(h): State<H>, headers: HeaderMap, Json(v): Json<Valu
     };
     Json(json!({ "ok": applied })).into_response()
 }
+
+/// O PC manda as APIs dele (com as chaves) para o studio da nuvem desta conta. As de mesmo id são trocadas,
+/// as outras da nuvem ficam. O studio da nuvem guarda a configuração na memória: se estiver ligado, desliga
+/// (volta no próximo acesso já com elas).
+pub async fn push_apis(State(h): State<H>, headers: HeaderMap, Json(v): Json<Value>) -> Response {
+    let Some(uid) = device_user(&h, &headers) else { return err(StatusCode::UNAUTHORIZED, "token") };
+    let Some(list) = v["apiProviders"].as_array().cloned() else { return err(StatusCode::BAD_REQUEST, "apiProviders") };
+    if list.len() > 100 {
+        return err(StatusCode::BAD_REQUEST, "muitas");
+    }
+    let restarted = h.boxes.running(uid);
+    if restarted {
+        h.boxes.stop(&h, uid).await;
+    }
+    let d = crate::boxes::dir(&h, uid);
+    crate::boxes::mkdir_owned(&d);
+    let path = d.join("config.json");
+    let mut cfg = read(&path).filter(Value::is_object).unwrap_or_else(|| json!({}));
+    let mut cur: Vec<Value> = cfg["apiProviders"].as_array().cloned().unwrap_or_default();
+    let mut n = 0;
+    for p in list {
+        let Some(id) = p["id"].as_str().map(str::to_string) else { continue };
+        if !p.is_object() || id.is_empty() || id.len() > 64 {
+            continue;
+        }
+        match cur.iter_mut().find(|x| x["id"].as_str() == Some(id.as_str())) {
+            Some(x) => *x = p,
+            None => cur.push(p),
+        }
+        n += 1;
+    }
+    cfg["apiProviders"] = Value::Array(cur);
+    if !write_owned(&path, &serde_json::to_string_pretty(&cfg).unwrap_or_default()) {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "gravar");
+    }
+    Json(json!({ "count": n, "restarted": restarted })).into_response()
+}
