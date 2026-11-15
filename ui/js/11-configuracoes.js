@@ -118,6 +118,12 @@ function renderSettings() {
   drawBackup(bk);
   section('backup', L('Backup'), 'archive', L('Uma cópia das conversas, personalidades, projetos, prompts, configurações, habilidades e conectores numa pasta. Use a pasta do Google Drive para computador e ela vai para a nuvem sozinha.'), bk);
 
+  if (!S.info.cloud) {
+    const cl = h('div.backup-box', null, h('div.muted', null, L('Carregando...')));
+    drawCloud(cl);
+    section('cloud', L('Nuvem'), 'cloud', L('Use este studio pelo celular ou por qualquer navegador. Com o PC ligado, tudo roda aqui (modelo local, ferramentas, arquivos); desligado, sua conta continua na nuvem com as conversas sincronizadas e uma pasta própria, só com as APIs.'), cl);
+  }
+
   section('share', L('Compartilhar'), 'share', L('Exporte suas configurações num arquivo para outra pessoa (ou outro PC) importar. Tokens e chaves dos conectores nunca saem: quem importa preenche os dele.'),
     h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
       h('button.btn', { type: 'button', onclick: exportDialog }, ic('download'), L('Exportar configurações')),
@@ -158,7 +164,7 @@ function renderSettings() {
 /* As configurações são um painel só: as subpáginas de ajuste e as páginas de recursos (servidor,
    conectores, habilidades...) ficam no mesmo menu. Os itens da barra lateral são atalhos para elas. */
 const SET_EMBED = [['server', L('Servidor'), 'server'], ['mcp', L('Conectores'), 'plug'], ['skills', L('Habilidades'), 'sparkles'], ['personas', L('Personalidades'), 'user'], ['tools', L('Utilitários'), 'wrench']];
-const SET_GROUPS = [[L('Geral'), ['set:model', 'set:tools', 'set:auto', 'set:context', 'set:api']], [L('Recursos'), ['v:server', 'v:mcp', 'v:skills', 'v:personas', 'v:tools']], [L('Segurança'), ['set:safety', 'set:auditor', 'set:sandbox']], [L('Sistema'), ['set:look', 'set:window', 'set:backup', 'set:share', 'set:updates', 'set:advanced', 'set:tests']]];
+const SET_GROUPS = [[L('Geral'), ['set:model', 'set:tools', 'set:auto', 'set:context', 'set:api']], [L('Recursos'), ['v:server', 'v:mcp', 'v:skills', 'v:personas', 'v:tools']], [L('Segurança'), ['set:safety', 'set:auditor', 'set:sandbox']], [L('Sistema'), ['set:look', 'set:window', 'set:backup', 'set:cloud', 'set:share', 'set:updates', 'set:advanced', 'set:tests']]];
 let SET_PAGES = [];
 let setPage = null;
 function openSettings(page) { setPage = page; setView('settings'); }
@@ -170,9 +176,11 @@ function showSetPage(id) {
   $('#set-pane').scrollTop = 0;
   drawSetNav('set:' + id);
 }
+const CLOUD_HIDE = ['v:server', 'set:sandbox', 'set:window', 'set:updates', 'set:cloud'];
 function drawSetNav(active) {
   const nav = $('#set-nav'); nav.innerHTML = '';
-  for (const [title, keys] of SET_GROUPS) {
+  for (const [title, keys0] of SET_GROUPS) {
+    const keys = S.info.cloud ? keys0.filter((k) => !CLOUD_HIDE.includes(k)) : keys0;
     const items = keys.map((key) => {
       const [kind, id] = key.split(':');
       if (kind === 'v') { const [, t, icon] = SET_EMBED.find(([v]) => v === id); return { key, t, icon, go: () => setView(id) }; }
@@ -508,7 +516,7 @@ function apiSection(put, field, saved) {
             picked.length ? h('small.muted', null, L('Até {0} exploradores ao mesmo tempo.', seats)) : null));
       }
       const cur0 = roles[id] === true ? ready[0]?.id || '' : roles[id] || '';
-      const sel = h('select.select', null, h('option', { value: '' }, L('Modelo local')), ready.map((a) => h('option', { value: a.id }, `${apiLabel(a)} · ${a.model}`)));
+      const sel = h('select.select', null, h('option', { value: '' }, S.info.cloud ? L('A primeira API pronta') : L('Modelo local')), ready.map((a) => h('option', { value: a.id }, `${apiLabel(a)} · ${a.model}`)));
       sel.value = ready.some((a) => a.id === cur0) ? cur0 : '';
       sel.addEventListener('change', () => put({ apiRoles: { ...(S.settings.apiRoles || {}), [id]: sel.value } }));
       return h('div.api-role', null, h('div.api-role-main', null, h('b', null, title), h('small.muted', null, desc)), sel);
@@ -516,7 +524,7 @@ function apiSection(put, field, saved) {
     const allOpen = apis.length && apis.every((a) => API_OPEN.has(a.id) || !a.ready);
     box.append(
       apis.length > 1 ? h('div.api-list-head', null, h('small.muted', null, L('{0} APIs · clique numa para editar', apis.length)), h('span.spacer'),
-        h('button.btn.sm.ghost', { type: 'button', onclick: () => { if (allOpen) API_OPEN.clear(); else apis.forEach((a) => API_OPEN.add(a.id)); store.set('apiOpen', [...API_OPEN]); draw(); } }, allOpen ? L('Fechar todas') : L('Abrir todas'))) : null,
+        h('button.btn.sm.ghost', { type: 'button', onclick: () => { if (allOpen) API_OPEN.clear(); else apis.forEach((a) => API_OPEN.add(a.id)); store.set('apiOpen', [...API_OPEN]); draw(); } }, allOpen ? L('Fechar todas') : L('Abrir todas'))) : '',
       ...apis.map(card),
       field(apis.length ? L('Outra API') : L('Provedor'), add, apis.length ? L('Dá para ter várias e mandar cada função para uma, espalhando os limites dos planos grátis.') : null),
       h('div.field', null, h('label', null, L('Quem faz cada função')), ...roleRows,
@@ -562,6 +570,61 @@ function toastHistory() {
   return box;
 }
 /* ------------------------------------------------------------ backup */
+/* ------------------------------------------------------------ nuvem (studio-hub) */
+async function drawCloud(box) {
+  let r;
+  try { r = await api('/api/cloud'); } catch (e) { box.innerHTML = ''; box.append(h('div.err', null, e.message)); return; }
+  if (!box.isConnected && box.dataset.drawn) return;
+  box.dataset.drawn = '1';
+  box.innerHTML = '';
+  const call = async (path, body, btn) => {
+    if (btn) btn.disabled = true;
+    try { await api(path, body || {}); } catch (e) { toast(e.message, 'err'); }
+    drawCloud(box);
+  };
+  if (!r.linked) {
+    const url = h('input.input.mono', { value: r.url || '', placeholder: 'https://studio.seudominio.com' });
+    const email = h('input.input', { type: 'email', value: r.email || '', autocomplete: 'email' });
+    const pass = h('input.input', { type: 'password', autocomplete: 'current-password' });
+    const dev = h('input.input', { value: r.device || '', placeholder: L('Nome deste PC') });
+    const go = h('button.btn.primary', { type: 'button', onclick: async () => {
+      go.disabled = true; go.textContent = L('Vinculando...');
+      try { await api('/api/cloud/link', { url: url.value.trim(), email: email.value.trim(), password: pass.value, device: dev.value.trim() }); toast(L('PC vinculado à nuvem')); }
+      catch (e) { toast(e.message, 'err'); }
+      drawCloud(box);
+    } }, ic('cloud'), L('Vincular este PC'));
+    box.append(
+      field2(L('Endereço da nuvem'), url, L('O endereço do seu studio-hub (o mesmo que você abre no celular).')),
+      h('div.row', null, field2(L('E-mail da conta'), email), field2(L('Senha'), pass, L('Só para vincular: o PC recebe um token próprio e a senha não fica guardada.'))),
+      field2(L('Nome deste PC'), dev),
+      h('div.backup-now', null, go));
+    return;
+  }
+  const state = r.connected
+    ? h('span', { style: { color: 'var(--ok)' } }, '● ', L('Conectado'), r.secs != null ? ' · ' + cloudAgo(r.secs) : '')
+    : r.enabled ? h('span', { style: { color: r.error ? 'var(--err)' : 'var(--muted)' } }, '● ', r.error || L('Conectando...')) : h('span.muted', null, '○ ', L('Desligado'));
+  const on = h('input', { type: 'checkbox', checked: r.enabled });
+  on.addEventListener('change', () => call('/api/cloud/enable', { on: on.checked }));
+  const sync = h('button.btn', { type: 'button', onclick: async () => {
+    sync.disabled = true;
+    try { const x = await api('/api/cloud/sync', {}); toast(L('Sincronizado: {0} trazidas, {1} enviadas', x.pulled, x.pushed)); } catch (e) { toast(e.message, 'err'); }
+    drawCloud(box);
+  } }, ic('refresh'), L('Sincronizar agora'));
+  const unlink = h('button.btn', { type: 'button', onclick: async () => {
+    if (!(await confirmBox(L('Desvincular este PC? Ele para de receber o chat de outros aparelhos e de sincronizar. As conversas continuam aqui e na nuvem.'), L('Desvincular'), true))) return;
+    call('/api/cloud/unlink', {}, unlink);
+  } }, L('Desvincular'));
+  box.append(
+    h('div.field', null, h('label', null, L('Conta')), h('div', null, h('b', null, r.email || '-'), h('span.muted', null, ' · ', r.url)), h('small', null, L('Este PC: {0}', r.device || '-'))),
+    h('label.tcard', null, h('span.tc-main', null, h('span.tc-title', null, L('Receber o chat de outros aparelhos')), h('span.tc-desc', null, L('Ligado, quem entra na sua conta usa este PC por inteiro: modelo, ferramentas, comandos e arquivos. Desligue quando não quiser acesso remoto.'))), h('span.switch', null, on, h('span'))),
+    h('div.backup-now', null, state, r.connected ? h('small.muted', null, L('{0} pedidos pelo túnel', r.requests)) : null),
+    h('div.backup-now', null, sync, unlink, r.syncAgo != null ? h('small.muted', null, L('Última sincronização há {0}', cloudAgo(r.syncAgo))) : null));
+  // atualiza o estado enquanto a página estiver aberta
+  setTimeout(() => { if (box.isConnected) drawCloud(box); }, 5000);
+}
+function cloudAgo(s) { return s < 60 ? L('{0} s', s) : s < 3600 ? L('{0} min', Math.floor(s / 60)) : L('{0} h {1} min', Math.floor(s / 3600), Math.floor(s / 60) % 60); }
+function field2(label, ctl, hint) { return h('div.field', null, h('label', null, label), ctl, hint ? h('small', null, hint) : null); }
+
 async function drawBackup(box) {
   let r;
   try { r = await api('/api/backup'); } catch (e) { box.innerHTML = ''; box.append(h('div.err', null, e.message)); return; }

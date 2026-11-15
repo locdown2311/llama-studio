@@ -1,0 +1,61 @@
+name: Nuvem
+
+# Imagens da versão nuvem (studio-hub e o studio de cada usuário) para ARM64 e x86_64, no GitHub Container
+# Registry. Cada arquitetura compila nativa no próprio runner (sem emulação) e no fim vira uma tag só.
+on:
+  push:
+    branches: [main]
+    paths: ['src/**', 'ui/**', 'hub/**', 'cloud/**', 'Cargo.toml', 'Cargo.lock', '.github/workflows/cloud.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+          - arch: amd64
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Testes da central
+        working-directory: hub
+        run: cargo test --release --locked
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Imagens
+        run: |
+          owner=$(echo "${{ github.repository_owner }}" | tr 'A-Z' 'a-z')
+          docker build -f cloud/Dockerfile.studio -t ghcr.io/$owner/llama-studio-cloud:${{ matrix.arch }} .
+          docker build -f cloud/Dockerfile.hub -t ghcr.io/$owner/studio-hub:${{ matrix.arch }} .
+          docker push ghcr.io/$owner/llama-studio-cloud:${{ matrix.arch }}
+          docker push ghcr.io/$owner/studio-hub:${{ matrix.arch }}
+
+  manifest:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Uma tag para as duas arquiteturas
+        run: |
+          owner=$(echo "${{ github.repository_owner }}" | tr 'A-Z' 'a-z')
+          v=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          for img in llama-studio-cloud studio-hub; do
+            for tag in latest $v; do
+              docker buildx imagetools create -t ghcr.io/$owner/$img:$tag ghcr.io/$owner/$img:arm64 ghcr.io/$owner/$img:amd64
+            done
+          done

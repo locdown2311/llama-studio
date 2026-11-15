@@ -68,6 +68,11 @@ pub fn router(app: Arc<App>) -> Router {
     Router::new()
         .route("/api/state", get(state))
         .route("/api/ui", get(ui_all).post(ui_put))
+        .route("/api/cloud", get(cloud_status))
+        .route("/api/cloud/link", post(cloud_link))
+        .route("/api/cloud/enable", post(cloud_enable))
+        .route("/api/cloud/unlink", post(cloud_unlink))
+        .route("/api/cloud/sync", post(cloud_sync))
         .route("/api/config", post(set_config))
         .route("/api/bins", get(bins_list))
         .route("/api/bins/install", post(bins_install))
@@ -214,6 +219,14 @@ pub fn router(app: Arc<App>) -> Router {
 
 /// Só aceita o próprio computador e exige o cabeçalho X-Studio nas rotas que mudam algo.
 async fn guard(req: Request, next: Next) -> Response {
+    // na nuvem só a central fala com o contêiner
+    if let Some(secret) = crate::app::hub_secret() {
+        let got = req.headers().get("x-hub-secret").map(|v| v.as_bytes()).unwrap_or(b"");
+        let same = got.len() == secret.len() && got.iter().zip(secret.as_bytes()).fold(0u8, |a, (x, y)| a | (x ^ y)) == 0;
+        if !same {
+            return (StatusCode::FORBIDDEN, "hub").into_response();
+        }
+    }
     let host = req.headers().get(header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("");
     let host = if host.starts_with('[') { host.split(']').next().map(|h| format!("{h}]")).unwrap_or_default() } else { host.split(':').next().unwrap_or("").to_string() };
     if !matches!(host.as_str(), "127.0.0.1" | "localhost" | "[::1]") {
@@ -654,9 +667,42 @@ async fn state(State(app): S) -> Res {
         "compactOutput": c.compact_output,
         "useRtk": c.use_rtk,
         "lang": c.lang,
+        "cloud": crate::app::cloud(),
         "apis": crate::remote::public(&app),
         "webSearch": { "provider": c.web_search.provider, "url": c.web_search.url, "hasKey": !c.web_search.key.is_empty() },
     }))
+}
+
+// ---------------------------------------------------------------- nuvem (studio-hub)
+
+async fn cloud_status(State(app): S) -> Res {
+    ok(crate::cloud::status(&app))
+}
+
+async fn cloud_link(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    crate::cloud::link(&app, st(&v, "url"), st(&v, "email"), st(&v, "password"), st(&v, "device")).await.map_err(bad)?;
+    ok(crate::cloud::status(&app))
+}
+
+async fn cloud_enable(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    crate::cloud::set_enabled(&app, v["on"].as_bool().unwrap_or(true));
+    ok(crate::cloud::status(&app))
+}
+
+async fn cloud_unlink(State(app): S) -> Res {
+    crate::cloud::unlink(&app);
+    ok(crate::cloud::status(&app))
+}
+
+async fn cloud_sync(State(app): S) -> Res {
+    let c = app.cfg().cloud;
+    if c.token.is_empty() {
+        return Err(bad(L!("Este PC não está vinculado.", "This PC isn't linked.")));
+    }
+    let (pulled, pushed) = crate::cloud::sync(&app, &c.url, &c.token).await.map_err(bad)?;
+    ok(json!({ "pulled": pulled, "pushed": pushed }))
 }
 
 async fn set_config(State(app): S, b: Bytes) -> Res {

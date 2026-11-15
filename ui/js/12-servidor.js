@@ -325,6 +325,11 @@ function drawEngines() {
 
 /* ------------------------------------------------------------ primeira abertura: guia */
 async function maybeOnboard(force = false) {
+  // na nuvem não há motor nem modelo local: o começo é escolher uma API
+  if (S.info.cloud) {
+    if (!(S.info.apis || []).length && !store.get('cloudOnb', false)) { store.set('cloudOnb', true); openSettings('api'); toast(L('Na nuvem o studio conversa pelas APIs. Adicione uma para começar.')); }
+    return;
+  }
   if (!force && store.get('onboarded', false)) return;
   const E = await loadEngines(true);
   await loadModels();
@@ -788,6 +793,7 @@ async function waitModel(conv, signal) {
 
 /* ============================================================ atualizações */
 async function checkUpdates(force = false) {
+  if (S.info.cloud) return; // na nuvem quem atualiza é a imagem da central
   try { S.update = await api('/api/update' + (force ? '?force=1' : '')); } catch { return null; }
   drawUpdateBadge();
   return S.update;
@@ -861,7 +867,7 @@ function updateSection() {
 let lastHealth = '';
 async function checkHealth() {
   let status = 'offline';
-  try {
+  if (S.info.cloud) { /* sem llama-server na nuvem */ } else try {
     S.llama = noteLlama(await api('/api/llama'));
     status = { ready: 'ok', external: 'ok', loading: 'loading', 'external-loading': 'loading' }[S.llama.state] || 'offline';
   } catch {

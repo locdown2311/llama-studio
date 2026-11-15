@@ -1,0 +1,54 @@
+# Llama Studio na nuvem: Caddy (HTTPS) -> studio-hub -> PC do usuário ou o contêiner dele.
+# Uso: veja cloud/README.md
+name: llama-studio-cloud
+
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      DOMAIN: ${DOMAIN:?defina DOMAIN no .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [pub]
+
+  hub:
+    image: ${HUB_HUB_IMAGE:-ghcr.io/locdown2311/studio-hub:latest}
+    restart: unless-stopped
+    environment:
+      HUB_PUBLIC_URL: https://${DOMAIN}
+      HUB_DATA: ${HUB_DATA:-/srv/studio-hub}
+      HUB_IMAGE: ${HUB_IMAGE:-ghcr.io/locdown2311/llama-studio-cloud:latest}
+      HUB_NETWORK: studio-users
+      HUB_HOST: hub
+      HUB_TRUST_PROXY: "1"
+      HUB_SIGNUP: ${HUB_SIGNUP:-open}
+      HUB_SIGNUPS_PER_IP: ${HUB_SIGNUPS_PER_IP:-3}
+      HUB_MEM: ${HUB_MEM:-1g}
+      HUB_CPUS: ${HUB_CPUS:-1}
+      HUB_DISK_MB: ${HUB_DISK_MB:-2048}
+      HUB_IDLE_MIN: ${HUB_IDLE_MIN:-20}
+      HUB_MAX_RUNNING: ${HUB_MAX_RUNNING:-8}
+      HUB_ALLOW: ${HUB_ALLOW:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # mesmo caminho dentro e fora: o hub monta as pastas dos usuários nos contêineres deles
+      - ${HUB_DATA:-/srv/studio-hub}:${HUB_DATA:-/srv/studio-hub}
+    networks:
+      pub: {}
+      users:
+        aliases: [hub]
+
+networks:
+  pub: {}
+  # sem saída para a internet: os studios dos usuários só falam com o hub (e o proxy dele)
+  users:
+    name: studio-users
+    internal: true
+
+volumes:
+  caddy-data: {}
+  caddy-config: {}

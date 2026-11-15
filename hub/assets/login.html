@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Llama Studio</title>
+<link rel="manifest" href="/hub/manifest.json">
+<link rel="icon" href="/hub/icon.svg">
+<meta name="theme-color" content="#17181c">
+<style>
+:root { --bg:#f8f8fa; --card:#fff; --text:#1d1e22; --muted:#6b6e78; --line:#e3e4e8; --accent:#5b5bd6; --err:#c0392b; }
+@media (prefers-color-scheme: dark) { :root { --bg:#17181c; --card:#1f2025; --text:#e9e9ee; --muted:#9a9ca6; --line:#2e3037; --accent:#8b8bf0; --err:#ff7b6b; } }
+* { box-sizing: border-box; }
+body { margin:0; min-height:100vh; display:grid; place-items:center; background:var(--bg); color:var(--text); font:15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; padding:16px; }
+.card { width:100%; max-width:380px; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:28px 24px; }
+.brand { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+.brand img { width:34px; height:34px; }
+h1 { font-size:20px; margin:0; }
+p.sub { color:var(--muted); margin:0 0 20px; font-size:14px; }
+.tabs { display:flex; gap:4px; background:var(--bg); border-radius:9px; padding:3px; margin-bottom:18px; }
+.tabs button { flex:1; border:0; background:none; color:var(--muted); padding:7px; border-radius:7px; font:inherit; cursor:pointer; }
+.tabs button.on { background:var(--card); color:var(--text); box-shadow:0 1px 2px rgba(0,0,0,.08); }
+label { display:block; font-size:13px; color:var(--muted); margin:12px 0 4px; }
+input { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:9px; background:var(--bg); color:var(--text); font:inherit; }
+input:focus { outline:2px solid color-mix(in srgb, var(--accent) 40%, transparent); border-color:var(--accent); }
+button.go { width:100%; margin-top:20px; padding:11px; border:0; border-radius:9px; background:var(--accent); color:#fff; font:inherit; font-weight:600; cursor:pointer; }
+button.go:disabled { opacity:.6; }
+.msg { min-height:20px; margin-top:12px; font-size:13px; color:var(--err); }
+.foot { margin-top:16px; font-size:12px; color:var(--muted); }
+</style>
+</head>
+<body>
+<form class="card" id="f">
+  <div class="brand"><img src="/hub/icon.svg" alt=""><h1>Llama Studio</h1></div>
+  <p class="sub" id="sub"></p>
+  <div class="tabs" id="tabs"><button type="button" data-m="login" class="on"></button><button type="button" data-m="signup"></button></div>
+  <label for="email" id="le"></label>
+  <input id="email" type="email" autocomplete="email" required>
+  <label for="pass" id="lp"></label>
+  <input id="pass" type="password" autocomplete="current-password" minlength="8" required>
+  <button class="go" id="go"></button>
+  <div class="msg" id="msg" role="alert"></div>
+  <div class="foot" id="foot"></div>
+</form>
+<script>
+const en = !/^pt/i.test(navigator.language || '');
+const T = en
+  ? { sub: 'Your studio on any device. With your PC on, everything runs on it; otherwise, in the cloud.', login: 'Sign in', signup: 'Create account', email: 'E-mail', pass: 'Password', go1: 'Sign in', go2: 'Create account', closed: 'Sign-ups are closed.', foot: 'Bring your own API keys. Your PC connects from Settings → Cloud.' }
+  : { sub: 'Seu studio em qualquer aparelho. Com o PC ligado, tudo roda nele; senão, na nuvem.', login: 'Entrar', signup: 'Criar conta', email: 'E-mail', pass: 'Senha', go1: 'Entrar', go2: 'Criar conta', closed: 'O cadastro está fechado.', foot: 'Use suas próprias chaves de API. O PC se conecta em Configurações → Nuvem.' };
+let mode = 'login', open = true;
+const $ = (id) => document.getElementById(id);
+$('sub').textContent = T.sub; $('le').textContent = T.email; $('lp').textContent = T.pass; $('foot').textContent = T.foot;
+const tabs = [...document.querySelectorAll('#tabs button')];
+tabs[0].textContent = T.login; tabs[1].textContent = T.signup;
+function draw() {
+  tabs.forEach((b) => b.classList.toggle('on', b.dataset.m === mode));
+  $('go').textContent = mode === 'login' ? T.go1 : T.go2;
+  $('pass').autocomplete = mode === 'login' ? 'current-password' : 'new-password';
+  $('msg').textContent = mode === 'signup' && !open ? T.closed : '';
+  $('go').disabled = mode === 'signup' && !open;
+}
+tabs.forEach((b) => b.onclick = () => { mode = b.dataset.m; draw(); });
+fetch('/hub/api/me').then((r) => r.json()).then((m) => { if (m.user) location.replace('/'); open = m.signupOpen !== false; if (!open) tabs[1].style.display = 'none'; draw(); }).catch(() => {});
+$('f').onsubmit = async (e) => {
+  e.preventDefault();
+  $('go').disabled = true; $('msg').textContent = '';
+  try {
+    const r = await fetch('/hub/api/' + mode, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-hub': '1' }, body: JSON.stringify({ email: $('email').value, password: $('pass').value }) });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) { location.replace('/'); return; }
+    $('msg').textContent = j.error || r.statusText;
+  } catch (err) { $('msg').textContent = String(err); }
+  $('go').disabled = false;
+};
+draw();
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+</script>
+</body>
+</html>

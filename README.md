@@ -158,6 +158,10 @@ Ligue em Utilitários › Apps opcionais. Aparece **Vídeos** na barra lateral, 
 
 Precisa do **Node.js** (18 ou mais novo) e do **Git**. O Remotion é grátis para pessoas e empresas pequenas; empresas maiores precisam de licença ([remotion.dev/license](https://remotion.dev/license)).
 
+## Nuvem e celular (opcional)
+
+Hospede o `studio-hub` no seu servidor (ARM64 ou x86_64) e use o studio pelo celular ou por qualquer navegador. Com o PC ligado, o chat vai para ele: modelo local, ferramentas e arquivos. Com o PC desligado, a conta continua na nuvem, com as conversas sincronizadas e uma pasta própria, só com as APIs. O cadastro pode ser aberto: cada usuário ganha um contêiner isolado. Veja [cloud/README.md](cloud/README.md).
+
 ## Como ele economiza
 
 Modelo local tem contexto curto e processamento caro, então o harness foi pensado para gastar pouco:

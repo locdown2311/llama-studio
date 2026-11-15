@@ -1,0 +1,7 @@
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy hub:8700 {
+		# streaming do chat (SSE) sem buffer
+		flush_interval -1
+	}
+}

@@ -156,6 +156,12 @@ fn strip_secrets(rel: &str, bytes: Vec<u8>) -> Vec<u8> {
         "config.json" => {
             for p in v["apiProviders"].as_array_mut().into_iter().flatten() {
                 p["key"] = json!("");
+                if p.get("keys").is_some() {
+                    p["keys"] = json!([]);
+                }
+            }
+            if v["cloud"].get("token").is_some() {
+                v["cloud"]["token"] = json!("");
             }
             for k in ["apiKey", "hfToken"] {
                 if v.get(k).is_some() {
@@ -354,11 +360,13 @@ mod t {
 
     #[test]
     fn tira_segredos() {
-        let c = br#"{"apiProviders":[{"id":"a","key":"sk-123","model":"m"}],"hfToken":"hf_x","port":8080}"#.to_vec();
+        let c = br#"{"apiProviders":[{"id":"a","key":"sk-123","keys":["sk-1","sk-2"],"model":"m"}],"hfToken":"hf_x","port":8080,"cloud":{"url":"https://x","token":"tok"}}"#.to_vec();
         let v: Value = serde_json::from_slice(&strip_secrets("config.json", c)).unwrap();
         assert_eq!(v["apiProviders"][0]["key"], "");
         assert_eq!(v["apiProviders"][0]["model"], "m");
         assert_eq!(v["hfToken"], "");
+        assert_eq!(v["apiProviders"][0]["keys"], json!([]));
+        assert_eq!((v["cloud"]["token"].as_str(), v["cloud"]["url"].as_str()), (Some(""), Some("https://x")));
         assert_eq!(v["port"], 8080);
         let m = br#"{"mcpServers":{"x":{"command":"npx","env":{"TOKEN":"abc"},"headers":{"Authorization":"Bearer y"}}}}"#.to_vec();
         let v: Value = serde_json::from_slice(&strip_secrets("mcp.json", m)).unwrap();

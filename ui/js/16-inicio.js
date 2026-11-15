@@ -98,6 +98,7 @@ async function init() {
 
   try {
     S.info = await api('/api/state');
+    if (S.info.cloud) $$('.nav-item[data-view="server"]').forEach((b) => b.remove());
     // idioma: o programa guarda o escolhido (instalador ou menu); a interface segue, e o programa aprende o da interface
     if (S.info.lang && S.info.lang !== LANG && !S.settings.lang) { setLang(S.info.lang); return; }
     if (!S.info.lang || (S.settings.lang && S.info.lang !== S.settings.lang)) api('/api/config', { lang: LANG }).catch(() => {});

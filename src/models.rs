@@ -159,7 +159,13 @@ fn scan(app: &App, known: &[Profile]) -> Vec<Value> {
 }
 
 pub fn list_json(app: &App) -> Value {
-    let list = full_list(app);
+    let mut list = full_list(app);
+    if crate::app::cloud() {
+        // na nuvem não há llama-server: só as APIs, e uma delas é sempre a ativa
+        list.retain(|p| p.model.starts_with("remote:"));
+        let active = active_id(app, &list).or_else(|| list.first().map(|p| p.id.clone()));
+        return json!({"models": list, "active": active, "found": [], "defaults": from_cfg(&app.llama.cfg(), "")});
+    }
     let active = active_id(app, &list);
     let found = scan(app, &list);
     json!({"models": list, "active": active, "found": found, "defaults": from_cfg(&app.llama.cfg(), "")})

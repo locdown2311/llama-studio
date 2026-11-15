@@ -1,6 +1,6 @@
 [package]
 name = "llama-studio"
-version = "2.92.6"
+version = "2.93.0"
 license = "GPL-3.0-or-later"
 edition = "2021"
 description = "Interface local para o llama-server com pasta de trabalho, habilidades e conectores MCP"
@@ -24,7 +24,7 @@ zip = { version = "9", default-features = false, features = ["deflate-flate2-zli
 walkdir = "2.5"
 regex-lite = "0.1"
 which = "8"
-tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect"] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "native-tls"] }
 jpeg-encoder = "0.7"
 png = "0.18"
 flate2 = "1"

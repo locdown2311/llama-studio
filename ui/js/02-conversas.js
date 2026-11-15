@@ -2163,9 +2163,11 @@ function renderEmpty() {
     h(
       "p",
       null,
-      L(
-        "O modelo roda no seu computador. Ele pode ler e escrever no espaço de trabalho, seguir as habilidades que você ativar e usar os conectores MCP."
-      )
+      S.info?.cloud
+        ? L("Rodando na nuvem, pelas suas APIs. Ele pode ler e escrever na sua pasta da nuvem, seguir as habilidades que você ativar e usar conectores MCP pela internet.")
+        : L(
+            "O modelo roda no seu computador. Ele pode ler e escrever no espaço de trabalho, seguir as habilidades que você ativar e usar os conectores MCP."
+          )
     ),
 
     h(

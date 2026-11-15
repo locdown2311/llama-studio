@@ -1,0 +1,5 @@
+target
+hub/target
+**/node_modules
+.git
+assets/screenshots

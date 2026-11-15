@@ -56,6 +56,19 @@ pub struct Config {
     pub sandbox: crate::sandbox::SandboxCfg,
     /// Buscador do web_search (vazio = DuckDuckGo, com o Bing de reserva).
     pub web_search: WebSearchCfg,
+    /// Conta na nuvem (studio-hub): o PC se conecta a ela e recebe o chat de outros aparelhos.
+    pub cloud: CloudCfg,
+}
+
+#[derive(Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CloudCfg {
+    pub url: String,
+    /// token deste PC na central (a senha da conta não fica guardada); nunca volta para a interface
+    pub token: String,
+    pub device: String,
+    pub email: String,
+    pub enabled: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -137,6 +150,7 @@ impl Default for Config {
             api_providers: vec![],
             sandbox: Default::default(),
             web_search: Default::default(),
+            cloud: Default::default(),
             ui_settings: json!({
                 "theme": "dark",
                 "colors": {
@@ -210,7 +224,15 @@ impl App {
 
         let cfg_file = root.join("config.json");
         let mut config: Config = read_json(&cfg_file).unwrap_or_default();
-        if !Path::new(&config.workspace).is_dir() {
+        if cloud() {
+            // na nuvem a pasta de trabalho é a do usuário, dentro do contêiner dele
+            let ws = root.join("workspace");
+            let _ = std::fs::create_dir_all(&ws);
+            if !Path::new(&config.workspace).is_dir() || !Path::new(&config.workspace).starts_with(&root) {
+                config.workspace = ws.to_string_lossy().into_owned();
+            }
+            config.open_browser = false;
+        } else if !Path::new(&config.workspace).is_dir() {
             config.workspace = home_dir().to_string_lossy().into_owned();
         }
         // primeira vez: o idioma escolhido no instalador
@@ -234,8 +256,12 @@ impl App {
             let _ = std::fs::write(&mcp_file, "{\n  \"mcpServers\": {}\n}\n");
         }
 
-        let http = reqwest::Client::builder()
-            .no_proxy()
+        let mut http = reqwest::Client::builder();
+        // na nuvem a saída passa pelo proxy da central (HTTPS_PROXY); no PC, direto
+        if !cloud() {
+            http = http.no_proxy();
+        }
+        let http = http
             .pool_idle_timeout(std::time::Duration::from_secs(30))
             .pool_max_idle_per_host(2)
             .build()
@@ -532,4 +558,16 @@ pub fn now_ms() -> u128 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0)
+}
+
+/// Studio rodando na nuvem (contêiner de um usuário da central): sem llama.cpp nem nada do PC.
+pub fn cloud() -> bool {
+    static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *C.get_or_init(|| std::env::var("STUDIO_CLOUD").map(|v| v == "1").unwrap_or(false))
+}
+
+/// Segredo que a central manda em cada pedido ao contêiner (os contêineres dividem a rede).
+pub fn hub_secret() -> Option<&'static str> {
+    static S: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    S.get_or_init(|| std::env::var("STUDIO_HUB_SECRET").ok().filter(|s| s.len() >= 16)).as_deref()
 }

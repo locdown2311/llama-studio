@@ -220,7 +220,10 @@ function apiForAll(role) {
   const apis = (S.info?.apis || []).filter((a) => a.ready);
   const v = S.settings.apiRoles?.[role];
   const ids = Array.isArray(v) ? v : [v === true ? apis[0]?.id : v];
-  return [...new Set(ids.map((id) => apis.find((a) => a.id === id)?.id).filter(Boolean))];
+  const out = [...new Set(ids.map((id) => apis.find((a) => a.id === id)?.id).filter(Boolean))];
+  // na nuvem não há modelo local: sem escolha, a função usa a primeira API pronta
+  if (!out.length && S.info?.cloud && apis.length) out.push(apis[0].id);
+  return out;
 }
 /** Quantos exploradores a API aguenta ao mesmo tempo (Configurações › API externa; padrão 2). */
 function explorerConc(id) { return Math.max(1, Math.min(8, Number(S.settings.explorerConc?.[id]) || 2)); }

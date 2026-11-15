@@ -12,6 +12,7 @@ mod arrumar;
 mod bench;
 mod bins;
 mod checkpoint;
+mod cloud;
 mod compact;
 mod browser;
 mod computer;
@@ -134,14 +135,16 @@ fn main() {
     bins::init(&app);
     bins::cleanup();
     // depois de uma atualização, espera a versão antiga liberar a porta
-    let mut bound = std::net::TcpListener::bind(("127.0.0.1", port));
+    // na nuvem a central chega pela rede do Docker (cada pedido traz o segredo dela)
+    let bind = std::env::var("STUDIO_BIND").ok().filter(|_| app::hub_secret().is_some()).unwrap_or_else(|| "127.0.0.1".into());
+    let mut bound = std::net::TcpListener::bind((bind.as_str(), port));
     if has("--apos-atualizar") {
         for _ in 0..60 {
             if bound.is_ok() {
                 break;
             }
             std::thread::sleep(Duration::from_millis(250));
-            bound = std::net::TcpListener::bind(("127.0.0.1", port));
+            bound = std::net::TcpListener::bind((bind.as_str(), port));
         }
     }
     let listener = match bound {
@@ -171,12 +174,16 @@ fn main() {
             let _ = app2.rt.set(rt.handle().clone());
             rt.block_on(async move {
                 let l = tokio::net::TcpListener::from_std(listener).expect("listener");
-                tokio::spawn(llama::Llama::monitor(app2.clone()));
+                if !app::cloud() {
+                    tokio::spawn(llama::Llama::monitor(app2.clone()));
+                }
                 tokio::spawn(arrumar::watch(app2.clone()));
                 tokio::spawn(backup::scheduler(app2.clone()));
+                let _ = cloud::PORT.set(port);
+                tokio::spawn(cloud::run(app2.clone()));
                 let a = app2.clone();
                 tokio::spawn(async move { a.mcp.sync(&a.http, &a.mcp_file()).await });
-                if start_server || app2.llama.cfg().auto_start {
+                if !app::cloud() && (start_server || app2.llama.cfg().auto_start) {
                     if let Err(e) = app2.llama.start(&app2) {
                         app2.llama.push_log(e);
                     }
