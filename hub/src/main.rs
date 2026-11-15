@@ -142,6 +142,7 @@ async fn main() {
         .route("/hub/admin", get(admin::page))
         .route("/hub/api/admin/users", get(admin::users))
         .route("/hub/api/admin/action", post(admin::action))
+        .route("/hub/api/admin/pull", post(admin::pull))
         .route("/hub/sync/apis", post(sync::push_apis))
         .route("/hub/api/push/key", get(push::key))
         .route("/hub/api/push/subscribe", post(push::subscribe))

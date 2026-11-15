@@ -156,3 +156,18 @@ pub async fn action(State(h): State<H>, headers: HeaderMap, Json(v): Json<Value>
     eprintln!("admin {} -> {act} em {id} ({})", me.email, now());
     Json(json!({ "ok": true })).into_response()
 }
+
+/// Busca a versão nova do studio da nuvem; os studios parados trocam no próximo acesso e os ligados sem
+/// tarefa, quando a página abrir.
+pub async fn pull(State(h): State<H>, headers: HeaderMap) -> Response {
+    if let Err(r) = admin(&h, &headers) {
+        return r;
+    }
+    if !crate::auth::csrf_ok(&headers) {
+        return err(StatusCode::FORBIDDEN, "x-hub");
+    }
+    match crate::boxes::pull_now(&h).await {
+        Ok(changed) => Json(json!({ "changed": changed })).into_response(),
+        Err(e) => err(StatusCode::BAD_GATEWAY, &e),
+    }
+}

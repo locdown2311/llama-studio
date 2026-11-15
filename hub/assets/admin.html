@@ -51,7 +51,7 @@ button.danger { color:var(--err); }
 <main>
   <div class="stats" id="stats"></div>
   <div class="cfg" id="cfg"></div>
-  <div class="bar"><input id="q" type="search" autocomplete="off"><button id="reload"></button></div>
+  <div class="bar"><input id="q" type="search" autocomplete="off"><button id="reload"></button><button id="pull"></button></div>
   <div class="err" id="err" role="alert"></div>
   <div class="list" id="list"></div>
 </main>
@@ -59,13 +59,13 @@ button.danger { color:var(--err); }
 <script>
 const en = !/^pt/i.test(navigator.language || '');
 const T = en ? {
-  title: 'Administration', back: 'Back to the studio', search: 'Search by e-mail', reload: 'Refresh', users: 'accounts', running: 'cloud studios on', pcs: 'PCs online', disk: 'disk in use',
+  pull: 'Fetch new cloud version', pulling: 'Fetching...', pulled: 'New version downloaded: each cloud studio switches when its page is opened.', same: 'Already on the latest version.', title: 'Administration', back: 'Back to the studio', search: 'Search by e-mail', reload: 'Refresh', users: 'accounts', running: 'cloud studios on', pcs: 'PCs online', disk: 'disk in use',
   signupOpen: 'sign-up open', signupClosed: 'sign-up closed', cfg: (s) => `Per studio: ${s.mem} RAM, ${s.cpus} CPU, turns off after ${s.idleMin} min idle, default quota ${s.defaultQuotaMb} MB. Image: ${s.image}`,
   created: 'created', last: 'last sign-in', never: 'never', devices: 'linked PCs', on: 'cloud on', pc: 'PC online', twofa: '2FA', admin: 'admin', disabled: 'blocked',
   disable: 'Block', enable: 'Unblock', stop: 'Turn off cloud', logout: 'End sessions', reset2fa: 'Reset 2FA', setQuota: 'Disk quota', setPassword: 'New password', makeAdmin: 'Make admin', removeAdmin: 'Remove admin', del: 'Delete',
   askQuota: 'Disk quota in MB (0 = server default):', askPass: 'New password for {0} (min. 8 characters). Their sessions are ended:', askDel: 'Delete {0} and ALL their cloud files? Type APAGAR to confirm:', sure: 'Are you sure? ({0})', done: 'Done',
 } : {
-  title: 'Administração', back: 'Voltar ao studio', search: 'Buscar por e-mail', reload: 'Atualizar', users: 'contas', running: 'studios ligados na nuvem', pcs: 'PCs online', disk: 'disco em uso',
+  pull: 'Buscar versão nova da nuvem', pulling: 'Buscando...', pulled: 'Versão nova baixada: cada studio da nuvem troca quando a página dele for aberta.', same: 'Já está na versão mais nova.', title: 'Administração', back: 'Voltar ao studio', search: 'Buscar por e-mail', reload: 'Atualizar', users: 'contas', running: 'studios ligados na nuvem', pcs: 'PCs online', disk: 'disco em uso',
   signupOpen: 'cadastro aberto', signupClosed: 'cadastro fechado', cfg: (s) => `Cada studio: ${s.mem} de RAM, ${s.cpus} CPU, desliga após ${s.idleMin} min parado, cota padrão de ${s.defaultQuotaMb} MB. Imagem: ${s.image}`,
   created: 'criada', last: 'último login', never: 'nunca', devices: 'PCs vinculados', on: 'nuvem ligada', pc: 'PC online', twofa: 'duas etapas', admin: 'admin', disabled: 'bloqueada',
   disable: 'Bloquear', enable: 'Desbloquear', stop: 'Desligar a nuvem', logout: 'Encerrar sessões', reset2fa: 'Zerar duas etapas', setQuota: 'Cota de disco', setPassword: 'Nova senha', makeAdmin: 'Tornar admin', removeAdmin: 'Tirar admin', del: 'Apagar',
@@ -127,6 +127,17 @@ function draw() {
 }
 $('q').oninput = () => data && draw();
 $('reload').onclick = load;
+$('pull').textContent = T.pull;
+$('pull').onclick = async () => {
+  const b = $('pull'); b.disabled = true; b.textContent = T.pulling; $('err').textContent = '';
+  try {
+    const r = await fetch('/hub/api/admin/pull', { method: 'POST', headers: { 'x-hub': '1' } });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    toast(j.changed ? T.pulled : T.same);
+  } catch (e) { $('err').textContent = e.message; }
+  b.disabled = false; b.textContent = T.pull;
+};
 load();
 setInterval(() => { if (!document.hidden) load(); }, 30000);
 </script>

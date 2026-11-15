@@ -315,8 +315,17 @@ pub async fn forward(h: &crate::Hub, addr: &str, u: &User, req: Request) -> Resp
 }
 
 /// Desliga quem ficou parado e confere o disco de quem está ligado.
+/// Baixa a imagem do studio da nuvem agora (botão do painel). Devolve se mudou.
+pub async fn pull_now(h: &crate::Hub) -> Result<bool, String> {
+    let before = docker(h, &["image", "inspect", "-f", "{{.Id}}", &h.cfg.image]).await.unwrap_or_default();
+    docker(h, &["pull", "-q", &h.cfg.image]).await?;
+    let after = docker(h, &["image", "inspect", "-f", "{{.Id}}", &h.cfg.image]).await.unwrap_or_default();
+    Ok(before != after)
+}
+
 pub async fn reaper(h: H) {
-    // imagem nova publicada: baixa ao abrir e a cada 6 h (cada studio troca no próximo uso; as pastas ficam)
+    // imagem nova publicada: baixa ao abrir e a cada 30 min (cada studio troca ao abrir a página, se não
+    // estiver rodando tarefa; as pastas ficam)
     if h.cfg.image.contains('/') {
         let h2 = h.clone();
         tokio::spawn(async move {
@@ -324,7 +333,7 @@ pub async fn reaper(h: H) {
                 if let Err(e) = docker(&h2, &["pull", "-q", &h2.cfg.image]).await {
                     eprintln!("pull {}: {e}", h2.cfg.image);
                 }
-                tokio::time::sleep(Duration::from_secs(6 * 3600)).await;
+                tokio::time::sleep(Duration::from_secs(30 * 60)).await;
             }
         });
     }
