@@ -675,41 +675,65 @@ function askView(tc, res) {
   };
   const collect = () => ({ answers: qs.map((q, i) => ({ q: q.question, header: q.header, chosen: q.options.filter((_, j) => d.sel[i].has(j)).map((o) => askLabel(o.label).text), other: d.other[i].trim() })) });
   const done = (i) => d.sel[i].size > 0 || d.other[i].trim();
-  const wrap = h('div.askq');
-  const send = h('button.btn.sm.primary', { onclick: () => answer(collect()) }, L('Responder'));
-  const refresh = () => {
-    send.disabled = !qs.every((_, i) => done(i));
-    wrap.querySelectorAll('.askq-opt[data-o]').forEach((b) => b.classList.toggle('sel', d.sel[+b.dataset.q].has(+b.dataset.o)));
-    wrap.querySelectorAll('.askq-own').forEach((b, i) => b.classList.toggle('sel', !!d.other[i].trim()));
+  // uma pergunta por página: abas no topo (marcadas quando respondidas), Voltar / Próxima e Responder na última.
+  // A conversa redesenha com morph(): os elementos na tela ficam e recebem as funções do render novo, então
+  // cada evento age no cartão de onde veio (e.currentTarget), nunca no elemento criado aqui.
+  if (d.page == null || d.page >= qs.length) d.page = 0;
+  const last = () => d.page === qs.length - 1;
+  const card = (e) => e.currentTarget.closest('.askq');
+  const go = (p, w) => { d.page = Math.max(0, Math.min(qs.length - 1, p)); d.focus = -1; draw(w); };
+  const refresh = (w) => {
+    const i = d.page;
+    const next = w.querySelector('.askq-next');
+    if (next) next.disabled = last() ? !qs.every((_, k) => done(k)) : !done(i);
+    w.querySelectorAll('.askq-opt[data-o]').forEach((el) => el.classList.toggle('sel', d.sel[i].has(+el.dataset.o)));
+    w.querySelector('.askq-own')?.classList.toggle('sel', !!d.other[i].trim());
+    w.querySelectorAll('.askq-tab').forEach((t, k) => t.classList.toggle('done', !!done(k)));
   };
-  qs.forEach((q, i) => {
+  const draw = (w) => {
+    w.innerHTML = '';
+    const i = d.page, q = qs[i];
+    if (qs.length > 1) {
+      w.append(h('div.askq-tabs', null, qs.map((x, k) => h('button.askq-tab' + (k === i ? '.cur' : '') + (done(k) ? '.done' : ''), {
+        type: 'button', title: x.question, onclick: (e) => go(k, card(e)),
+      }, done(k) ? ic('check') : h('span.askq-num', null, String(k + 1)), h('span', null, x.header || L('Pergunta {0}', k + 1))))));
+    }
     const opts = h('div.askq-opts');
     q.options.forEach((o, j) => {
       const lb = askLabel(o.label);
       opts.append(h('button.askq-opt', {
-        type: 'button', dataset: { q: i, o: j },
+        type: 'button', dataset: { o: j },
         // sempre dá para marcar uma ou mais
-        onclick: () => { d.sel[i].has(j) ? d.sel[i].delete(j) : d.sel[i].add(j); refresh(); },
+        onclick: (e) => { d.sel[d.page].has(j) ? d.sel[d.page].delete(j) : d.sel[d.page].add(j); refresh(card(e)); },
       },
       h('span.askq-mark', null, ic('check')),
       h('span.askq-txt', null, h('b', null, lb.text, lb.rec ? h('span.askq-rec', null, L('recomendado')) : null), o.description ? h('span', null, o.description) : null)));
     });
     // a última opção é sempre escrever a própria resposta
-    const other = h('input.askq-other', { placeholder: L('Outra resposta: escreva aqui...'), value: d.other[i], dataset: { q: i } });
-    other.addEventListener('input', () => { d.other[i] = other.value; refresh(); });
-    other.addEventListener('focus', () => { d.focus = i; });
-    // o redesenho tira o campo da página: aí o foco deve voltar para o novo, então só esquece se ele continua na página
-    other.addEventListener('blur', () => setTimeout(() => { if (other.isConnected && d.focus === i) d.focus = -1; }, 0));
-    other.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing && qs.every((_, k) => done(k))) { e.preventDefault(); answer(collect()); } });
-    if (d.focus === i) requestAnimationFrame(() => { other.focus(); other.setSelectionRange(other.value.length, other.value.length); });
-    wrap.append(h('div.askq-item', null,
-      h('div.askq-head', null, q.header ? h('span.askq-tag', null, q.header) : null, h('span.askq-hint', null, L('marque uma ou mais'))),
-      h('div.askq-q', null, q.question), opts));
+    const other = h('input.askq-other', {
+      placeholder: L('Outra resposta: escreva aqui...'), value: d.other[i],
+      oninput: (e) => { d.other[d.page] = e.currentTarget.value; refresh(card(e)); },
+      onfocus: () => { d.focus = d.page; },
+      // o redesenho pode tirar o campo da página: aí o foco volta para o novo, então só esquece se ele continua na página
+      onblur: (e) => { const el = e.currentTarget; setTimeout(() => { if (el.isConnected) d.focus = -1; }, 0); },
+      onkeydown: (e) => { if (e.key === 'Enter' && !e.isComposing) { const n = card(e).querySelector('.askq-next'); if (n && !n.disabled) { e.preventDefault(); n.click(); } } },
+    });
+    if (d.focus === i) requestAnimationFrame(() => { const el = document.querySelector(`.askq[data-ask="${id}"] .askq-other`); if (el && document.activeElement !== el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } });
     opts.append(h('label.askq-opt.askq-own', null, h('span.askq-mark', null, ic('edit')), other));
-  });
-  wrap.append(h('div.askq-foot', null,
-    h('button.btn.sm', { onclick: () => answer('skip'), title: L('O modelo segue com a opção recomendada') }, L('Pular')),
-    send));
-  refresh();
+    w.append(
+      h('div.askq-item', null,
+        h('div.askq-head', null, q.header && qs.length === 1 ? h('span.askq-tag', null, q.header) : null,
+          qs.length > 1 ? h('span.askq-hint', null, L('{0} de {1}', i + 1, qs.length)) : null,
+          h('span.askq-hint', null, L('marque uma ou mais'))),
+        h('div.askq-q', null, q.question), opts),
+      h('div.askq-foot', null,
+        h('button.btn.sm.ghost', { type: 'button', onclick: () => answer('skip'), title: L('O modelo segue com a opção recomendada') }, L('Pular')),
+        h('span.spacer'),
+        i > 0 ? h('button.btn.sm', { type: 'button', onclick: (e) => go(d.page - 1, card(e)) }, L('Voltar')) : null,
+        h('button.btn.sm.primary.askq-next', { type: 'button', onclick: (e) => (last() ? answer(collect()) : go(d.page + 1, card(e))) }, last() ? L('Responder') : L('Próxima'))));
+    refresh(w);
+  };
+  const wrap = h('div.askq', { dataset: { ask: id } });
+  draw(wrap);
   return wrap;
 }

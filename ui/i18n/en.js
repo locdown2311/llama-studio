@@ -2399,4 +2399,6 @@ const I18N_EN = {
   "O modelo segue com a opção recomendada": "The model goes on with the recommended option",
   "esperando sua resposta": "waiting for your answer",
   "Pergunta": "Question",
+  "Pergunta {0}": "Question {0}",
+  "Próxima": "Next",
 };
