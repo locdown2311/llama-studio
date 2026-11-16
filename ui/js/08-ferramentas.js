@@ -622,6 +622,14 @@ function askLabel(label) {
   return m ? { text: label.slice(0, m.index).trim(), rec: true } : { text: label, rec: false };
 }
 
+/** Ajuste de quanto perguntar (Configurações → Ferramentas), somado à instrução padrão. */
+function askLevelNote(conv) {
+  if (!S.settings.tools.ask || conv?.noAsk) return '';
+  if (S.settings.askLevel === 'pouco') return L('Perguntas (ask_user): pergunte só quando errar a escolha sairia caro ou seria difícil de desfazer; no resto, decida e diga o que decidiu.');
+  if (S.settings.askLevel === 'muito') return L('Perguntas (ask_user): antes de começar qualquer tarefa com mais de um caminho razoável, confirme com ask_user a abordagem, o escopo e o formato; em dúvida, pergunte em vez de supor.');
+  return '';
+}
+
 async function askUser(tctx, tmsg, args) {
   const qs = normQuestions(args);
   if (!qs.length) return { content: L('Passe questions: 1 a 4 perguntas, cada uma com question e 2 a 4 options ({label, description}).'), isError: true };
@@ -632,11 +640,22 @@ async function askUser(tctx, tmsg, args) {
   S.waiting.add(conv.id); renderConvList();
   if (conv.id !== S.curId || S.view !== 'chat') toast(L('"{0}" tem uma pergunta para você', conv.title));
   plugHook('Notification', conv, { message: qs[0].question });
-  const a = await waitApproval(id, tctx.signal);
+  // em segundo plano, sem ninguém olhando: depois do tempo configurado, segue com a recomendada
+  const mins = EXECUTOR ? Number(S.settings.askTimeout) || 0 : 0;
+  let timer = 0;
+  const a = await Promise.race([
+    waitApproval(id, tctx.signal),
+    ...(mins ? [new Promise((r) => { timer = setTimeout(() => { S.approvals.delete(id); r({ timeout: mins }); }, mins * 60000); })] : []),
+  ]);
+  clearTimeout(timer);
   S.questions.delete(id); S.askDraft.delete(id);
   S.waiting.delete(conv.id); renderConvList();
   tmsg.status = 'running';
   if (tctx.signal.aborted) throw new DOMException('abort', 'AbortError');
+  if (a?.timeout) {
+    tmsg.askA = []; tmsg.askTimeout = a.timeout;
+    return { content: L('O usuário não respondeu em {0} min (tarefa em segundo plano). Siga com a opção recomendada de cada pergunta e diga no texto o que escolheu, para ele poder corrigir depois.', a.timeout) };
+  }
   if (!a || typeof a !== 'object' || !Array.isArray(a.answers)) {
     tmsg.askA = [];
     return { content: L('O usuário pulou as perguntas. Siga com a opção recomendada (ou a que fizer mais sentido) e diga no texto qual escolheu.') };
@@ -650,8 +669,8 @@ async function askUser(tctx, tmsg, args) {
 }
 
 /** Resumo curto das respostas (no título do cartão). */
-function askSummary(ans) {
-  if (!ans?.length) return L('pulou');
+function askSummary(ans, res) {
+  if (!ans?.length) return res?.askTimeout ? L('sem resposta, seguiu a recomendada') : L('pulou');
   return ans.map((x) => [...(x.chosen || []), ...(x.other ? [x.other] : [])].join(', ') || '—').join(' · ');
 }
 
@@ -661,7 +680,7 @@ function askView(tc, res) {
   // já respondida: pergunta → resposta
   if (res?.status !== 'question') {
     if (!res?.askA) return null;
-    if (!res.askA.length) return h('div.askq-done', null, L('Você pulou estas perguntas.'));
+    if (!res.askA.length) return h('div.askq-done', null, res.askTimeout ? L('Sem resposta em {0} min: o modelo seguiu com a opção recomendada.', res.askTimeout) : L('Você pulou estas perguntas.'));
     return h('div.askq-done', null, res.askA.map((x) => h('div.askq-qa', null,
       h('div.askq-q', null, x.q),
       h('div.askq-a', null, ic('check'), [...(x.chosen || []), ...(x.other ? [x.other] : [])].join(', ') || '—'))));

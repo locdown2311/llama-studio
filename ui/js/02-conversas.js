@@ -1589,6 +1589,22 @@ function fillConvMenu() {
       L("Exportar como Markdown")
     ),
 
+    S.settings.tools.ask
+      ? h(
+          "button.menu-item",
+          {
+            onclick: () => {
+              closePops();
+              c.noAsk = !c.noAsk;
+              saveConvs();
+              toast(c.noAsk ? L("Nesta conversa o modelo decide sem perguntar") : L("Nesta conversa o modelo pode perguntar com sugestões"));
+            },
+          },
+          ic("chat"),
+          h("span.mi-main", null, L("Perguntas com sugestões"), h("span.mi-sub", null, c.noAsk ? L("Desligadas nesta conversa") : L("Ligadas: o modelo pergunta quando a escolha é sua")))
+        )
+      : "",
+
     h(
       "button.menu-item",
       {
@@ -3279,7 +3295,7 @@ function renderTool(tc, res, live) {
 
     server ? h("span.tool-server", null, server) : null,
 
-    h("span.tool-sub", null, name === "ask_user" && res?.askA ? askSummary(res.askA) : toolSummary(name, args)),
+    h("span.tool-sub", null, name === "ask_user" && res?.askA ? askSummary(res.askA, res) : toolSummary(name, args)),
 
     res?.runOn ? runOnChip(res) : null,
 

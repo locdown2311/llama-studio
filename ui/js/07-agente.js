@@ -388,7 +388,7 @@ async function runAgent(conv) {
   try {
     const act = activeSel(conv);
     const au = conv.auto || {};
-    const groups = [...new Set([...enabledGroups(), ...(au.groups || [])])].filter((g) => TOOL_GROUPS.includes(g) && !(au.block || []).includes(g));
+    const groups = [...new Set([...enabledGroups(), ...(au.groups || [])])].filter((g) => TOOL_GROUPS.includes(g) && !(au.block || []).includes(g) && !(g === 'ask' && conv.noAsk));
     // conversa de um projeto de vídeo: a equipe escreve as cenas (video_scenes)
     if (projectOf(conv)?.video && !groups.includes('video')) groups.push('video');
     act.mcp = [...new Set([...act.mcp, ...(au.mcp || [])])];
@@ -479,6 +479,7 @@ async function runAgent(conv) {
       persona?.prompt?.trim() ? L('# Personalidade: {0}\n{1}', persona.name, persona.prompt.trim()) : '',
       proj?.instructions?.trim() ? L('# Instruções do projeto "{0}"\n{1}', proj.name, proj.instructions.trim()) : '',
       conv.hookStart || '',
+      askLevelNote(conv),
       conv.factsNote || '',
       ctx.text,
       catalogSys,

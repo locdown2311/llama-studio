@@ -27,7 +27,7 @@ function renderSettings() {
 
   // ferramentas
   const groupsBySec = {};
-  for (const g of ['web', 'browser', 'computer', 'read', 'edit', 'write', 'shell', 'code', 'history', 'toolsearch', 'explore', 'todo', 'notebook', 'interface']) (groupsBySec[TOOL_INFO[g].sec] ||= []).push(g);
+  for (const g of ['web', 'browser', 'computer', 'read', 'edit', 'write', 'shell', 'code', 'history', 'toolsearch', 'explore', 'ask', 'todo', 'notebook', 'interface']) (groupsBySec[TOOL_INFO[g].sec] ||= []).push(g);
   const toolGrid = h('div.tgrid', null, Object.values(groupsBySec).flat().map((g) => sw(TOOL_INFO[g].title, TOOL_INFO[g].desc, S.settings.tools[g], (v) => { S.settings.tools[g] = v; store.set('settings', S.settings); saveKit(); updatePickers(); saved(); })));
 
   section('model', L('Modelo'), 'cpu', L('Como o modelo responde em todas as conversas.'),
@@ -62,6 +62,12 @@ function renderSettings() {
 
   section('tools', L('Ferramentas'), 'hammer', L('O que o modelo pode usar. Também dá para ligar e desligar pela barra do chat.'),
     toolGrid,
+    group(L('Perguntas com sugestões'),
+      field(L('Quanto o modelo pergunta'), seg([['pouco', L('Só o essencial')], ['', L('Equilibrado')], ['muito', L('Sempre que houver dúvida')]], st.askLevel || '', (v) => put({ askLevel: v })),
+        L('Só o essencial: pergunta apenas quando errar sairia caro. Sempre que houver dúvida: confirma abordagem, escopo e formato antes de começar tarefas maiores.')),
+      field(L('Tarefa em segundo plano sem resposta'), seg([['', L('Esperar')], ['5', '5 min'], ['15', '15 min'], ['60', L('1 hora')]], String(st.askTimeout || ''), (v) => put({ askTimeout: Number(v) || 0 })),
+        L('Com o app fechado, depois desse tempo sem resposta o modelo segue com a opção recomendada e diz qual escolheu.')),
+      h('small.muted', null, L('Dá para desligar as perguntas numa conversa só, pelo menu ⋯ dela.'))),
     webGroup,
     group(L('Limites'),
       h('div.row', null,
