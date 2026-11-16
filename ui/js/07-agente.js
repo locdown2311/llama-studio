@@ -1013,35 +1013,62 @@ async function reconcileBg() {
 }
 if (!EXECUTOR) setInterval(() => { if (!document.hidden) reconcileBg(); }, 5000);
 
-/* ------------------------------------------------------------ o executor */
-async function executorRun(job) {
-  const conv = S.convs.find((c) => c.id === job.conv);
-  if (!conv) { await api('/api/jobs/done', { job: job.id, ok: false, note: L('Conversa não encontrada.') }).catch(() => {}); return; }
-  S.curId = conv.id;
-  window.__execJob = job;
-  conv.bg = { state: 'running', at: Date.now() };
-  saveConvsNow(true);
-  const asked = new Set();
-  const tick = setInterval(async () => {
-    // o agente parou esperando uma permissão: avisa o celular
-    const fresh = [...S.approvals.keys()].filter((k) => !asked.has(k));
-    if (fresh.length) {
-      fresh.forEach((k) => asked.add(k));
-      const q = fresh.find((k) => S.questions.has(k));
-      api('/api/jobs/ask', q ? { job: job.id, kind: 'question', text: S.questions.get(q) } : { job: job.id }).catch(() => {});
+/* ------------------------------------------------------------ o executor
+   Roda várias tarefas ao mesmo tempo (uma por conversa). Parado, ele recarrega a página a cada tarefa nova
+   para pegar a conversa e as configurações como estão agora; com outra rodando, busca a conversa pela
+   sincronização e começa junto. Um despachante só recebe as respostas (permissões, perguntas, parar) e
+   entrega para a tarefa certa. */
+const EXEC = { running: new Map(), asked: new Set(), tick: 0 };
+
+function execJobOf(convId) { return EXEC.running.get(convId)?.job || null; }
+
+/** De qual conversa é este pedido de permissão / pergunta (id da chamada de ferramenta). */
+function execConvOfCall(id) {
+  for (const cid of EXEC.running.keys()) {
+    const c = S.convs.find((x) => x.id === cid);
+    if (c?.messages.some((m) => m.role === 'tool' && m.tool_call_id === id)) return cid;
+  }
+  return [...EXEC.running.keys()][0] || null;
+}
+
+function execTick() {
+  if (EXEC.tick) return;
+  EXEC.tick = setInterval(async () => {
+    if (!EXEC.running.size) { clearInterval(EXEC.tick); EXEC.tick = 0; return; }
+    // o agente parou esperando uma permissão ou uma resposta: avisa o celular
+    for (const k of [...S.approvals.keys()].filter((k) => !EXEC.asked.has(k))) {
+      EXEC.asked.add(k);
+      const job = execJobOf(execConvOfCall(k));
+      if (job) api('/api/jobs/ask', S.questions.has(k) ? { job: job.id, kind: 'question', text: S.questions.get(k) } : { job: job.id }).catch(() => {});
     }
     let r; try { r = await api('/api/jobs/answers'); } catch { return; }
     for (const x of r.answers || []) {
-      if (x.stop === conv.id) { stopped = true; stop(conv); }
-      else if (x.id) { const fn = S.approvals.get(x.id); if (fn) { S.approvals.delete(x.id); fn(x.a); } }
+      if (x.stop) {
+        const run = EXEC.running.get(x.stop);
+        const c = S.convs.find((y) => y.id === x.stop);
+        if (run && c) { run.stopped = true; stop(c); }
+      } else if (x.id) { const fn = S.approvals.get(x.id); if (fn) { S.approvals.delete(x.id); fn(x.a); } }
     }
   }, 1500);
-  let ok = true, note = '', stopped = false;
+}
+
+async function executorRun(job) {
+  let conv = S.convs.find((c) => c.id === job.conv);
+  // começou junto com outra: a conversa pode ainda não ter chegado pela sincronização
+  for (let i = 0; !conv && i < 5; i++) { await new Promise((ok) => setTimeout(ok, 800)); await uiPoll(); conv = S.convs.find((c) => c.id === job.conv); }
+  if (!conv) { await api('/api/jobs/done', { job: job.id, ok: false, note: L('Conversa não encontrada.') }).catch(() => {}); return; }
+  const run = { job, stopped: false };
+  EXEC.running.set(conv.id, run);
+  S.curId = conv.id;
+  conv.bg = { state: 'running', at: Date.now() };
+  saveConvsNow(true);
+  execTick();
+  let ok = true, note = '';
   try { await runAgent(conv); } catch (e) { ok = false; note = String(e?.message || e); }
-  clearInterval(tick);
+  EXEC.running.delete(conv.id);
   const last = [...conv.messages].reverse().find((m) => m.role === 'assistant');
   if (last?.error) { ok = false; note = note || String(last.error); }
-  if (stopped) { ok = false; note = L('Você parou a tarefa.'); }
+  if (run.stopped) { ok = false; note = L('Você parou a tarefa.'); }
   conv.bg = null;
   conv.updatedAt = Date.now();
   saveConvsNow(true);
@@ -1053,16 +1080,20 @@ async function executorRun(job) {
 async function executorLoop() {
   document.title = 'executor - llama studio';
   const pending = sessionStorage.getItem('execJob');
-  if (pending) { sessionStorage.removeItem('execJob'); try { await executorRun(JSON.parse(pending)); } catch { /* segue */ } }
+  if (pending) { sessionStorage.removeItem('execJob'); try { executorRun(JSON.parse(pending)).catch(() => {}); } catch { /* segue */ } }
   for (;;) {
     let r = null;
     try { r = await api('/api/jobs/next?wait=25'); } catch { await new Promise((ok) => setTimeout(ok, 3000)); continue; }
-    if (r?.job) {
-      // recarrega para pegar a conversa e as configurações como estão agora
+    if (!r?.job) continue;
+    if (!EXEC.running.size) {
+      // parado: recarrega para pegar a conversa e as configurações como estão agora
       sessionStorage.setItem('execJob', JSON.stringify(r.job));
       location.reload();
       return;
     }
+    // outra tarefa rodando: busca a conversa nova e começa junto
+    await uiPoll();
+    executorRun(r.job).catch(() => {});
   }
 }
 
@@ -1172,7 +1203,7 @@ async function loopJudge(conv, g, signal) {
       conv.messages.push({ role: 'notice', icon: 'refresh', content: L('O juiz achou que o modelo travou ({0}). Ele recebeu uma orientação para mudar de rumo.', String(v.why || '').slice(0, 160)) });
     } else {
       conv.messages.push({ role: 'notice', icon: 'alert', content: L('Continua travado mesmo depois da orientação ({0}). Se não melhorar no próximo passo, a resposta para; você pode parar agora.', String(v.why || '').slice(0, 160)) });
-      if (EXECUTOR && window.__execJob) api('/api/jobs/ask', { job: window.__execJob.id }).catch(() => {});
+      if (EXECUTOR && execJobOf(conv.id)) api('/api/jobs/ask', { job: execJobOf(conv.id).id }).catch(() => {});
     }
   } else {
     // não travou: não gasta aviso nem para; só volta a olhar se repetir bem mais
