@@ -989,6 +989,7 @@ fn to_cc(name: &str, a: &Value, ws: &Path) -> (String, Value) {
         "web_fetch" => ("WebFetch", json!({"url": s("url"), "prompt": s("prompt")})),
         "web_search" => ("WebSearch", json!({"query": s("query")})),
         "update_todos" => ("TodoWrite", json!({"todos": a.get("todos")})),
+        "ask_user" => ("AskUserQuestion", json!({"questions": a.get("questions")})),
         "explore" => ("Task", json!({"description": s("task").chars().take(60).collect::<String>(), "prompt": s("task"), "subagent_type": "Explore"})),
         "multi_explore" => ("Task", json!({"description": "multi_explore", "prompt": a.get("subtasks").map(|x| x.to_string()).unwrap_or_default(), "subagent_type": "Explore"})),
         n if n.contains("__") => {

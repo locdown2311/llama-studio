@@ -13,6 +13,7 @@ const TOOL_INFO = {
   code: { sec: L('Shell'), title: L('Executar código de ferramentas'), short: L('código'), desc: L('JavaScript que chama várias ferramentas e combina os resultados.') },
   history: { sec: L('Busca'), title: L('Lembrar conversas'), short: L('histórico'), desc: L('Procurar no histórico desta e das outras conversas.') },
   toolsearch: { sec: L('Busca'), title: L('Buscar ferramentas'), short: L('buscar ferramentas'), desc: L('Achar e ativar ferramentas de conectores sob demanda.') },
+  ask: { sec: L('Planejamento'), title: L('Perguntar com sugestões'), short: L('perguntas'), desc: L('Quando houver uma escolha sua (abordagem, escopo, formato), o modelo pergunta com opções prontas antes de seguir. Você toca numa ou escreve outra.') },
   todo: { sec: L('Planejamento'), title: L('Lista de tarefas'), short: 'tarefas', desc: L('O modelo escreve um plano e vai marcando cada passo; você acompanha acima da caixa de texto.') },
   notebook: { sec: L('Planejamento'), title: L('Caderno de investigação'), short: 'caderno', desc: L('O modelo registra achados (endereços, funções, hipóteses) num caderno do projeto e consulta antes de repetir trabalho.') },
   interface: { sec: L('Interface'), title: L('Personalizar a interface'), short: 'interface', desc: L('Temas, cores, fontes e layout do studio, pedidos ao modelo.') },
@@ -108,6 +109,7 @@ async function execTool(name, args, info, tctx, tmsg) {
     if (name === 'video_captions') return await runVideoCaptions(args || {}, tctx, tmsg);
     if (name === 'recall_history') return recallHistory(args || {}, tctx.conv);
     if (name === 'update_todos') return await updateTodos(tctx.conv, args, tctx.signal);
+    if (name === 'ask_user') return await askUser(tctx, tmsg, args);
     if (name === 'restore_tools') return restoreTools(tctx.conv, args);
     if (name === 'notebook') return await notebookTool(tctx.conv, args);
     if (name === 'search_tools') {
@@ -595,4 +597,119 @@ async function runApplyEdit(args, tctx, tmsg) {
   const a = (f.text || '').split('\n').length, b = text.split('\n').length;
   if (tctx.ws === S.ws?.path) markFresh(path);
   return { content: L('Aplicado em {0} ({1}; trecho das linhas {2}–{3}; o arquivo foi de {4} para {5} linhas).', path, how, from, to, a, b), isError: false };
+}
+
+/* ============================================================ perguntas com sugestões (ask_user) */
+S.questions = new Map(); // id da chamada -> texto da primeira pergunta (para a notificação)
+S.askDraft = new Map();  // id da chamada -> { sel: [Set], other: [], focus } (sobrevive aos redesenhos)
+
+/** Normaliza o que o modelo mandou: aceita uma pergunta solta, opções em texto e campos faltando. */
+function normQuestions(args) {
+  let qs = Array.isArray(args?.questions) ? args.questions : args?.question ? [args] : [];
+  if (typeof args?.questions === 'string') { try { qs = JSON.parse(args.questions); } catch { qs = []; } }
+  return qs.slice(0, 4).map((q) => {
+    const options = (Array.isArray(q?.options) ? q.options : []).slice(0, 6)
+      .map((o) => (typeof o === 'string' ? { label: o } : { label: String(o?.label ?? o?.text ?? ''), description: String(o?.description ?? '') }))
+      // "Outro" vira o campo de escrever, que sempre vem no fim
+      .filter((o) => o.label.trim() && !/^(outr[oa]s?|other|something else|algo diferente)\b[\s.:()…-]*$/i.test(o.label.trim()));
+    return { question: String(q?.question || '').trim(), header: String(q?.header || '').trim().slice(0, 24), multiSelect: !!q?.multiSelect, options };
+  }).filter((q) => q.question);
+}
+
+/** "Tal coisa (Recomendado)" -> rótulo limpo + marca. */
+function askLabel(label) {
+  const m = /\s*\((recomendad[oa]|recommended)\)\s*$/i.exec(label);
+  return m ? { text: label.slice(0, m.index).trim(), rec: true } : { text: label, rec: false };
+}
+
+async function askUser(tctx, tmsg, args) {
+  const qs = normQuestions(args);
+  if (!qs.length) return { content: L('Passe questions: 1 a 4 perguntas, cada uma com question e 2 a 4 options ({label, description}).'), isError: true };
+  const conv = tctx.conv, id = tmsg.tool_call_id;
+  tmsg.askQs = qs; tmsg.status = 'question';
+  saveConvs(); scheduleRender();
+  S.questions.set(id, qs[0].question);
+  S.waiting.add(conv.id); renderConvList();
+  if (conv.id !== S.curId || S.view !== 'chat') toast(L('"{0}" tem uma pergunta para você', conv.title));
+  plugHook('Notification', conv, { message: qs[0].question });
+  const a = await waitApproval(id, tctx.signal);
+  S.questions.delete(id); S.askDraft.delete(id);
+  S.waiting.delete(conv.id); renderConvList();
+  tmsg.status = 'running';
+  if (tctx.signal.aborted) throw new DOMException('abort', 'AbortError');
+  if (!a || typeof a !== 'object' || !Array.isArray(a.answers)) {
+    tmsg.askA = [];
+    return { content: L('O usuário pulou as perguntas. Siga com a opção recomendada (ou a que fizer mais sentido) e diga no texto qual escolheu.') };
+  }
+  tmsg.askA = a.answers;
+  const lines = a.answers.map((x) => {
+    const parts = [...(x.chosen || []), ...(x.other ? [L('outra resposta: "{0}"', x.other)] : [])];
+    return `- ${x.q}\n  → ${parts.length ? parts.join('; ') : L('(sem resposta)')}`;
+  });
+  return { content: L('Respostas do usuário:\n{0}\n\nSiga com essas escolhas, sem perguntar de novo.', lines.join('\n')) };
+}
+
+/** Resumo curto das respostas (no título do cartão). */
+function askSummary(ans) {
+  if (!ans?.length) return L('pulou');
+  return ans.map((x) => [...(x.chosen || []), ...(x.other ? [x.other] : [])].join(', ') || '—').join(' · ');
+}
+
+/** O cartão da pergunta: opções para tocar, campo "outra resposta", Pular e Responder. */
+function askView(tc, res) {
+  const id = tc.id, qs = res?.askQs || normQuestions(parseArgs(tc.function?.arguments));
+  // já respondida: pergunta → resposta
+  if (res?.status !== 'question') {
+    if (!res?.askA) return null;
+    if (!res.askA.length) return h('div.askq-done', null, L('Você pulou estas perguntas.'));
+    return h('div.askq-done', null, res.askA.map((x) => h('div.askq-qa', null,
+      h('div.askq-q', null, x.q),
+      h('div.askq-a', null, ic('check'), [...(x.chosen || []), ...(x.other ? [x.other] : [])].join(', ') || '—'))));
+  }
+  let d = S.askDraft.get(id);
+  if (!d) { d = { sel: qs.map(() => new Set()), other: qs.map(() => ''), focus: -1 }; S.askDraft.set(id, d); }
+  const answer = (a) => {
+    const fn = S.approvals.get(id);
+    if (fn) { S.approvals.delete(id); fn(a); } else remoteAnswer(id, a);
+    S.askDraft.delete(id);
+  };
+  const collect = () => ({ answers: qs.map((q, i) => ({ q: q.question, header: q.header, chosen: q.options.filter((_, j) => d.sel[i].has(j)).map((o) => askLabel(o.label).text), other: d.other[i].trim() })) });
+  const done = (i) => d.sel[i].size > 0 || d.other[i].trim();
+  const wrap = h('div.askq');
+  const send = h('button.btn.sm.primary', { onclick: () => answer(collect()) }, L('Responder'));
+  const refresh = () => {
+    send.disabled = !qs.every((_, i) => done(i));
+    wrap.querySelectorAll('.askq-opt[data-o]').forEach((b) => b.classList.toggle('sel', d.sel[+b.dataset.q].has(+b.dataset.o)));
+    wrap.querySelectorAll('.askq-own').forEach((b, i) => b.classList.toggle('sel', !!d.other[i].trim()));
+  };
+  qs.forEach((q, i) => {
+    const opts = h('div.askq-opts');
+    q.options.forEach((o, j) => {
+      const lb = askLabel(o.label);
+      opts.append(h('button.askq-opt', {
+        type: 'button', dataset: { q: i, o: j },
+        // sempre dá para marcar uma ou mais
+        onclick: () => { d.sel[i].has(j) ? d.sel[i].delete(j) : d.sel[i].add(j); refresh(); },
+      },
+      h('span.askq-mark', null, ic('check')),
+      h('span.askq-txt', null, h('b', null, lb.text, lb.rec ? h('span.askq-rec', null, L('recomendado')) : null), o.description ? h('span', null, o.description) : null)));
+    });
+    // a última opção é sempre escrever a própria resposta
+    const other = h('input.askq-other', { placeholder: L('Outra resposta: escreva aqui...'), value: d.other[i], dataset: { q: i } });
+    other.addEventListener('input', () => { d.other[i] = other.value; refresh(); });
+    other.addEventListener('focus', () => { d.focus = i; });
+    // o redesenho tira o campo da página: aí o foco deve voltar para o novo, então só esquece se ele continua na página
+    other.addEventListener('blur', () => setTimeout(() => { if (other.isConnected && d.focus === i) d.focus = -1; }, 0));
+    other.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing && qs.every((_, k) => done(k))) { e.preventDefault(); answer(collect()); } });
+    if (d.focus === i) requestAnimationFrame(() => { other.focus(); other.setSelectionRange(other.value.length, other.value.length); });
+    wrap.append(h('div.askq-item', null,
+      h('div.askq-head', null, q.header ? h('span.askq-tag', null, q.header) : null, h('span.askq-hint', null, L('marque uma ou mais'))),
+      h('div.askq-q', null, q.question), opts));
+    opts.append(h('label.askq-opt.askq-own', null, h('span.askq-mark', null, ic('edit')), other));
+  });
+  wrap.append(h('div.askq-foot', null,
+    h('button.btn.sm', { onclick: () => answer('skip'), title: L('O modelo segue com a opção recomendada') }, L('Pular')),
+    send));
+  refresh();
+  return wrap;
 }

@@ -3143,6 +3143,7 @@ const TOOL_ICON = {
   search_tools: "search",
   explore: "compass",
   update_todos: "list",
+  ask_user: "chat",
   notebook: "book",
 };
 
@@ -3157,6 +3158,7 @@ function toolIcon(name, source) {
 }
 
 function toolSummary(name, args) {
+  if (name === "ask_user" && args) return normQuestions(args)[0]?.question || "";
   if (name === "notebook" && args)
     return [
       args.action,
@@ -3217,7 +3219,7 @@ function renderTool(tc, res, live) {
       source +
       (open ? ".open" : "") +
       ((name === "multi_explore" || name === "video_scenes") && res?.subs?.length ? ".multi" : "") +
-      (res?.asks?.length ? ".asking" : ""),
+      (res?.asks?.length || status === "question" ? ".asking" : ""),
     { dataset: { id: key } }
   );
 
@@ -3253,7 +3255,10 @@ function renderTool(tc, res, live) {
     ],
 
     denied: [h("span", { html: svg("ban") }), L("negada")],
+
+    question: [h("span", { html: svg("chat") }), L("esperando sua resposta")],
   }[status];
+  if (name === "ask_user") displayName = L("Pergunta");
 
   const head = h(
     "button.tool-head",
@@ -3274,7 +3279,7 @@ function renderTool(tc, res, live) {
 
     server ? h("span.tool-server", null, server) : null,
 
-    h("span.tool-sub", null, toolSummary(name, args)),
+    h("span.tool-sub", null, name === "ask_user" && res?.askA ? askSummary(res.askA) : toolSummary(name, args)),
 
     res?.runOn ? runOnChip(res) : null,
 
@@ -3294,6 +3299,7 @@ function renderTool(tc, res, live) {
   );
 
   const bodyEl = h("div.tool-body");
+  if (name === "ask_user") { const v = askView(tc, res); if (v) bodyEl.append(v); }
 
   if (name === "run_command" && args) {
     bodyEl.append(
@@ -3465,7 +3471,7 @@ function renderTool(tc, res, live) {
         diff
       )
     );
-  } else if (args && Object.keys(args).length) {
+  } else if (name !== "ask_user" && args && Object.keys(args).length) {
     const vals = Object.values(args);
 
     const simple =
@@ -3686,7 +3692,7 @@ function renderTool(tc, res, live) {
     );
   }
 
-  if (res && res.content && status !== "approval") {
+  if (res && res.content && status !== "approval" && !(name === "ask_user" && res.askA)) {
     const content = res.content;
 
     let inner;

@@ -991,7 +991,11 @@ async function executorRun(job) {
   const tick = setInterval(async () => {
     // o agente parou esperando uma permissão: avisa o celular
     const fresh = [...S.approvals.keys()].filter((k) => !asked.has(k));
-    if (fresh.length) { fresh.forEach((k) => asked.add(k)); api('/api/jobs/ask', { job: job.id }).catch(() => {}); }
+    if (fresh.length) {
+      fresh.forEach((k) => asked.add(k));
+      const q = fresh.find((k) => S.questions.has(k));
+      api('/api/jobs/ask', q ? { job: job.id, kind: 'question', text: S.questions.get(q) } : { job: job.id }).catch(() => {});
+    }
     let r; try { r = await api('/api/jobs/answers'); } catch { return; }
     for (const x of r.answers || []) {
       if (x.stop === conv.id) { stopped = true; stop(conv); }
@@ -1038,7 +1042,7 @@ async function executorLoop() {
    3. Micro-habilidades (desligado por padrão): pares "falhou assim, funcionou assado" viram fatos do
       projeto; a cada 3 conversas uma revisão curta confirma ou derruba; o fato só entra no começo das
       conversas depois de visto em 3 conversas diferentes. */
-const TE_CORE = new Set(['read_file', 'list_directory', 'search_files', 'use_skill', 'search_tools', 'restore_tools', 'update_todos']);
+const TE_CORE = new Set(['read_file', 'list_directory', 'search_files', 'use_skill', 'search_tools', 'restore_tools', 'update_todos', 'ask_user']);
 const TE = { pruneMin: 10, pruneP: 10, pruneM: 2, pruneS: 5, judgeConf: 0.7, redirects: 1, reviewK: 3, confirm: 3 };
 function teOn(k) { const v = S.settings[k]; return k === 'microSkills' ? v === true : v !== false; }
 function teKey(conv) { const p = projectOf(conv); return p ? 'p:' + p.id : 'w:' + (wsOf(conv) || '').toLowerCase(); }

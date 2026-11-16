@@ -206,6 +206,10 @@ pub async fn ask(app: Arc<App>, v: &Value) {
         }
         m.insert(id.to_string(), Instant::now());
     }
+    if v["kind"].as_str() == Some("question") {
+        crate::cloud::notify(&app, &LF!("Uma pergunta para você: {title}", "A question for you: {title}"), v["text"].as_str().filter(|t| !t.is_empty()).unwrap_or(L!("O agente parou e está esperando sua resposta.", "The agent paused and is waiting for your answer.")), &format!("/?c={conv}")).await;
+        return;
+    }
     crate::cloud::notify(&app, &LF!("Precisa da sua permissão: {title}", "Needs your permission: {title}"), L!("O agente parou e está esperando você permitir uma ação.", "The agent paused and is waiting for you to allow an action."), &format!("/?c={conv}")).await;
 }
 
