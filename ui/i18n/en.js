@@ -2420,4 +2420,6 @@ const I18N_EN = {
   "O usuário não respondeu em {0} min (tarefa em segundo plano). Siga com a opção recomendada de cada pergunta e diga no texto o que escolheu, para ele poder corrigir depois.": "The user did not answer within {0} min (background task). Go on with the recommended option of each question and say in the text what you picked, so they can correct it later.",
   "Sem resposta em {0} min: o modelo seguiu com a opção recomendada.": "No answer within {0} min: the model went on with the recommended option.",
   "sem resposta, seguiu a recomendada": "no answer, went with the recommended",
+  "O executor {0} ainda não pegou a tarefa.": "The executor {0} hasn't picked up the task yet.",
+  "Rodar nesta tela": "Run on this screen",
 };

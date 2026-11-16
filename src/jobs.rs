@@ -27,6 +27,8 @@ struct St {
     answers: Vec<Value>,
     runner: Option<tokio::process::Child>,
     runner_seen: Option<Instant>,
+    /// Última vez que a página do executor pediu tarefa ou deu batida (prova de que ela carregou).
+    polled: Option<Instant>,
     activity: Option<Instant>,
 }
 
@@ -40,12 +42,63 @@ fn wake() -> &'static tokio::sync::Notify {
     N.get_or_init(tokio::sync::Notify::new)
 }
 
+/// Chave do executor desta execução do studio. Na nuvem o contêiner só aceita pedidos da central (com o
+/// segredo dela); o executor roda dentro do próprio contêiner e entra com esta chave num cookie.
+pub fn exec_token() -> &'static str {
+    static T: OnceLock<String> = OnceLock::new();
+    T.get_or_init(|| {
+        let mut b = [0u8; 32];
+        let ok = std::fs::File::open("/dev/urandom").and_then(|mut f| std::io::Read::read_exact(&mut f, &mut b)).is_ok();
+        if !ok {
+            use sha2::Digest;
+            let seed = format!("{:?}{}{:p}", std::time::SystemTime::now(), std::process::id(), &b);
+            b.copy_from_slice(&sha2::Sha256::digest(seed.as_bytes()));
+        }
+        b.iter().map(|x| format!("{x:02x}")).collect()
+    })
+}
+
 fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
 fn pub_job(j: &Job) -> Value {
     json!({ "id": j.id, "conv": j.conv, "title": j.title, "state": j.state, "created": j.created, "finished": j.finished, "note": j.note })
+}
+
+/// Fecha um executor que sobrou de uma execução anterior do studio (atualização, reinício): ele segura a pasta
+/// do perfil e o novo navegador desiste ("SingletonLock: File exists"), deixando as tarefas presas na fila.
+fn kill_orphans(profile: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        // SingletonLock aponta para "máquina-PID"; só mata se o processo for mesmo um navegador com este perfil
+        if let Ok(t) = std::fs::read_link(profile.join("SingletonLock")) {
+            let pid = t.to_string_lossy().rsplit('-').next().and_then(|p| p.parse::<i32>().ok());
+            if let Some(pid) = pid.filter(|p| *p > 1 && *p != std::process::id() as i32) {
+                let cmd = std::fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
+                let flag = format!("--user-data-dir={}", profile.display());
+                if String::from_utf8_lossy(&cmd).split('\0').any(|a| a == flag) {
+                    let _ = std::process::Command::new("kill").args(["-9", &pid.to_string()]).status();
+                    std::thread::sleep(Duration::from_millis(300));
+                }
+            }
+        }
+        for f in ["SingletonLock", "SingletonSocket", "SingletonCookie"] {
+            let _ = std::fs::remove_file(profile.join(f));
+        }
+    }
+    #[cfg(windows)]
+    {
+        let p = profile.display().to_string().replace('\'', "''");
+        let ps = format!("Get-CimInstance Win32_Process -Filter \"Name='msedge.exe' or Name='chrome.exe' or Name='chromium.exe'\" | Where-Object {{ $_.CommandLine -like '*--user-data-dir={p}*' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }}");
+        let mut c = std::process::Command::new("powershell");
+        c.args(["-NoProfile", "-NonInteractive", "-Command", &ps]);
+        {
+            use std::os::windows::process::CommandExt;
+            c.creation_flags(crate::CREATE_NO_WINDOW);
+        }
+        let _ = c.status();
+    }
 }
 
 /// Liga o executor (navegador sem janela apontando para a própria interface) se ainda não estiver de pé.
@@ -63,6 +116,10 @@ fn ensure_runner(app: &App) -> Result<(), String> {
     let port = *crate::cloud::PORT.get().unwrap_or(&app.cfg().port);
     let profile = app.root.join("executor");
     let _ = std::fs::create_dir_all(&profile);
+    // primeira vez nesta execução do studio: um executor antigo pode ter ficado para trás
+    if s.runner.is_none() {
+        kill_orphans(&profile);
+    }
     // o cache do navegador do executor só cresce e não serve para nada entre tarefas: fica fora do perfil,
     // limitado a 50 MB, e é apagado toda vez que o executor sobe
     let cache = app.root.join("cache").join("executor");
@@ -91,8 +148,10 @@ fn ensure_runner(app: &App) -> Result<(), String> {
         // dentro do contêiner o isolamento é o próprio contêiner (sem namespaces para o sandbox do Chrome)
         cmd.args(["--no-sandbox", "--disable-dev-shm-usage"]);
     }
-    cmd.arg(format!("http://127.0.0.1:{port}/?executor=1"));
-    cmd.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).kill_on_drop(true);
+    cmd.arg(format!("http://127.0.0.1:{port}/__exec?k={}", exec_token()));
+    // o que o navegador reclamar fica em executor.log (para entender quando ele não sobe)
+    let log = std::fs::File::create(app.root.join("executor.log")).map(std::process::Stdio::from).unwrap_or_else(|_| std::process::Stdio::null());
+    cmd.stdout(std::process::Stdio::null()).stderr(log).kill_on_drop(true);
     #[cfg(windows)]
     {
         cmd.creation_flags(crate::CREATE_NO_WINDOW);
@@ -126,7 +185,8 @@ pub fn start(app: &App, conv: &str, title: &str) -> Result<Value, String> {
 
 pub fn list() -> Value {
     let s = st().lock().unwrap();
-    let alive = s.runner_seen.is_some_and(|t| t.elapsed() < Duration::from_secs(60));
+    // vivo = a página do executor pediu tarefa há pouco (o processo de pé não garante que ela carregou)
+    let alive = s.polled.is_some_and(|t| t.elapsed() < Duration::from_secs(60));
     json!({ "jobs": s.jobs.iter().rev().map(pub_job).collect::<Vec<_>>(), "executor": alive })
 }
 
@@ -138,6 +198,7 @@ pub async fn next(wait: u64) -> Value {
         {
             let mut s = st().lock().unwrap();
             s.runner_seen = Some(Instant::now());
+            s.polled = Some(Instant::now());
             if let Some(j) = s.jobs.iter_mut().find(|j| j.state == "queued") {
                 j.state = "running";
                 let v = pub_job(j);
@@ -157,6 +218,7 @@ pub async fn next(wait: u64) -> Value {
 pub fn answers() -> Value {
     let mut s = st().lock().unwrap();
     s.runner_seen = Some(Instant::now());
+    s.polled = Some(Instant::now());
     s.activity = Some(Instant::now());
     json!({ "answers": std::mem::take(&mut s.answers) })
 }
@@ -164,6 +226,15 @@ pub fn answers() -> Value {
 /// Uma tela respondeu a um pedido de permissão (ou pediu para parar) de uma tarefa em segundo plano.
 pub fn answer(v: Value) {
     let mut s = st().lock().unwrap();
+    // parar uma tarefa que ainda está na fila: sai da fila na hora (o executor nem chegou a pegar)
+    if let Some(conv) = v["stop"].as_str() {
+        if let Some(j) = s.jobs.iter_mut().find(|j| j.conv == conv && j.state == "queued") {
+            j.state = "error";
+            j.finished = now_ms();
+            j.note = L!("Você parou a tarefa.", "You stopped the task.").into();
+            return;
+        }
+    }
     s.answers.push(v);
     if s.answers.len() > 200 {
         s.answers.remove(0);
@@ -227,8 +298,18 @@ pub async fn watch(app: Arc<App>) {
                     let _ = c.start_kill();
                 }
             }
-            // rodando e o executor sem dar sinal há 90 s: caiu no meio
             let mut lost = vec![];
+            // na fila há mais de 90 s e a página do executor não pede tarefa há 75 s: ele não subiu
+            if s.polled.is_none_or(|t| t.elapsed() > Duration::from_secs(75)) {
+                let now = now_ms();
+                for j in s.jobs.iter_mut().filter(|j| j.state == "queued" && now.saturating_sub(j.created) > 90_000) {
+                    j.state = "error";
+                    j.finished = now;
+                    j.note = L!("O navegador que roda as tarefas em segundo plano não iniciou. Rode nesta tela.", "The browser that runs background tasks didn't start. Run it on this screen.").into();
+                    lost.push(j.clone());
+                }
+            }
+            // rodando e o executor sem dar sinal há 90 s: caiu no meio
             if busy && (!alive || seen_ago > Duration::from_secs(90)) {
                 for j in s.jobs.iter_mut().filter(|j| j.state == "running") {
                     j.state = "error";

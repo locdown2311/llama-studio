@@ -959,8 +959,34 @@ function drawBgBar() {
   if (!bar) { bar = h('div.bgbar#bgbar'); $('.composer-wrap')?.prepend(bar); }
   bar.innerHTML = '';
   const where = window.__hubTarget === 'pc' ? L('no seu PC') : L('na nuvem');
-  bar.append(h('span.spin', { html: svg('loader') }), h('span', null, c.bg.state === 'queued' ? L('Na fila {0}...', where) : L('Rodando {0}. Pode fechar o app.', where)),
-    h('span.spacer'), h('button.btn.sm', { type: 'button', onclick: async (e) => { e.target.disabled = true; await api('/api/jobs/answer', { stop: c.id }).catch(() => {}); } }, ic('stop'), L('Parar')));
+  // na fila há um tempo e o executor não dá sinal: oferece rodar aqui
+  const stuck = c.bg.state === 'queued' && Date.now() - (c.bg.at || 0) > 20000 && BG.executor === false;
+  bar.append(h('span.spin', { html: svg('loader') }),
+    h('span', null, stuck ? L('O executor {0} ainda não pegou a tarefa.', where) : c.bg.state === 'queued' ? L('Na fila {0}...', where) : L('Rodando {0}. Pode fechar o app.', where)),
+    h('span.spacer'),
+    stuck ? h('button.btn.sm.primary', { type: 'button', onclick: () => bgRunHere(c) }, L('Rodar nesta tela')) : '',
+    h('button.btn.sm', { type: 'button', onclick: (e) => bgStop(c, e.currentTarget) }, ic('stop'), L('Parar')));
+}
+
+const BG = { executor: null };
+
+/** Parar: na fila sai na hora; rodando, o executor para e a conversa sincroniza. */
+async function bgStop(c0, btn) {
+  // a sincronização troca os objetos das conversas: usa o atual
+  const c = S.convs.find((x) => x.id === c0.id) || c0;
+  if (btn) btn.disabled = true;
+  await api('/api/jobs/answer', { stop: c.id }).catch(() => {});
+  if (c.bg?.state === 'queued') { c.bg = null; saveConvsNow(true); renderConvList(); renderComposer(); }
+  drawBgBar();
+  setTimeout(reconcileBg, 1500);
+}
+
+/** Tira da fila do executor e roda nesta tela. */
+async function bgRunHere(c0) {
+  const c = S.convs.find((x) => x.id === c0.id) || c0;
+  await api('/api/jobs/answer', { stop: c.id }).catch(() => {});
+  c.bg = null; saveConvsNow(true); drawBgBar();
+  runAgent(c);
 }
 
 /** Resposta a um pedido de permissão que está em outra tela (o executor). */
@@ -970,15 +996,22 @@ function remoteAnswer(id, a) { api('/api/jobs/answer', { id, a }).catch(() => {}
 async function reconcileBg() {
   if (EXECUTOR || !S.convs.some((c) => c.bg)) return;
   let r; try { r = await api('/api/jobs'); } catch { return; }
+  BG.executor = !!r.executor;
   const live = new Set((r.jobs || []).filter((j) => j.state === 'queued' || j.state === 'running').map((j) => j.conv));
   let changed = false;
   for (const c of S.convs) {
-    if (c.bg && !live.has(c.id) && Date.now() - (c.bg.at || 0) > 20000) { c.bg = null; changed = true; }
+    if (c.bg && !live.has(c.id) && Date.now() - (c.bg.at || 0) > 8000) {
+      // terminou com erro sem o executor ter gravado nada (não subiu, ou parado na fila): diz o motivo
+      const j = (r.jobs || []).find((x) => x.conv === c.id);
+      if (j?.state === 'error' && j.note && c.id === S.curId) toast(j.note, 'err');
+      c.bg = null; changed = true;
+    }
     else if (c.bg && live.has(c.id) && c.bg.state === 'queued' && (r.jobs || []).some((j) => j.conv === c.id && j.state === 'running')) { c.bg.state = 'running'; }
   }
-  if (changed) { saveConvsNow(true); renderConvList(); }
+  if (changed) { saveConvsNow(true); renderConvList(); renderComposer(); }
   drawBgBar();
 }
+if (!EXECUTOR) setInterval(() => { if (!document.hidden) reconcileBg(); }, 5000);
 
 /* ------------------------------------------------------------ o executor */
 async function executorRun(job) {

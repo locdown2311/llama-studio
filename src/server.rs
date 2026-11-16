@@ -237,12 +237,33 @@ pub fn router(app: Arc<App>) -> Router {
 }
 
 /// Só aceita o próprio computador e exige o cabeçalho X-Studio nas rotas que mudam algo.
+fn same_secret(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// O cookie do executor (navegador sem janela das tarefas em segundo plano) traz a chave certa?
+fn is_executor(req: &Request) -> bool {
+    let key = crate::jobs::exec_token().as_bytes();
+    req.headers().get_all(header::COOKIE).iter().filter_map(|v| v.to_str().ok()).flat_map(|c| c.split(';')).any(|kv| kv.trim().strip_prefix("studio_exec=").is_some_and(|v| same_secret(v.as_bytes(), key)))
+}
+
 async fn guard(req: Request, next: Next) -> Response {
-    // na nuvem só a central fala com o contêiner
+    // o executor entra por /__exec?k=chave: vira cookie e segue para a página dele
+    if req.uri().path() == "/__exec" {
+        let k = req.uri().query().unwrap_or("").split('&').find_map(|kv| kv.strip_prefix("k=")).unwrap_or("");
+        if !same_secret(k.as_bytes(), crate::jobs::exec_token().as_bytes()) {
+            return (StatusCode::FORBIDDEN, "exec").into_response();
+        }
+        let mut r = Response::new(Body::empty());
+        *r.status_mut() = StatusCode::FOUND;
+        r.headers_mut().insert(header::LOCATION, HeaderValue::from_static("/?executor=1"));
+        r.headers_mut().insert(header::SET_COOKIE, HeaderValue::from_str(&format!("studio_exec={}; Path=/; HttpOnly; SameSite=Strict", crate::jobs::exec_token())).unwrap());
+        return r;
+    }
+    // na nuvem só a central fala com o contêiner (e o executor dele, com a chave no cookie)
     if let Some(secret) = crate::app::hub_secret() {
         let got = req.headers().get("x-hub-secret").map(|v| v.as_bytes()).unwrap_or(b"");
-        let same = got.len() == secret.len() && got.iter().zip(secret.as_bytes()).fold(0u8, |a, (x, y)| a | (x ^ y)) == 0;
-        if !same {
+        if !same_secret(got, secret.as_bytes()) && !is_executor(&req) {
             return (StatusCode::FORBIDDEN, "hub").into_response();
         }
     }
