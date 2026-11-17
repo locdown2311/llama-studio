@@ -89,6 +89,10 @@ jobs:
             dist/ui.zip
             dist/SHA256SUMS.txt
           generate_release_notes: true
+          # versão com hífen (2.98.4-strata.1): versão de teste de um branch. Fica como pré-lançamento e nunca como
+          # "latest", então a atualização automática de quem usa o main não a oferece.
+          prerelease: ${{ contains(env.STUDIO_VERSION, '-') }}
+          make_latest: ${{ contains(env.STUDIO_VERSION, '-') && 'false' || 'true' }}
           body: ${{ steps.setup.outcome == 'success' && format('**Instalar pela primeira vez:** baixe `llama-studio-setup-{0}.exe`. Não pede administrador; na primeira abertura o programa ajuda a instalar o motor (llama.cpp ou ik_llama.cpp) certo para a sua placa e a baixar um modelo.<br>**Já tem instalado:** o programa avisa e se atualiza sozinho (Procurar atualizações).', env.STUDIO_VERSION) || '' }}
 
       - name: Guardar artefatos (sem versão nova)
