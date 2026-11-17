@@ -40,6 +40,7 @@ mod remote;
 mod share;
 mod server;
 mod skills;
+mod strata;
 mod tools;
 mod tools_en;
 mod uistate;

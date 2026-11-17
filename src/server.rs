@@ -98,6 +98,13 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/locate", post(locate_h))
         .route("/api/remember", post(remember))
         .route("/api/stat", post(stat))
+        .route("/api/strata", get(strata_status))
+        .route("/api/strata/catalog", get(strata_catalog))
+        .route("/api/strata/install", post(strata_install))
+        .route("/api/strata/launch", post(strata_launch))
+        .route("/api/strata/stop", post(strata_stop))
+        .route("/api/strata/cancel", post(strata_cancel))
+        .route("/api/strata/attach", post(strata_attach))
         .route("/api/plugins", get(plugins_list))
         .route("/api/plugins/add", post(plugins_add))
         .route("/api/plugins/market/remove", post(plugins_market_remove))
@@ -1154,6 +1161,38 @@ async fn stat(State(app): S, b: Bytes) -> Res {
         Ok(m) => ok(json!({"exists": true, "path": p, "dir": m.is_dir(), "size": m.len()})),
         Err(_) => ok(json!({"exists": false, "path": p})),
     }
+}
+
+// ---------------------------------------------------------------- Strata (motor adicional)
+
+async fn strata_status(State(app): S) -> Res {
+    ok(crate::strata::status(&app).await)
+}
+async fn strata_catalog() -> Res {
+    ok(crate::strata::catalog().await.map_err(bad)?)
+}
+async fn strata_install(State(app): S) -> Res {
+    crate::strata::install(app.clone()).await.map_err(bad)?;
+    ok(crate::strata::status(&app).await)
+}
+async fn strata_launch(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    crate::strata::launch(app.clone(), st(&v, "family").into(), st(&v, "model").into(), st(&v, "context").into(), st(&v, "vision").into()).await.map_err(bad)?;
+    ok(crate::strata::status(&app).await)
+}
+async fn strata_stop(State(app): S) -> Res {
+    let r = crate::strata::stop().await.map_err(bad)?;
+    let mut s = crate::strata::status(&app).await;
+    s["result"] = r;
+    ok(s)
+}
+async fn strata_cancel(State(app): S) -> Res {
+    crate::strata::cancel();
+    ok(crate::strata::status(&app).await)
+}
+async fn strata_attach(State(app): S) -> Res {
+    crate::strata::attach(&app).await.map_err(bad)?;
+    ok(crate::strata::status(&app).await)
 }
 
 // ---------------------------------------------------------------- plugins (formato do Claude Code)

@@ -2009,3 +2009,31 @@ details.verify.warn summary svg { color: var(--warn); }
 .askq, .askq-item, .askq-opts { grid-template-columns: minmax(0, 1fr); min-width: 0; }
 .askq-opt, .askq-other, .askq-txt b, .askq-txt span { min-width: 0; overflow-wrap: anywhere; }
 .askq-other { width: 0; }
+
+/* Strata */
+.srv-card.strata { display: grid; gap: 10px; }
+.strata-job-head, .strata-state, .strata-go, .strata-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.strata-job-head .spacer, .strata-state .spacer, .strata-go .spacer { flex: 1; }
+.strata-bar { height: 6px; border-radius: 99px; background: var(--bg2); overflow: hidden; }
+.strata-bar > div { height: 100%; background: var(--accent); transition: width .4s; }
+.strata-log { margin: 0; max-height: 180px; overflow: auto; font-size: 11.5px; line-height: 1.45; background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; word-break: break-word; }
+.strata-state .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+.strata-state .dot.on { background: var(--ok, #2f9e58); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok, #2f9e58) 22%, transparent); }
+.strata-list { display: grid; gap: 4px; max-height: 420px; overflow: auto; }
+.strata-fam { font-size: 11.5px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: var(--muted); margin: 8px 2px 2px; }
+.strata-row { display: grid; grid-template-columns: minmax(150px, 1.1fr) minmax(0, 2.4fr) 60px 140px; gap: 10px; align-items: center; text-align: left; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
+.strata-row:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.strata-row.sel { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg)); }
+.strata-m { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.strata-about { color: var(--muted); font-size: 12.5px; min-width: 0; }
+.strata-size { color: var(--muted); font-size: 12.5px; text-align: right; }
+.strata-fit { font-size: 12px; font-weight: 600; text-align: right; }
+.strata-fit.v-fits { color: var(--ok, #2f9e58); }
+.strata-fit.v-tight { color: var(--warn, #c98a16); }
+.strata-fit.v-slower, .strata-fit.v-no { color: var(--muted); }
+.strata-go label { display: grid; gap: 3px; }
+@media (max-width: 760px) {
+  .strata-row { grid-template-columns: 1fr auto; }
+  .strata-about { grid-column: 1 / -1; order: 3; }
+  .strata-size { display: none; }
+}

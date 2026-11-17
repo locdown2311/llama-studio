@@ -16,7 +16,7 @@ let srvTimer = null; let logNext = 0;
 async function renderServerPage() {
   try { S.llama = await api('/api/llama'); } catch (e) { toast(e.message, 'err'); return; }
   await loadModels();
-  drawServerStatus(); drawServerForm(); drawModels(); pollHf(); loadEngines(true);
+  drawServerStatus(); drawServerForm(); drawModels(); pollHf(); loadEngines(true); loadStrata();
   $('#srv-log').textContent = ''; logNext = 0;
   await pollLog();
   clearInterval(srvTimer);
@@ -922,4 +922,123 @@ async function pingApis() {
   }
   lastHealth = '';  // o status lateral depende do ping: força redesenhar
   checkHealth();
+}
+
+/* ------------------------------------------------------------ Strata (motor adicional) */
+const STRATA = { st: null, cat: null, catErr: '', pick: null, ctx: '', vision: 'off', timer: 0, loadingCat: false };
+
+async function loadStrata() {
+  try { STRATA.st = await api('/api/strata'); } catch { STRATA.st = null; }
+  const sec = $('#strata-sec');
+  if (sec) sec.hidden = !STRATA.st?.supported;
+  if (!STRATA.st?.supported) return;
+  drawStrata();
+  const running = STRATA.st.job?.state === 'running';
+  clearTimeout(STRATA.timer);
+  if (S.view === 'server' && (running || STRATA.st.job?.state === 'done' && !STRATA.st.serving)) STRATA.timer = setTimeout(loadStrata, running ? 1500 : 4000);
+  if (STRATA.st.installed && !STRATA.cat && !STRATA.loadingCat && !STRATA.catErr) loadStrataCatalog();
+}
+
+async function loadStrataCatalog() {
+  STRATA.loadingCat = true; drawStrata();
+  try { STRATA.cat = await api('/api/strata/catalog'); STRATA.catErr = ''; } catch (e) { STRATA.catErr = e.message; }
+  STRATA.loadingCat = false;
+  const last = STRATA.st?.last;
+  if (!STRATA.pick && STRATA.cat?.rows?.length) {
+    STRATA.pick = STRATA.cat.rows.find((r) => r.family === last?.family && r.model === last?.model) || STRATA.cat.rows.find((r) => r.installed) || STRATA.cat.rows.find((r) => r.recommended) || STRATA.cat.rows.find((r) => r.verdict === 'fits') || STRATA.cat.rows[0];
+    if (last?.context) STRATA.ctx = last.context;
+    if (last?.vision) STRATA.vision = last.vision;
+  }
+  drawStrata();
+}
+
+async function strataAct(path, body, okMsg) {
+  try { STRATA.st = await api(path, body || {}); if (okMsg) toast(okMsg); } catch (e) { toast(e.message, 'err'); }
+  drawStrata(); setTimeout(loadStrata, 800);
+}
+
+function strataCtxLabel(n) { return n >= 1048576 && n % 1048576 === 0 ? (n / 1048576) + 'M' : n % 1024 === 0 ? (n / 1024) + 'K' : String(n); }
+
+function drawStrata() {
+  const box = $('#strata-box'); if (!box) return;
+  const st = STRATA.st; box.innerHTML = '';
+  if (!st) return;
+  const job = st.job;
+  const card = h('div.srv-card.strata');
+  box.append(card);
+  // tarefa em andamento (instalar ou iniciar)
+  if (job && (job.state === 'running' || job.state === 'error')) {
+    const pct = job.pct == null ? null : Math.max(0, Math.min(100, job.pct));
+    card.append(
+      h('div.strata-job-head', null,
+        job.state === 'running' ? h('span.spin', { html: svg('loader') }) : h('span', { html: svg('alert') }),
+        h('b', null, job.kind === 'install' ? L('Instalando o Strata') : L('Preparando e iniciando o modelo')),
+        h('span.spacer'),
+        job.state === 'running' ? h('button.btn.sm', { onclick: () => strataAct('/api/strata/cancel', {}, L('Cancelado')) }, L('Cancelar')) : null),
+      pct != null && job.state === 'running' ? h('div.strata-bar', null, h('div', { style: `width:${pct}%` })) : '',
+      job.state === 'error' ? h('div.srv-err', null, job.error) : '',
+      h('pre.strata-log', null, (job.lines || []).join('\n')));
+    if (job.state === 'running') return;
+  }
+  if (!st.installed) {
+    card.append(
+      h('p', null, L('Precisa de uma placa NVIDIA (RTX 20 ou mais nova) ou AMD Radeon com 12 GB ou mais, e de 40 a 80 GB livres em disco para o modelo. O studio usa o instalador oficial do Strata (sem administrador) e o terminal dele escolhe o motor certo para a sua placa.')),
+      h('div.strata-actions', null,
+        h('button.btn.primary', { onclick: () => strataAct('/api/strata/install', {}, L('Instalando o Strata...')) }, ic('download'), L('Instalar o Strata')),
+        h('a.btn', { href: 'https://github.com/' + st.repo, target: '_blank', rel: 'noopener' }, ic('external'), L('Sobre o Strata'))));
+    return;
+  }
+  // instalado: o que está servindo
+  const sv = st.serving;
+  card.append(h('div.strata-state', null,
+    h('span.dot' + (sv ? '.on' : '')),
+    sv ? h('span', null, h('b', null, sv.model), ' · ', L('servindo em {0}', sv.url), sv.context ? ' · ' + L('contexto {0}', strataCtxLabel(sv.context)) : '')
+      : h('span', null, L('Instalado'), st.version ? ' (' + st.version + ')' : '', ' · ', L('parado')),
+    h('span.spacer'),
+    sv && !st.provider ? h('button.btn.sm.primary', { onclick: () => strataAct('/api/strata/attach', {}, L('Pronto: escolha "Strata" na lista de modelos')) }, L('Usar nas conversas')) : '',
+    sv || st.running?.length ? h('button.btn.sm', { onclick: async (e) => { e.currentTarget.disabled = true; await strataAct('/api/strata/stop', {}, L('Strata parado')); } }, ic('stop'), L('Parar')) : ''));
+  if (sv && st.provider) card.append(h('p.small.muted', null, L('Nas conversas, escolha "Strata" na lista de modelos.')));
+  // catálogo
+  if (STRATA.loadingCat) { card.append(h('div.muted.small', null, L('Lendo o catálogo do Strata e a memória deste PC...'))); return; }
+  if (STRATA.catErr) { card.append(h('div.srv-err', null, STRATA.catErr), h('button.btn.sm', { onclick: () => { STRATA.catErr = ''; loadStrataCatalog(); } }, L('Tentar de novo'))); return; }
+  const cat = STRATA.cat; if (!cat) return;
+  const hw = [cat.gpus?.length ? cat.gpus.map((g) => g.name + (g.vram_gb ? ` (${g.vram_gb} GB)` : '')).join(', ') : L('nenhuma placa de vídeo reconhecida'), cat.ram_gb ? L('{0} GB de RAM', Math.round(cat.ram_gb)) : ''].filter(Boolean).join(' · ');
+  card.append(h('div.small.muted.strata-hw', null, L('Este PC: {0}', hw)));
+  if (cat.recommended && !cat.recommended.model && cat.recommended.why) card.append(h('div.small.muted', null, L('Sem recomendação automática: {0}', cat.recommended.why)));
+  const words = { fits: L('cabe'), tight: L('apertado: feche outros programas'), slower: L('pode ficar lento'), no: L('não cabe') };
+  const fams = [...new Set(cat.rows.map((r) => r.family_title))];
+  const list = h('div.strata-list');
+  for (const f of fams) {
+    list.append(h('div.strata-fam', null, f));
+    for (const r of cat.rows.filter((x) => x.family_title === f)) {
+      const sel = STRATA.pick && STRATA.pick.family === r.family && STRATA.pick.model === r.model;
+      list.append(h('button.strata-row' + (sel ? '.sel' : ''), { type: 'button', onclick: () => { STRATA.pick = r; drawStrata(); } },
+        h('span.strata-m', null, h('b', null, r.model), r.recommended ? h('span.tag.ok', null, L('recomendado')) : null, r.installed ? h('span.tag', null, L('baixado')) : null, r.experimental ? h('span.tag', null, L('experimental')) : null),
+        h('span.strata-about', null, r.about),
+        h('span.strata-size', null, r.installed ? '' : L('{0} GB', Math.round(r.download_gb))),
+        h('span.strata-fit.v-' + r.verdict, null, words[r.verdict] || r.words)));
+    }
+  }
+  card.append(list);
+  for (const u of cat.unavailable || []) card.append(h('div.small.muted', null, `${u.title}: ${u.why}`));
+  // opções e iniciar
+  const p = STRATA.pick;
+  if (p) {
+    const ctxSel = h('select.input', { onchange: (e) => { STRATA.ctx = e.currentTarget.value; } },
+      h('option', { value: '' }, L('Contexto padrão')),
+      (cat.contexts || []).map((c) => h('option', { value: strataCtxLabel(c).toLowerCase(), selected: STRATA.ctx === strataCtxLabel(c).toLowerCase() }, strataCtxLabel(c))));
+    const visSel = h('select.input', { onchange: (e) => { STRATA.vision = e.currentTarget.value; } },
+      [['off', L('Sem imagens')], ['cpu', L('Imagens (leitor na CPU)')], ['gpu', L('Imagens (leitor na placa)')]].map(([v, t]) => h('option', { value: v, selected: STRATA.vision === v }, t)));
+    card.append(h('div.strata-go', null,
+      h('label.small', null, L('Contexto'), ctxSel),
+      h('label.small', null, L('Imagens'), visSel),
+      h('span.spacer'),
+      h('button.btn.primary', {
+        onclick: async () => {
+          if (!p.installed && !(await confirmBox(L('Baixar {0} {1}? São cerca de {2} GB (mais o motor da sua placa, na primeira vez).', p.family_title, p.model, Math.round(p.download_gb)), L('Baixar e iniciar')))) return;
+          strataAct('/api/strata/launch', { family: p.family, model: p.model, context: STRATA.ctx, vision: STRATA.vision }, L('Iniciando o Strata...'));
+        },
+      }, ic('play'), p.installed ? L('Iniciar {0}', p.model) : L('Baixar e iniciar {0}', p.model))));
+    card.append(h('p.small.muted', null, L('Ao iniciar o Strata, o modelo do llama.cpp sai da memória para liberar a placa de vídeo.')));
+  }
 }
