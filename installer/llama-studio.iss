@@ -8,6 +8,12 @@
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
+; o campo de versão do Windows só aceita números (2.98.4): uma versão de teste (2.98.4-strata.1) usa a parte antes do hífen
+#if Pos("-", AppVersion) > 0
+  #define NumVersion Copy(AppVersion, 1, Pos("-", AppVersion) - 1)
+#else
+  #define NumVersion AppVersion
+#endif
 #ifndef SourceDir
   #define SourceDir "..\dist"
 #endif
@@ -43,7 +49,7 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 CloseApplications=force
 RestartApplications=no
-VersionInfoVersion={#AppVersion}
+VersionInfoVersion={#NumVersion}
 VersionInfoProductName={#AppName}
 VersionInfoDescription=Instalador do {#AppName}
 ChangesEnvironment=no
