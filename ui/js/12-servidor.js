@@ -998,6 +998,18 @@ function drawStrata() {
     sv && !st.provider ? h('button.btn.sm.primary', { onclick: () => strataAct('/api/strata/attach', {}, L('Pronto: escolha "Strata" na lista de modelos')) }, L('Usar nas conversas')) : '',
     sv || st.running?.length ? h('button.btn.sm', { onclick: async (e) => { e.currentTarget.disabled = true; await strataAct('/api/strata/stop', {}, L('Strata parado')); } }, ic('stop'), L('Parar')) : ''));
   if (sv && st.provider) card.append(h('p.small.muted', null, L('Nas conversas, escolha "Strata" na lista de modelos.')));
+  // diagnóstico: manda uma mensagem curtinha pelo mesmo caminho das conversas e mostra o erro exato
+  if (sv || st.provider) {
+    const out = h('div.small.strata-test' + (STRATA.test ? (STRATA.test.ok ? '.ok' : '.err') : ''), null, STRATA.test?.message || '');
+    card.append(h('div.strata-actions', null,
+      h('button.btn.sm', {
+        onclick: async (e) => {
+          const b = e.currentTarget; b.disabled = true; b.textContent = L('Testando... (pode levar alguns minutos)');
+          try { STRATA.test = await api('/api/strata/test', {}); } catch (x) { STRATA.test = { ok: false, message: x.message }; }
+          drawStrata();
+        },
+      }, ic('plug'), L('Testar conexão'))), STRATA.test ? out : '');
+  }
   // catálogo
   if (STRATA.loadingCat) { card.append(h('div.muted.small', null, L('Lendo o catálogo do Strata e a memória deste PC...'))); return; }
   if (STRATA.catErr) { card.append(h('div.srv-err', null, STRATA.catErr), h('button.btn.sm', { onclick: () => { STRATA.catErr = ''; loadStrataCatalog(); } }, L('Tentar de novo'))); return; }

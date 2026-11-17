@@ -392,7 +392,9 @@ pub async fn push_apis(app: &App) -> Result<Value, String> {
     if c.cloud.token.is_empty() {
         return Err(L!("Este PC não está vinculado.", "This PC isn't linked.").into());
     }
-    let list = serde_json::to_value(&c.api_providers).map_err(|e| e.to_string())?;
+    // as APIs deste PC (Strata, LM Studio... em 127.0.0.1) não fazem sentido na nuvem: lá o 127.0.0.1 é o contêiner
+    let list: Vec<_> = c.api_providers.iter().filter(|p| !crate::remote::is_loopback(&p.base)).collect();
+    let list = serde_json::to_value(&list).map_err(|e| e.to_string())?;
     let r = web()
         .post(format!("{}/hub/sync/apis", base(&c.cloud.url)))
         .header("authorization", format!("Bearer {}", c.cloud.token))

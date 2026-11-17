@@ -147,6 +147,38 @@ fn client() -> &'static reqwest::Client {
             .expect("cliente das APIs externas")
     })
 }
+/// A API está neste computador (127.0.0.1, localhost)? Ex.: o Strata, um LM Studio, um vLLM local.
+pub fn is_loopback(base: &str) -> bool {
+    let host = base.split("://").nth(1).unwrap_or(base).split(['/', '?']).next().unwrap_or("");
+    let host = host.rsplit_once('@').map(|x| x.1).unwrap_or(host);
+    let host = if host.starts_with('[') { host.split(']').next().unwrap_or("").trim_start_matches('[') } else { host.split(':').next().unwrap_or("") };
+    host.eq_ignore_ascii_case("localhost") || host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
+}
+
+/// Cliente para uma API neste computador: nunca passa pelo proxy do sistema (um proxy do Windows, de VPN ou de
+/// antivírus podia receber o 127.0.0.1 e a conexão falhava) e espera mais sem dados (modelos grandes divididos
+/// entre placa, RAM e SSD podem levar minutos lendo o prompt antes da primeira palavra).
+fn client_local() -> &'static reqwest::Client {
+    static C: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    C.get_or_init(|| {
+        reqwest::Client::builder()
+            .no_proxy()
+            .pool_idle_timeout(Duration::from_secs(8))
+            .connect_timeout(Duration::from_secs(10))
+            .read_timeout(Duration::from_secs(30 * 60))
+            .build()
+            .expect("cliente das APIs locais")
+    })
+}
+
+fn client_for(base: &str) -> &'static reqwest::Client {
+    if is_loopback(base) {
+        client_local()
+    } else {
+        client()
+    }
+}
+
 /// `side`: pedido que não é a conversa (explorador, auditor, tarefa de fundo); na fila do NIM ele cede a vez.
 async fn send_with_retries(app: &App, c: &ApiProvider, model: &str, body_str: &str, max_retries: u32, side: bool, rotating: bool) -> Result<reqwest::Response, SendErr> {
     let mut attempt = 0u32;
@@ -173,7 +205,7 @@ async fn send_with_retries(app: &App, c: &ApiProvider, model: &str, body_str: &s
                 Err(crate::limits::Deny::Daily(d)) => return Err(SendErr::Daily(d, label(c))),
             }
         }
-        let mut rb = client()
+        let mut rb = client_for(&c.base)
             .post(endpoint(&c.base, "chat/completions"))
             .timeout(Duration::from_secs(45 * 60))
             .header("Content-Type", "application/json")
@@ -254,7 +286,7 @@ pub async fn call_provider_direct(app: &App, provider_id: &str, prompt: &str) ->
     }
 }
 /// O erro com as causas (o "error sending request" sozinho não diz se foi DNS, TLS, conexão recusada...).
-fn chain(e: reqwest::Error) -> String {
+pub fn chain(e: reqwest::Error) -> String {
     let e = e.without_url();
     let mut out = e.to_string();
     let mut src = std::error::Error::source(&e);
@@ -603,7 +635,7 @@ pub async fn warm(app: &App, id: &str) {
     let Some(c) = provider(app, id) else { return };
     let Ok(u) = reqwest::Url::parse(c.base.trim()) else { return };
     let Ok(root) = u.join("/") else { return };
-    let _ = client().head(root).timeout(Duration::from_secs(5)).header("User-Agent", "llama-studio").send().await;
+    let _ = client_for(root.as_str()).head(root).timeout(Duration::from_secs(5)).header("User-Agent", "llama-studio").send().await;
 }
 
 /// Testa se a API responde (ping leve). Retorna Ok se a API está online.
@@ -622,7 +654,7 @@ pub async fn ping(app: &App, id: &str) -> Result<(), String> {
     };
     let mut last = String::new();
     for u in urls {
-        let mut rb = client().get(&u).timeout(Duration::from_secs(10)).header("User-Agent", "llama-studio");
+        let mut rb = client_for(&u).get(&u).timeout(Duration::from_secs(10)).header("User-Agent", "llama-studio");
         if !c.key.trim().is_empty() {
             rb = rb.bearer_auth(c.key.trim());
         }
@@ -641,7 +673,7 @@ pub async fn models(app: &App, id: &str) -> Result<Vec<String>, String> {
     if c.base.trim().is_empty() {
         return Err(L!("Informe o endereço da API.", "Enter the API address.").into());
     }
-    let mut rb = client().get(endpoint(&c.base, "models")).timeout(Duration::from_secs(20)).header("User-Agent", "llama-studio");
+    let mut rb = client_for(&c.base).get(endpoint(&c.base, "models")).timeout(Duration::from_secs(20)).header("User-Agent", "llama-studio");
     if !c.key.trim().is_empty() {
         rb = rb.bearer_auth(c.key.trim());
     }
@@ -665,6 +697,16 @@ pub async fn models(app: &App, id: &str) -> Result<Vec<String>, String> {
 #[cfg(test)]
 mod t {
     use super::*;
+    #[test]
+    fn loopback() {
+        assert!(is_loopback("http://127.0.0.1:8095/v1"));
+        assert!(is_loopback("http://localhost:1234/v1"));
+        assert!(is_loopback("http://[::1]:8080/v1"));
+        assert!(!is_loopback("https://api.openai.com/v1"));
+        assert!(!is_loopback("http://192.168.0.5:8080/v1"));
+        assert!(!is_loopback("http://127.0.0.1.evil.com/v1"));
+    }
+
     #[test]
     fn so_nvidia_e_limitado() {
         assert!(is_nim(&ApiProvider { id: "nvidia".into(), ..Default::default() }));

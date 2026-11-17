@@ -421,7 +421,8 @@ pub async fn launch(app: Arc<App>, family: String, model: String, context: Strin
                 }
                 tokio::time::sleep(Duration::from_secs(3)).await;
             };
-            connect(&app, &id, ctx, img);
+            let k = key().await;
+            connect(&app, &id, ctx, img, k);
             push_line(&LF!("Pronto: {id} está servindo. Escolha \"Strata\" na lista de modelos.", "Ready: {id} is serving. Pick \"Strata\" in the model list."));
             Ok(())
         }
@@ -432,7 +433,7 @@ pub async fn launch(app: Arc<App>, family: String, model: String, context: Strin
 }
 
 /// Cria (ou atualiza) a API "Strata" do studio apontando para o servidor local.
-fn connect(app: &App, model: &str, ctx: u64, vision: bool) {
+fn connect(app: &App, model: &str, ctx: u64, vision: bool, key: Option<String>) {
     {
         let mut c = app.config.write().unwrap();
         let p = ApiProvider {
@@ -442,6 +443,7 @@ fn connect(app: &App, model: &str, ctx: u64, vision: bool) {
             model: model.into(),
             context: if ctx >= 1024 { ctx.min(u32::MAX as u64) as u32 } else { 131072 },
             vision,
+            key: key.clone().unwrap_or_default(),
             ..Default::default()
         };
         match c.api_providers.iter_mut().find(|x| x.id == PROVIDER_ID) {
@@ -450,6 +452,8 @@ fn connect(app: &App, model: &str, ctx: u64, vision: bool) {
                 x.model = p.model;
                 x.context = p.context;
                 x.vision = p.vision;
+                // a chave segue a do Strata (com ou sem); sem chave lá, a API fica sem também
+                x.key = p.key;
             }
             None => c.api_providers.push(p),
         }
@@ -460,8 +464,66 @@ fn connect(app: &App, model: &str, ctx: u64, vision: bool) {
 /// Liga a API "Strata" a um servidor que já está servindo na porta do studio.
 pub async fn attach(app: &App) -> Result<(), String> {
     let (id, ctx, img) = served(app).await.ok_or(LF!("Nenhum Strata servindo em 127.0.0.1:{PORT}.", "No Strata serving at 127.0.0.1:{PORT}."))?;
-    connect(app, &id, ctx, img);
+    let k = key().await;
+    connect(app, &id, ctx, img, k);
     Ok(())
+}
+
+/// A chave da API do Strata, se ele estiver servindo com uma (vem do config do modelo ou do preset).
+async fn key() -> Option<String> {
+    let exe = cli()?;
+    let mut c = command(&exe);
+    c.args(["launch", "--show-key"]).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).kill_on_drop(true);
+    let o = tokio::time::timeout(Duration::from_secs(30), c.output()).await.ok()?.ok()?;
+    if !o.status.success() {
+        return None;
+    }
+    let out = String::from_utf8_lossy(&o.stdout);
+    let k = out.lines().map(str::trim).filter(|l| !l.is_empty()).last()?.to_string();
+    (k.len() >= 8 && k.len() <= 300 && k.chars().all(|c| c.is_ascii_alphanumeric() || "-_.~+/=".contains(c))).then_some(k)
+}
+
+/// Manda uma mensagem curtinha pela API "Strata" (como as conversas fazem) e diz o que aconteceu.
+pub async fn test(app: &App) -> Value {
+    let cfg = app.cfg();
+    let Some(p) = cfg.api_providers.iter().find(|p| p.id == PROVIDER_ID).cloned() else {
+        return json!({"ok": false, "message": L!("A API \"Strata\" ainda não existe: inicie um modelo ou toque em \"Usar nas conversas\".", "The \"Strata\" API doesn't exist yet: start a model or tap \"Use in chats\".")});
+    };
+    let http = reqwest::Client::builder().no_proxy().connect_timeout(Duration::from_secs(5)).build().unwrap();
+    let base = p.base.trim_end_matches('/').to_string();
+    // 1) o servidor responde?
+    let models = http.get(format!("{base}/models")).bearer_auth(p.key.trim()).timeout(Duration::from_secs(10)).send().await;
+    let m = match models {
+        Err(e) => return json!({"ok": false, "step": "models", "message": LF!("Não conectou em {base}: {}", "Couldn't connect to {base}: {}", crate::remote::chain(e))}),
+        Ok(r) if !r.status().is_success() => {
+            let st = r.status().as_u16();
+            let t = r.text().await.unwrap_or_default();
+            return json!({"ok": false, "step": "models", "message": LF!("{base}/models respondeu {st}: {}", "{base}/models answered {st}: {}", t.chars().take(400).collect::<String>())});
+        }
+        Ok(r) => serde_json::from_slice::<Value>(&r.bytes().await.unwrap_or_default()).unwrap_or_default(),
+    };
+    let served = m["data"][0]["id"].as_str().unwrap_or("").to_string();
+    if served.is_empty() {
+        return json!({"ok": false, "step": "models", "message": L!("O Strata respondeu, mas ainda está carregando o modelo. Espere e teste de novo.", "Strata answered, but it's still loading the model. Wait and test again.")});
+    }
+    // 2) uma resposta de verdade (pode demorar: o modelo lê o prompt antes)
+    let t0 = Instant::now();
+    let body = json!({"model": p.model, "messages": [{"role": "user", "content": "Reply with just: ok"}], "max_tokens": 8, "stream": false});
+    let r = http.post(format!("{base}/chat/completions")).bearer_auth(p.key.trim()).header("content-type", "application/json").body(body.to_string()).timeout(Duration::from_secs(600)).send().await;
+    match r {
+        Err(e) => json!({"ok": false, "step": "chat", "message": LF!("A conversa não completou: {}", "The chat didn't complete: {}", crate::remote::chain(e))}),
+        Ok(r) => {
+            let st = r.status().as_u16();
+            let t = r.text().await.unwrap_or_default();
+            if !(200..300).contains(&st) {
+                return json!({"ok": false, "step": "chat", "message": LF!("O Strata respondeu {st}: {}", "Strata answered {st}: {}", t.chars().take(500).collect::<String>())});
+            }
+            let v: Value = serde_json::from_str(&t).unwrap_or_default();
+            let txt = v["choices"][0]["message"]["content"].as_str().unwrap_or("").trim().chars().take(80).collect::<String>();
+            let mismatch = if served != p.model { LF!(" (o Strata serve \"{served}\" e a API pede \"{}\": toque em Usar nas conversas)", " (Strata serves \"{served}\" and the API asks for \"{}\": tap Use in chats)", p.model) } else { String::new() };
+            json!({"ok": true, "message": LF!("Funcionou em {:.1} s: \"{txt}\"{mismatch}", "Worked in {:.1} s: \"{txt}\"{mismatch}", t0.elapsed().as_secs_f64())})
+        }
+    }
 }
 
 pub async fn stop() -> Result<Value, String> {

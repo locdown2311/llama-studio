@@ -72,11 +72,13 @@ pub fn remote_profiles(app: &App) -> Vec<Profile> {
     app.cfg().api_providers.iter()
         .filter(|p| crate::remote::ready(p))
         .map(|p| {
-            // nome customizado no painel; sem nome, mostra o id do modelo
+            // nome customizado no painel; sem nome, mostra o id do modelo. API neste PC (Strata, LM Studio em
+            // 127.0.0.1) leva o ícone de computador, não o de nuvem
+            let icon = if crate::remote::is_loopback(&p.base) { "🖥️" } else { "☁️" };
             let name = if p.name.trim().is_empty() {
-                format!("☁️ {}", p.model)
+                format!("{icon} {}", p.model)
             } else {
-                format!("☁️ {}", p.name.trim())
+                format!("{icon} {}", p.name.trim())
             };
             Profile {
                 id: format!("api_{}", p.id),

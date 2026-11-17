@@ -105,6 +105,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/strata/stop", post(strata_stop))
         .route("/api/strata/cancel", post(strata_cancel))
         .route("/api/strata/attach", post(strata_attach))
+        .route("/api/strata/test", post(strata_test))
         .route("/api/plugins", get(plugins_list))
         .route("/api/plugins/add", post(plugins_add))
         .route("/api/plugins/market/remove", post(plugins_market_remove))
@@ -1189,6 +1190,9 @@ async fn strata_stop(State(app): S) -> Res {
 async fn strata_cancel(State(app): S) -> Res {
     crate::strata::cancel();
     ok(crate::strata::status(&app).await)
+}
+async fn strata_test(State(app): S) -> Res {
+    ok(crate::strata::test(&app).await)
 }
 async fn strata_attach(State(app): S) -> Res {
     crate::strata::attach(&app).await.map_err(bad)?;

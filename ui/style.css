@@ -2037,3 +2037,6 @@ details.verify.warn summary svg { color: var(--warn); }
   .strata-about { grid-column: 1 / -1; order: 3; }
   .strata-size { display: none; }
 }
+.strata-test { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); white-space: pre-wrap; word-break: break-word; }
+.strata-test.ok { border-color: color-mix(in srgb, var(--ok, #2f9e58) 50%, var(--line)); color: var(--ok, #2f9e58); }
+.strata-test.err { border-color: color-mix(in srgb, var(--danger, #d64545) 50%, var(--line)); color: var(--danger, #d64545); }

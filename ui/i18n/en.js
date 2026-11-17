@@ -2460,4 +2460,6 @@ const I18N_EN = {
   "Iniciar {0}": "Start {0}",
   "Baixar e iniciar {0}": "Download and start {0}",
   "Ao iniciar o Strata, o modelo do llama.cpp sai da memória para liberar a placa de vídeo.": "Starting Strata unloads the llama.cpp model to free the graphics card.",
+  "Testando... (pode levar alguns minutos)": "Testing... (may take a few minutes)",
+  "Testar conexão": "Test connection",
 };
