@@ -31,6 +31,17 @@ fn pick_model(d: &Path, want: &str) -> Option<String> {
     ["small", "base", "large-v3-turbo", "medium"].iter().find(|m| model_ok(d, m)).map(|m| m.to_string())
 }
 
+/// Para a transcrição da base de conhecimento (que roda numa thread, só com a pasta de dados).
+pub fn whisper_dir(root: &Path) -> PathBuf {
+    root.join("whisper").join("whisper.cpp")
+}
+pub fn whisper_exe(d: &Path) -> Option<PathBuf> {
+    exe(d)
+}
+pub fn whisper_model(d: &Path, want: &str) -> Option<String> {
+    pick_model(d, want)
+}
+
 pub fn status(app: &App) -> Value {
     let d = dir(app);
     let models: Vec<&str> = MODELS.iter().copied().filter(|m| model_ok(&d, m)).collect();

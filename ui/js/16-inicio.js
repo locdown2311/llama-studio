@@ -101,6 +101,7 @@ async function init() {
     if (S.info.cloud) $$('.nav-item[data-view="server"]').forEach((b) => b.remove());
     // nuvem: no celular a barra fica só com o essencial (o resto vai para o menu +)
     document.documentElement.classList.toggle('cloud', !!S.info.cloud);
+    applySimple();
     // idioma: o programa guarda o escolhido (instalador ou menu); a interface segue, e o programa aprende o da interface
     if (S.info.lang && S.info.lang !== LANG && !S.settings.lang) { setLang(S.info.lang); return; }
     if (!S.info.lang || (S.settings.lang && S.info.lang !== S.settings.lang)) api('/api/config', { lang: LANG }).catch(() => {});

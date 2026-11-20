@@ -392,7 +392,7 @@ async function runAgent(conv) {
     // conversa de um projeto de vídeo: a equipe escreve as cenas (video_scenes)
     if (projectOf(conv)?.video && !groups.includes('video')) groups.push('video');
     // base de conhecimento: vale quando o projeto ligou; outras conversas: só em projeto com mais de uma
-    for (const [g, on] of [['kb', kbOn(conv)], ['peers', peersOn(conv) && S.settings.tools.peers !== false]]) {
+    for (const [g, on] of [['kb', kbOn(conv)], ['peers', peersOn(conv) && S.settings.tools.peers !== false], ['memory', memOn()]]) {
       const at = groups.indexOf(g);
       if (on && at < 0) groups.push(g);
       if (!on && at >= 0) groups.splice(at, 1);
@@ -486,6 +486,7 @@ async function runAgent(conv) {
       proj?.instructions?.trim() ? L('# Instruções do projeto "{0}"\n{1}', proj.name, proj.instructions.trim()) : '',
       conv.hookStart || '',
       askLevelNote(conv),
+      groups.includes('memory') ? memNote(conv) : '',
       conv.factsNote || '',
       ctx.text,
       catalogSys,

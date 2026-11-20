@@ -70,9 +70,170 @@ fn ext_of(p: &Path) -> String {
     p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase()
 }
 
-fn wanted(p: &Path) -> bool {
+const MEDIA_EXT: &[&str] = &["mp3", "wav", "m4a", "ogg", "opus", "flac", "aac", "wma", "mp4", "mkv", "webm", "mov", "avi", "m4v"];
+const MAX_MEDIA: u64 = 4 * 1024 * 1024 * 1024;
+
+fn is_media(p: &Path) -> bool {
+    MEDIA_EXT.contains(&ext_of(p).as_str())
+}
+
+/// Documento que a base lê direto (texto, código, PDF, Word): usado também nos repositórios do GitHub.
+pub fn wanted_doc(p: &Path) -> bool {
     let e = ext_of(p);
     e == "pdf" || e == "docx" || TEXT_EXT.contains(&e.as_str())
+}
+
+fn wanted(p: &Path) -> bool {
+    wanted_doc(p) || is_media(p)
+}
+
+pub fn skip_dir(n: &str) -> bool {
+    SKIP.iter().any(|s| n.eq_ignore_ascii_case(s)) || n.starts_with('.')
+}
+
+/* ---------------------------------------------------------------- áudio e vídeo: transcrição com o Whisper
+   A transcrição roda numa fila, uma de cada vez, numa thread própria (pode levar minutos). O texto fica em
+   dados/conhecimento/<projeto>/transcricoes/<hash>.txt; a próxima busca ou "Indexar agora" já o encontra. */
+
+const PENDING: &str = "\u{23f3}";
+
+struct MediaJob {
+    src: PathBuf,
+    out: PathBuf,
+}
+
+struct MediaQueue {
+    jobs: std::collections::VecDeque<MediaJob>,
+    running: bool,
+    current: String,
+}
+
+fn media_q() -> &'static Mutex<MediaQueue> {
+    static Q: OnceLock<Mutex<MediaQueue>> = OnceLock::new();
+    Q.get_or_init(|| Mutex::new(MediaQueue { jobs: Default::default(), running: false, current: String::new() }))
+}
+
+fn fnv(s: &str) -> String {
+    let mut h: u64 = 1469598103934665603;
+    for b in s.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(1099511628211);
+    }
+    format!("{h:016x}")
+}
+
+fn media_text(app: &App, id: &str, p: &Path, mt: u64, size: u64) -> Result<String, String> {
+    let out = app.root.join("conhecimento").join(id).join("transcricoes").join(format!("{}.txt", fnv(&format!("{}|{mt}|{size}", p.display()))));
+    if let Ok(t) = std::fs::read_to_string(&out) {
+        return Ok(t);
+    }
+    if let Ok(e) = std::fs::read_to_string(out.with_extension("err")) {
+        return Err(e);
+    }
+    let mut q = media_q().lock().unwrap_or_else(|e| e.into_inner());
+    let queued = q.jobs.iter().any(|j| j.out == out) || q.current == p.to_string_lossy();
+    if !queued {
+        q.jobs.push_back(MediaJob { src: p.to_path_buf(), out });
+    }
+    if !q.running {
+        q.running = true;
+        let root = app.root.clone();
+        std::thread::spawn(move || media_worker(root));
+    }
+    Err(PENDING.into())
+}
+
+fn media_worker(root: PathBuf) {
+    loop {
+        let job = {
+            let mut q = media_q().lock().unwrap_or_else(|e| e.into_inner());
+            match q.jobs.pop_front() {
+                Some(j) => {
+                    q.current = j.src.to_string_lossy().to_string();
+                    j
+                }
+                None => {
+                    q.running = false;
+                    q.current.clear();
+                    return;
+                }
+            }
+        };
+        let _ = std::fs::create_dir_all(job.out.parent().unwrap_or(&root));
+        match transcribe_file(&root, &job.src) {
+            Ok(t) => {
+                let _ = std::fs::write(&job.out, t);
+            }
+            Err(e) => {
+                let _ = std::fs::write(job.out.with_extension("err"), e);
+            }
+        }
+    }
+}
+
+fn hide_window(_c: &mut std::process::Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        _c.creation_flags(crate::CREATE_NO_WINDOW);
+    }
+}
+
+fn transcribe_file(root: &Path, src: &Path) -> Result<String, String> {
+    let wd = crate::dictate::whisper_dir(root);
+    let bin = crate::dictate::whisper_exe(&wd).ok_or(L!("Para transcrever áudio e vídeo, instale o Whisper: toque uma vez no microfone da caixa de mensagem.", "To transcribe audio and video, install Whisper: tap the microphone in the message box once."))?;
+    let model = crate::dictate::whisper_model(&wd, "").ok_or(L!("Falta o modelo do Whisper: toque uma vez no microfone da caixa de mensagem.", "The Whisper model is missing: tap the microphone in the message box once."))?;
+    let ff = crate::bins::which("ffmpeg").ok_or(L!("Para transcrever, instale o FFmpeg em Utilitários.", "To transcribe, install FFmpeg in Utilities."))?;
+    let tmp = std::env::temp_dir().join(format!("llama-studio-kb-{}-{}.wav", std::process::id(), crate::app::now_ms()));
+    let mut c = std::process::Command::new(ff);
+    c.args(["-v", "error", "-y", "-i"]).arg(src).args(["-vn", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le"]).arg(&tmp).stdin(std::process::Stdio::null());
+    hide_window(&mut c);
+    let o = c.output().map_err(|e| e.to_string())?;
+    if !o.status.success() || !tmp.is_file() {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(L!("Não consegui extrair o áudio (o arquivo tem som?).", "Could not extract the audio (does the file have sound?).").into());
+    }
+    let threads = std::thread::available_parallelism().map(|n| (n.get() / 2).clamp(2, 8)).unwrap_or(4).to_string();
+    let mut c = std::process::Command::new(&bin);
+    c.arg("-m").arg(wd.join(format!("ggml-{model}.bin"))).arg("-f").arg(&tmp).args(["-l", "auto", "-np", "-t", &threads]).current_dir(&wd).stdin(std::process::Stdio::null());
+    hide_window(&mut c);
+    let o = c.output();
+    let _ = std::fs::remove_file(&tmp);
+    let o = o.map_err(|e| e.to_string())?;
+    if !o.status.success() {
+        return Err(LF!("O Whisper falhou: {}", "Whisper failed: {}", String::from_utf8_lossy(&o.stderr).lines().last().unwrap_or("").trim()));
+    }
+    // "[00:01:02.000 --> 00:01:05.000]  texto" -> "[01:02] texto"
+    let mut lines = vec![];
+    for l in String::from_utf8_lossy(&o.stdout).lines() {
+        let l = l.trim();
+        let (ts, text) = match l.strip_prefix('[').and_then(|r| r.split_once(']')) {
+            Some((ts, t)) => (ts.split(" --> ").next().unwrap_or(""), t.trim()),
+            None => ("", l),
+        };
+        if text.is_empty() || text.starts_with('[') || text.starts_with('(') {
+            continue;
+        }
+        let p: Vec<&str> = ts.split([':', '.']).collect();
+        let stamp = match p.as_slice() {
+            [h, m, s, _] if *h != "00" => format!("[{h}:{m}:{s}] "),
+            [_, m, s, _] => format!("[{m}:{s}] "),
+            _ => String::new(),
+        };
+        lines.push(format!("{stamp}{text}"));
+    }
+    if lines.is_empty() {
+        return Err(L!("O Whisper não achou fala nesse arquivo.", "Whisper found no speech in this file.").into());
+    }
+    let name = src.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    Ok(format!("{}
+
+{}", LF!("Transcrição de {name}", "Transcript of {name}"), lines.join("\n")))
+}
+
+fn media_status() -> Value {
+    let q = media_q().lock().unwrap_or_else(|e| e.into_inner());
+    json!({ "queued": q.jobs.len(), "current": Path::new(&q.current).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default() })
 }
 
 fn strip_tags(s: &str) -> String {
@@ -257,7 +418,7 @@ fn scan(sources: &[String]) -> (Vec<(PathBuf, u64, u64)>, Vec<String>) {
         }
         let walker = walkdir::WalkDir::new(&p).max_depth(12).into_iter().filter_entry(|e| {
             let n = e.file_name().to_string_lossy();
-            !(e.file_type().is_dir() && e.depth() > 0 && (SKIP.iter().any(|s| n.eq_ignore_ascii_case(s)) || n.starts_with('.')))
+            !(e.file_type().is_dir() && e.depth() > 0 && skip_dir(&n))
         });
         for e in walker.flatten() {
             if out.len() >= MAX_FILES {
@@ -290,11 +451,25 @@ fn refresh(app: &App, id: &str, sources: &[String], idx: &mut Index) -> Value {
     for (p, mt, size) in &files {
         let key = p.to_string_lossy().to_string();
         keep.insert(key.clone());
-        if idx.files.get(&key).is_some_and(|f| f.mtime == *mt && f.size == *size) {
+        // transcrição na fila: confere de novo a cada passada (ela termina sozinha)
+        if idx.files.get(&key).is_some_and(|f| f.mtime == *mt && f.size == *size && f.err != PENDING) {
             continue;
         }
-        let limit = if matches!(ext_of(p).as_str(), "pdf" | "docx") { MAX_DOC } else { MAX_TEXT };
-        let entry = if *size > limit {
+        let limit = if is_media(p) { MAX_MEDIA } else if matches!(ext_of(p).as_str(), "pdf" | "docx") { MAX_DOC } else { MAX_TEXT };
+        let entry = if is_media(p) && *size <= limit {
+            match media_text(app, id, p, *mt, *size) {
+                Ok(t) => FileEntry { mtime: *mt, size: *size, err: String::new(), chunks: chunks_of(&t, false) },
+                Err(e) => {
+                    // ainda na fila: não conta como mudança (não regrava o índice a cada busca)
+                    let same = idx.files.get(&key).is_some_and(|f| f.err == e);
+                    idx.files.insert(key, FileEntry { mtime: *mt, size: *size, err: e, chunks: vec![] });
+                    if !same {
+                        changed += 1;
+                    }
+                    continue;
+                }
+            }
+        } else if *size > limit {
             FileEntry { mtime: *mt, size: *size, err: "grande demais".into(), chunks: vec![] }
         } else {
             match extract(p) {
@@ -317,9 +492,12 @@ fn refresh(app: &App, id: &str, sources: &[String], idx: &mut Index) -> Value {
         }
     }
     let chunks: usize = idx.files.values().map(|f| f.chunks.len()).sum();
-    let errors: Vec<Value> = idx.files.iter().filter(|(_, f)| !f.err.is_empty()).take(20).map(|(k, f)| json!({"path": k, "error": f.err})).collect();
+    let errors: Vec<Value> = idx.files.iter().filter(|(_, f)| !f.err.is_empty() && f.err != PENDING).take(20).map(|(k, f)| json!({"path": k, "error": f.err})).collect();
+    let pending = idx.files.values().filter(|f| f.err == PENDING).count();
     json!({
         "files": idx.files.values().filter(|f| f.err.is_empty()).count(),
+        "transcribing": pending,
+        "media": media_status(),
         "chunks": chunks,
         "chars": idx.files.values().flat_map(|f| f.chunks.iter()).map(|c| c.t.len()).sum::<usize>(),
         "changed": changed,
@@ -365,25 +543,45 @@ fn sources_of(v: &Value) -> Vec<String> {
     v.get("sources").and_then(Value::as_array).map(|a| a.iter().filter_map(|x| x.as_str()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).take(50).collect()).unwrap_or_default()
 }
 
+/// Links viram pastas baixadas (kbfontes); devolve as fontes locais e o resumo de cada link.
+async fn resolve_sources(app: &App, id: &str, sources: Vec<String>, force: bool) -> (Vec<String>, Vec<Value>) {
+    let mut local = vec![];
+    let mut web = vec![];
+    for s in sources {
+        if crate::kbfontes::is_url(&s) {
+            let m = crate::kbfontes::materialize(app, id, &s, force).await;
+            local.push(crate::kbfontes::dir_for(app, id, &s).to_string_lossy().to_string());
+            web.push(json!({ "url": s, "kind": m["kind"], "title": m["title"], "files": m["files"], "error": m["error"], "fetched": m["fetched"] }));
+        } else {
+            local.push(s);
+        }
+    }
+    (local, web)
+}
+
 pub async fn status(app: std::sync::Arc<App>, v: Value) -> Result<Value, String> {
     let id = safe_id(v.get("id").and_then(Value::as_str).unwrap_or("")).ok_or("id inválido")?;
-    let sources = sources_of(&v);
-    tokio::task::spawn_blocking(move || with_index(&app, &id, |idx| refresh(&app, &id, &sources, idx))).await.map_err(|e| e.to_string())
+    let force = v.get("force").and_then(Value::as_bool).unwrap_or(false);
+    let (sources, web) = resolve_sources(&app, &id, sources_of(&v), force).await;
+    let mut r = tokio::task::spawn_blocking(move || with_index(&app, &id, |idx| refresh(&app, &id, &sources, idx))).await.map_err(|e| e.to_string())?;
+    r["web"] = json!(web);
+    Ok(r)
 }
 
 pub async fn clear(app: std::sync::Arc<App>, v: Value) -> Result<Value, String> {
     let id = safe_id(v.get("id").and_then(Value::as_str).unwrap_or("")).ok_or("id inválido")?;
     store().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
     let _ = std::fs::remove_file(index_file(&app, &id));
+    let _ = std::fs::remove_dir_all(app.root.join("conhecimento").join(&id));
     Ok(json!({"ok": true}))
 }
 
 pub async fn search(app: std::sync::Arc<App>, v: Value) -> Result<Value, String> {
     let id = safe_id(v.get("id").and_then(Value::as_str).unwrap_or("")).ok_or("id inválido")?;
-    let sources = sources_of(&v);
     let query = v.get("query").and_then(Value::as_str).unwrap_or("").to_string();
     let k = v.get("k").and_then(Value::as_u64).unwrap_or(6).clamp(1, 15) as usize;
     let only = v.get("path").and_then(Value::as_str).unwrap_or("").to_lowercase();
+    let (sources, _) = resolve_sources(&app, &id, sources_of(&v), false).await;
     tokio::task::spawn_blocking(move || {
         with_index(&app, &id, |idx| {
             let stats = refresh(&app, &id, &sources, idx);
@@ -443,7 +641,7 @@ pub async fn search(app: std::sync::Arc<App>, v: Value) -> Result<Value, String>
                 }
                 *c += 1;
                 let ch = &idx.files[p].chunks[*ci as usize];
-                hits.push(json!({"path": p, "line": ch.l, "part": ci + 1, "of": idx.files[p].chunks.len(), "score": (s * 100.0).round() / 100.0, "text": ch.t}));
+                hits.push(json!({"path": p, "url": crate::kbfontes::url_of(&app, &id, p), "line": ch.l, "part": ci + 1, "of": idx.files[p].chunks.len(), "score": (s * 100.0).round() / 100.0, "text": ch.t}));
                 if hits.len() >= k {
                     break;
                 }

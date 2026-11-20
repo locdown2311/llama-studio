@@ -98,6 +98,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/locate", post(locate_h))
         .route("/api/remember", post(remember))
         .route("/api/stat", post(stat))
+        .route("/api/schedules/state", get(sched_state))
+        .route("/api/schedules/run", post(sched_run))
         .route("/api/kb/status", post(kb_status))
         .route("/api/kb/search", post(kb_search))
         .route("/api/kb/clear", post(kb_clear))
@@ -1175,6 +1177,13 @@ async fn stat(State(app): S, b: Bytes) -> Res {
 async fn plugins_changed(app: &Arc<App>) -> Res {
     app.mcp.sync(&app.http, &app.mcp_file()).await;
     ok(crate::plugins::summary(&app.root))
+}
+async fn sched_state(State(app): S) -> Res {
+    ok(crate::agenda::state(&app))
+}
+async fn sched_run(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    ok(crate::agenda::run_now(&app, st(&v, "id")).map_err(bad)?)
 }
 async fn kb_status(State(app): S, b: Bytes) -> Res {
     ok(crate::kb::status(app, body(&b)).await.map_err(bad)?)

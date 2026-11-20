@@ -17,12 +17,14 @@ async function runSearchKnowledge(tctx, args) {
   const query = String(args?.query || '').trim();
   if (!query) return { content: L('Passe query com as palavras a procurar.'), isError: true };
   const r = await api('/api/kb/search', { id: p.id, sources, query, k: Number(args?.k) || 6, path: String(args?.path || '') }, { signal: tctx.signal });
-  if (!r.hits.length) return { content: L('Nada encontrado na base para "{0}" ({1} documentos, {2} trechos). Tente outras palavras, sinônimos ou termos mais específicos.', query, r.stats.files, r.stats.chunks) };
+  const tr = r.stats.transcribing ? L(' ({0} gravação(ões) ainda sendo transcrita(s): tente de novo daqui a pouco)', r.stats.transcribing) : '';
+  if (!r.hits.length) return { content: L('Nada encontrado na base para "{0}" ({1} documentos, {2} trechos). Tente outras palavras, sinônimos ou termos mais específicos.', query, r.stats.files, r.stats.chunks) + tr };
   const out = r.hits.map((x, i) => {
-    const where = x.line ? L('{0}, linha {1}', x.path, x.line) : L('{0}, parte {1} de {2}', x.path, x.part, x.of);
+    const src = x.url || x.path;
+    const where = x.url ? src : x.line ? L('{0}, linha {1}', src, x.line) : L('{0}, parte {1} de {2}', src, x.part, x.of);
     return `[${i + 1}] ${where}\n${x.text}`;
   });
-  return { content: L('{0} trecho(s) da base de conhecimento para "{1}":\n\n', r.hits.length, query) + out.join('\n\n---\n\n') };
+  return { content: L('{0} trecho(s) da base de conhecimento para "{1}":\n\n', r.hits.length, query) + out.join('\n\n---\n\n') + tr };
 }
 
 /** Parte "Base de conhecimento" do formulário do projeto. Devolve o elemento e um leitor do estado. */
@@ -35,13 +37,14 @@ function kbEditor(p) {
     const sw = h('input', { type: 'checkbox', checked: st.on });
     sw.addEventListener('change', () => { st.on = sw.checked; draw(); });
     box.append(h('label.kb-on', null, sw, h('span', null, L('Ligar a base de conhecimento'))),
-      h('small.muted', null, L('O modelo procura nos documentos das fontes abaixo (texto, Markdown, código, HTML, Word e PDF) e cita de onde tirou. O índice se atualiza sozinho quando os arquivos mudam.')));
+      h('small.muted', null, L('O modelo procura nos documentos das fontes abaixo e cita de onde tirou: texto, Markdown, código, HTML, Word, PDF, áudio e vídeo (transcritos pelo Whisper) e links (sites, repositórios do GitHub e vídeos do YouTube). O índice se atualiza sozinho quando os arquivos mudam.')));
     if (!st.on) return;
     const dirSw = h('input', { type: 'checkbox', checked: st.dir });
     dirSw.addEventListener('change', () => { st.dir = dirSw.checked; });
     box.append(h('label.kb-src', null, dirSw, h('span', null, L('A pasta do projeto'))));
     for (const x of st.paths) {
-      box.append(h('div.kb-src', null, ic('file'), h('span.mono', { title: x }, x),
+      const web = /^https?:\/\//i.test(x);
+      box.append(h('div.kb-src', null, ic(web ? 'globe' : 'file'), h('span.mono', { title: x }, x),
         h('button.icon-btn.sm', { type: 'button', title: L('Remover'), 'aria-label': L('Remover'), html: svg('x'), onclick: () => { st.paths = st.paths.filter((y) => y !== x); draw(); } })));
     }
     box.append(h('div.kb-actions', null,
@@ -49,7 +52,22 @@ function kbEditor(p) {
         const r = await pickPath({ title: L('Pasta ou arquivo da base'), mode: 'any', start: st.paths.at(-1) || p?.dir || S.info.workspace });
         if (r && !st.paths.includes(r)) { st.paths.push(r); draw(); }
       } }, ic('plus'), L('Adicionar pasta ou arquivo')),
-      p?.id ? h('button.btn.sm', { type: 'button', onclick: () => kbIndexNow(p.id, read(), info) }, ic('refresh'), L('Indexar agora')) : null),
+      h('button.btn.sm', { type: 'button', onclick: () => {
+        const inp = h('input.input', { placeholder: L('https://... (site, github.com/dono/repo ou vídeo do YouTube)') });
+        const add = () => {
+          const v = inp.value.trim();
+          if (!/^https?:\/\/\S+\.\S+/i.test(v)) { toast(L('Cole um link começando com https://'), 'err'); return; }
+          if (!st.paths.includes(v)) st.paths.push(v);
+          draw();
+          if (p?.id) kbIndexNow(p.id, read(), info);
+        };
+        inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+        const row = h('div.kb-link', null, inp, h('button.btn.sm.primary', { type: 'button', onclick: add }, L('Adicionar')));
+        box.querySelector('.kb-link')?.remove();
+        box.querySelector('.kb-actions').after(row);
+        inp.focus();
+      } }, ic('globe'), L('Adicionar link')),
+      p?.id ? h('button.btn.sm', { type: 'button', onclick: () => kbIndexNow(p.id, read(), info, false, true) }, ic('refresh'), L('Indexar agora')) : null),
     info);
   };
   const read = () => ({ on: st.on, dir: st.dir, paths: st.paths });
@@ -58,17 +76,24 @@ function kbEditor(p) {
   return { el: box, read };
 }
 
-async function kbIndexNow(id, kb, info, quiet) {
+async function kbIndexNow(id, kb, info, quiet, force) {
   const sources = kbSources({ dir: S.projects.find((x) => x.id === id)?.dir, kb });
   if (!sources.length) { info.textContent = L('Nenhuma fonte escolhida.'); return; }
-  info.textContent = quiet ? L('Conferindo o índice...') : L('Indexando... (PDFs grandes podem levar alguns segundos)');
+  info.textContent = quiet ? L('Conferindo o índice...') : L('Indexando... (links e PDFs grandes podem levar um tempo)');
   try {
-    const r = await api('/api/kb/status', { id, sources });
+    const r = await api('/api/kb/status', { id, sources, force: !!force });
     info.textContent = (r.chars >= 1000 ? L('{0} documento(s), {1} trechos (~{2} mil caracteres).', r.files, r.chunks, Math.round(r.chars / 1000)) : L('{0} documento(s), {1} trechos.', r.files, r.chunks))
       + (r.changed ? ' ' + L('{0} lido(s) agora.', r.changed) : '')
       + (r.errors.length ? ' ' + L('{0} ficaram de fora (ex.: {1}: {2}).', r.errors.length, basename(r.errors[0].path), r.errors[0].error) : '')
       + (r.missing.length ? ' ' + L('Não achei: {0}.', r.missing.join(', ')) : '')
-      + (r.capped ? ' ' + L('Parou em 6000 arquivos: escolha pastas mais específicas.') : '');
+      + (r.capped ? ' ' + L('Parou em 6000 arquivos: escolha pastas mais específicas.') : '')
+      + (r.transcribing ? ' ' + L('Transcrevendo {0} gravação(ões){1}: elas entram na base quando terminar.', r.transcribing, r.media?.current ? ` (${r.media.current})` : '') : '');
+    for (const w of r.web || []) {
+      info.append(h('div.kb-web' + (w.error ? '.err' : ''), null, ic(w.kind === 'youtube' ? 'play' in ICONS ? 'play' : 'globe' : 'globe'),
+        h('span', null, w.error ? L('{0}: {1}', w.url, w.error) : L('{0}: {1} arquivo(s){2}', w.title || w.url, w.files, w.kind === 'site' ? L(' (páginas do site)') : w.kind === 'github' ? L(' (do repositório)') : L(' (transcrição)')))));
+    }
+    // transcrição em andamento: confere de novo daqui a pouco
+    if (r.transcribing && info.isConnected) setTimeout(() => { if (info.isConnected) kbIndexNow(id, kb, info, true); }, 15000);
   } catch (e) { info.textContent = e.message; }
 }
 

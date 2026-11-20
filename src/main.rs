@@ -27,8 +27,10 @@ mod llama;
 mod locate;
 mod engines;
 mod hf;
+mod agenda;
 mod jobs;
 mod kb;
+mod kbfontes;
 mod mcp;
 mod models;
 mod nim;
@@ -185,6 +187,7 @@ fn main() {
                 let _ = cloud::PORT.set(port);
                 tokio::spawn(cloud::run(app2.clone()));
                 tokio::spawn(jobs::watch(app2.clone()));
+                tokio::spawn(agenda::run(app2.clone()));
                 plugins::refresh(&app2.root);
                 let a = app2.clone();
                 tokio::spawn(async move { a.mcp.sync(&a.http, &a.mcp_file()).await });

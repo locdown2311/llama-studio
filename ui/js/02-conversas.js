@@ -2165,7 +2165,35 @@ function renderMessages(onlyLast) {
   drawActivitySoon();
 }
 
+/* ------------------------------------------------------------ modo simples
+   Para quem só quer perguntar: o CSS (.simple) esconde seletores, ferramentas concluídas, raciocínio e detalhes;
+   aprovações, perguntas e prévias continuam. ?simples=1 / ?simples=0 no endereço liga e desliga. */
+function simpleMode() { return S.settings.simple === true; }
+function applySimple() {
+  try {
+    const q = new URLSearchParams(location.search).get('simples') ?? new URLSearchParams(location.search).get('simple');
+    if (q === '1' || q === '0') { S.settings.simple = q === '1'; store.set('settings', S.settings); }
+  } catch { /* sem endereço */ }
+  document.documentElement.classList.toggle('simple', simpleMode());
+  if (typeof renderMessages === 'function' && S.view === 'chat') renderMessages(true);
+}
+
+function renderSimpleEmpty() {
+  const starters = [
+    ['mail', L('Escreva um e-mail educado pedindo para remarcar uma reunião para a semana que vem')],
+    ['sparkles', L('Explique de um jeito simples, como se eu tivesse 12 anos: o que é inflação?')],
+    ['list', L('Me ajude a montar uma lista de compras para uma semana de almoços saudáveis')],
+    ['edit', L('Corrija o português deste texto e deixe mais claro: ')],
+  ];
+  return h('div.empty.simple-empty', null,
+    h('div.empty-mark', null, 'L'),
+    h('h2', null, L('Pergunte o que quiser')),
+    h('p', null, L('Escreva do jeito que você falaria com uma pessoa. Se quiser, toque no microfone e fale.')),
+    h('div.starters', null, starters.map(([icon, s]) => h('button.starter', { onclick: () => { setEditorText(s); focusEditor(true); } }, ic(icon in ICONS ? icon : 'chat'), h('span', null, s)))));
+}
+
 function renderEmpty() {
+  if (simpleMode()) return renderSimpleEmpty();
   const starters = [
     [
       "folderOpen",
@@ -3185,6 +3213,8 @@ const TOOL_ICON = {
   update_todos: "list",
   ask_user: "chat",
   search_knowledge: "book",
+  memory: "bookmark",
+  schedule: "clock",
   list_chats: "chat",
   send_to_chat: "chat",
   notebook: "book",

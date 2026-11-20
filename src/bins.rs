@@ -104,6 +104,30 @@ pub const CATALOG: &[Bin] = &[
         tag: "runtime",
         files: &[],
     },
+    Bin {
+        id: "ffmpeg",
+        name: "FFmpeg",
+        desc_t: ("Converte áudio e vídeo. A base de conhecimento usa para transcrever gravações (com o Whisper).", "Converts audio and video. The knowledge base uses it to transcribe recordings (with Whisper)."),
+        repo: "BtbN/FFmpeg-Builds",
+        site: "https://ffmpeg.org/",
+        asset: r"^ffmpeg-master-latest-win64-gpl\.zip$",
+        exes: &["ffmpeg", "ffprobe"],
+        copies: &[],
+        tag: "mídia",
+        files: &[],
+    },
+    Bin {
+        id: "yt-dlp",
+        name: "yt-dlp",
+        desc_t: ("Baixa legendas e vídeos do YouTube e outros sites. A base de conhecimento usa para pegar a transcrição de vídeos.", "Downloads captions and videos from YouTube and other sites. The knowledge base uses it to get video transcripts."),
+        repo: "yt-dlp/yt-dlp",
+        site: "https://github.com/yt-dlp/yt-dlp",
+        asset: r"^yt-dlp\.exe$",
+        exes: &["yt-dlp"],
+        copies: &[],
+        tag: "mídia",
+        files: &[],
+    },
 ];
 
 static DIR: OnceLock<PathBuf> = OnceLock::new();
@@ -264,6 +288,15 @@ pub async fn install(app: &App, id: &str) -> Result<String, String> {
     }
     let d = dir();
     std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
+    // o pacote é o próprio executável (yt-dlp.exe)
+    if url.to_lowercase().ends_with(".exe") {
+        put(&d.join(exe_name(b.exes[0])), &bytes)?;
+        let ver = tag_version(&rel);
+        let mut vers = read_versions();
+        vers.insert(b.id.to_string(), ver.clone());
+        write_versions(&vers);
+        return Ok(ver);
+    }
     let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| LF!("Pacote inválido: {e}", "Invalid package: {e}"))?;
     let mut got = vec![];
     for i in 0..zip.len() {

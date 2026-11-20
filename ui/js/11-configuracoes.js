@@ -27,7 +27,7 @@ function renderSettings() {
 
   // ferramentas
   const groupsBySec = {};
-  for (const g of ['web', 'browser', 'computer', 'read', 'edit', 'write', 'shell', 'code', 'history', 'toolsearch', 'explore', 'ask', 'peers', 'todo', 'notebook', 'interface']) (groupsBySec[TOOL_INFO[g].sec] ||= []).push(g);
+  for (const g of ['web', 'browser', 'computer', 'read', 'edit', 'write', 'shell', 'code', 'history', 'toolsearch', 'explore', 'ask', 'peers', 'schedule', 'todo', 'notebook', 'interface']) (groupsBySec[TOOL_INFO[g].sec] ||= []).push(g);
   const toolGrid = h('div.tgrid', null, Object.values(groupsBySec).flat().map((g) => sw(TOOL_INFO[g].title, TOOL_INFO[g].desc, S.settings.tools[g], (v) => { S.settings.tools[g] = v; store.set('settings', S.settings); saveKit(); updatePickers(); saved(); })));
 
   section('model', L('Modelo'), 'cpu', L('Como o modelo responde em todas as conversas.'),
@@ -58,6 +58,9 @@ function renderSettings() {
       HUB ? sw(L('Rodar as tarefas em segundo plano'), L('O agente roda no studio (do PC ou da nuvem), não nesta tela: dá para fechar o app ou apagar a tela, e chega uma notificação quando termina. Padrão: ligado no celular.'), bgMode(), (v) => put({ bgTasks: v })) : null,
       field(L('Tarefa em segundo plano sem resposta'), seg([['', L('Esperar')], ['5', '5 min'], ['15', '15 min'], ['60', L('1 hora')]], String(st.askTimeout || ''), (v) => put({ askTimeout: Number(v) || 0 })),
         L('Com o app fechado, depois desse tempo sem resposta a uma pergunta o modelo segue com a opção recomendada e diz qual escolheu.'))));
+
+  section('schedules', L('Tarefas agendadas'), 'clock', L('Pedidos que rodam sozinhos num horário, em segundo plano, com aviso quando terminam.'), ...schedulesPage());
+  section('memory', L('Memória'), 'bookmark', L('Fatos sobre você e sobre cada projeto que o modelo lembra entre conversas.'), ...memoryPage(put));
 
   // buscador da pesquisa na web
   const ws0 = S.info.webSearch || {};
@@ -148,6 +151,7 @@ function renderSettings() {
         field(L('O que resumir'), (() => { const x = h('select.select', null, h('option', { value: 'meio' }, L('O meio (guarda início e fim)')), h('option', { value: 'inicio' }, L('O começo (guarda só o fim)'))); x.value = st.compactMode || 'meio'; x.addEventListener('change', () => put({ compactMode: x.value })); return x; })()))));
 
   section('look', L('Aparência e idioma'), 'palette', null,
+    sw(L('Modo simples'), L('Para quem só quer perguntar: some com as ferramentas, os seletores, o raciocínio e os detalhes técnicos; fica a caixa de mensagem e as respostas. O studio decide o resto sozinho. Dá para voltar aqui a qualquer momento.'), simpleMode(), (v) => { put({ simple: v }); applySimple(); }),
     field(L('Idioma'), seg([['pt', 'Português (Brasil)'], ['en', 'English']], LANG, (v) => { if (v !== LANG) setLang(v); }), L('Vale para a interface e para o que o modelo recebe (instruções e ferramentas). A tela recarrega.')),
     field(L('Tema'), seg([['auto', L('Automático')], ['dark', L('Escuro')], ['light', L('Claro')]], st.theme, (v) => { put({ theme: v }); applyTheme(); })));
 
@@ -211,7 +215,7 @@ function renderSettings() {
 /* As configurações são um painel só: as subpáginas de ajuste e as páginas de recursos (servidor,
    conectores, habilidades...) ficam no mesmo menu. Os itens da barra lateral são atalhos para elas. */
 const SET_EMBED = [['server', L('Servidor'), 'server'], ['mcp', L('Conectores'), 'plug'], ['plugins', L('Plugins'), 'puzzle'], ['skills', L('Habilidades'), 'sparkles'], ['personas', L('Personalidades'), 'user'], ['tools', L('Utilitários'), 'wrench']];
-const SET_GROUPS = [[L('Conversa'), ['set:model', 'set:replies', 'set:tools', 'set:auto', 'set:context', 'set:economy']], [L('Modelos e recursos'), ['set:api', 'v:server', 'v:mcp', 'v:plugins', 'v:skills', 'v:personas', 'v:tools']], [L('Segurança'), ['set:safety', 'set:auditor', 'set:sandbox']], [L('Sistema'), ['set:look', 'set:window', 'set:backup', 'set:cloud', 'set:share', 'set:updates', 'set:advanced', 'set:tests']]];
+const SET_GROUPS = [[L('Conversa'), ['set:model', 'set:replies', 'set:memory', 'set:schedules', 'set:tools', 'set:auto', 'set:context', 'set:economy']], [L('Modelos e recursos'), ['set:api', 'v:server', 'v:mcp', 'v:plugins', 'v:skills', 'v:personas', 'v:tools']], [L('Segurança'), ['set:safety', 'set:auditor', 'set:sandbox']], [L('Sistema'), ['set:look', 'set:window', 'set:backup', 'set:cloud', 'set:share', 'set:updates', 'set:advanced', 'set:tests']]];
 let SET_PAGES = [];
 let setPage = null;
 function openSettings(page) { setPage = page; setView('settings'); }
