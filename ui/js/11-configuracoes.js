@@ -37,13 +37,25 @@ function renderSettings() {
         field(L('Temperatura'), input('input.input', { value: st.temperature, placeholder: L('padrão do servidor'), inputmode: 'decimal' }, (x) => put({ temperature: x.value.trim() }))),
         field(L('Top P'), input('input.input', { value: st.topP, placeholder: L('padrão do servidor'), inputmode: 'decimal' }, (x) => put({ topP: x.value.trim() }))),
         field(L('Máximo de tokens'), input('input.input', { value: st.maxTokens, placeholder: L('sem limite'), inputmode: 'numeric' }, (x) => put({ maxTokens: x.value.trim() }))))),
-    group(L('Economia de tokens'),
+    group(L('Raciocínio e imagens'),
       field(L('Raciocínio nas conversas novas'), (() => { const x = h('select.select', null, THINK_OPTS.map(([v, l]) => h('option', { value: v }, l))); x.value = thinkDefault(); x.addEventListener('change', () => { put({ thinkDefault: x.value }); updatePickers(); }); return x; })(), L('Econômico: o modelo pensa no começo de cada pedido, quando algo falha e na conferência final; nos passos seguintes (ler, editar, rodar) age direto. Sanduíche: igual, mas com um pouco de raciocínio no meio. Cada conversa pode mudar pelo botão de raciocínio.')),
-      sw(L('Respostas enxutas'), L('Pede ao modelo para ir direto ao ponto, sem repetir o pedido nem resumir no fim o que já está na conversa.'), st.concise !== false, (v) => put({ concise: v }))),
-    sw(L('Sugestões de continuação'), L('No fim de cada resposta, 2 ou 3 botões com o próximo pedido provável (um toque envia). Gera com uma resposta curta da API de segundo plano, da API da conversa ou do modelo local.'), st.followups !== false, (v) => put({ followups: v })),
-    sw(L('Comparar respostas de vez em quando'), L('Com outra API pronta, 1 em cada ~15 respostas sem ferramentas também é gerada por ela e você escolhe a melhor (no máximo uma vez a cada 10 minutos). O placar fica no menu da conversa.'), st.abAuto !== false, (v) => put({ abAuto: v })),
-    field(L('Enviar imagens ao modelo'), seg([['auto', L('Automático ({0})', S.vision ? L('tem visão') : L('sem visão'))], ['on', L('Sempre')], ['off', L('Nunca')]], st.vision, (v) => put({ vision: v })), L('Capturas de tela e imagens coladas na mensagem.')),
-    HUB ? sw(L('Rodar as tarefas em segundo plano'), L('O agente roda no studio (do PC ou da nuvem), não nesta tela: dá para fechar o app ou apagar a tela, e chega uma notificação quando termina. Padrão: ligado no celular.'), bgMode(), (v) => put({ bgTasks: v })) : null);
+      field(L('Enviar imagens ao modelo'), seg([['auto', L('Automático ({0})', S.vision ? L('tem visão') : L('sem visão'))], ['on', L('Sempre')], ['off', L('Nunca')]], st.vision, (v) => put({ vision: v })), L('Capturas de tela e imagens coladas na mensagem.'))));
+
+  // 2) Respostas: como o studio responde e conversa com você
+  section('replies', L('Respostas'), 'chat', L('Como as respostas chegam e o que vem junto com elas.'),
+    group(L('Como responde'),
+      sw(L('Respostas enxutas'), L('Pede ao modelo para ir direto ao ponto, sem repetir o pedido nem resumir no fim o que já está na conversa.'), st.concise !== false, (v) => put({ concise: v })),
+      sw(L('Mostrar o raciocínio do modelo'), L('Os blocos de "pensando" aparecem na conversa, recolhidos.'), st.showThinking, (v) => { put({ showThinking: v }); renderMessages(); }),
+      sw(L('Sugestões de continuação'), L('No fim de cada resposta, 2 ou 3 botões com o próximo pedido provável (um toque envia). Gera com uma resposta curta da API de segundo plano, da API da conversa ou do modelo local.'), st.followups !== false, (v) => put({ followups: v })),
+      sw(L('Comparar respostas de vez em quando'), L('Com outra API pronta, 1 em cada ~15 respostas sem ferramentas também é gerada por ela e você escolhe a melhor (no máximo uma vez a cada 10 minutos). O placar fica no menu da conversa.'), st.abAuto !== false, (v) => put({ abAuto: v }))),
+    group(L('Perguntas com sugestões'),
+      field(L('Quanto o modelo pergunta'), seg([['pouco', L('Só o essencial')], ['', L('Equilibrado')], ['muito', L('Sempre que houver dúvida')]], st.askLevel || '', (v) => put({ askLevel: v })),
+        L('Só o essencial: pergunta apenas quando errar sairia caro. Sempre que houver dúvida: confirma abordagem, escopo e formato antes de começar tarefas maiores.')),
+      h('small.muted', null, L('Para desligar as perguntas: Ferramentas → "Perguntar com sugestões", ou numa conversa só pelo menu ⋯ dela.'))),
+    group(L('Segundo plano'),
+      HUB ? sw(L('Rodar as tarefas em segundo plano'), L('O agente roda no studio (do PC ou da nuvem), não nesta tela: dá para fechar o app ou apagar a tela, e chega uma notificação quando termina. Padrão: ligado no celular.'), bgMode(), (v) => put({ bgTasks: v })) : null,
+      field(L('Tarefa em segundo plano sem resposta'), seg([['', L('Esperar')], ['5', '5 min'], ['15', '15 min'], ['60', L('1 hora')]], String(st.askTimeout || ''), (v) => put({ askTimeout: Number(v) || 0 })),
+        L('Com o app fechado, depois desse tempo sem resposta a uma pergunta o modelo segue com a opção recomendada e diz qual escolheu.'))));
 
   // buscador da pesquisa na web
   const ws0 = S.info.webSearch || {};
@@ -63,12 +75,6 @@ function renderSettings() {
 
   section('tools', L('Ferramentas'), 'hammer', L('O que o modelo pode usar. Também dá para ligar e desligar pela barra do chat.'),
     toolGrid,
-    group(L('Perguntas com sugestões'),
-      field(L('Quanto o modelo pergunta'), seg([['pouco', L('Só o essencial')], ['', L('Equilibrado')], ['muito', L('Sempre que houver dúvida')]], st.askLevel || '', (v) => put({ askLevel: v })),
-        L('Só o essencial: pergunta apenas quando errar sairia caro. Sempre que houver dúvida: confirma abordagem, escopo e formato antes de começar tarefas maiores.')),
-      field(L('Tarefa em segundo plano sem resposta'), seg([['', L('Esperar')], ['5', '5 min'], ['15', '15 min'], ['60', L('1 hora')]], String(st.askTimeout || ''), (v) => put({ askTimeout: Number(v) || 0 })),
-        L('Com o app fechado, depois desse tempo sem resposta o modelo segue com a opção recomendada e diz qual escolheu.')),
-      h('small.muted', null, L('Dá para desligar as perguntas numa conversa só, pelo menu ⋯ dela.'))),
     webGroup,
     group(L('Limites'),
       h('div.row', null,
@@ -141,8 +147,7 @@ function renderSettings() {
 
   section('look', L('Aparência e idioma'), 'palette', null,
     field(L('Idioma'), seg([['pt', 'Português (Brasil)'], ['en', 'English']], LANG, (v) => { if (v !== LANG) setLang(v); }), L('Vale para a interface e para o que o modelo recebe (instruções e ferramentas). A tela recarrega.')),
-    field(L('Tema'), seg([['auto', L('Automático')], ['dark', L('Escuro')], ['light', L('Claro')]], st.theme, (v) => { put({ theme: v }); applyTheme(); })),
-    sw(L('Mostrar o raciocínio do modelo'), L('Os blocos de "pensando" aparecem na conversa, recolhidos.'), st.showThinking, (v) => { put({ showThinking: v }); renderMessages(); }));
+    field(L('Tema'), seg([['auto', L('Automático')], ['dark', L('Escuro')], ['light', L('Claro')]], st.theme, (v) => { put({ theme: v }); applyTheme(); })));
 
   if (S.info.native) section('window', L('Janela'), 'monitor', L('Como a janela do studio usa o sistema.'),
     sw(L('Usar a placa de vídeo para desenhar a janela'), L('Desligado, a janela não ocupa VRAM do modelo. Vale na próxima vez que a janela abrir.'), S.info.windowGpu, async (v) => { await api('/api/config', { windowGpu: v }); S.info.windowGpu = v; saved(); }),
@@ -204,7 +209,7 @@ function renderSettings() {
 /* As configurações são um painel só: as subpáginas de ajuste e as páginas de recursos (servidor,
    conectores, habilidades...) ficam no mesmo menu. Os itens da barra lateral são atalhos para elas. */
 const SET_EMBED = [['server', L('Servidor'), 'server'], ['mcp', L('Conectores'), 'plug'], ['plugins', L('Plugins'), 'puzzle'], ['skills', L('Habilidades'), 'sparkles'], ['personas', L('Personalidades'), 'user'], ['tools', L('Utilitários'), 'wrench']];
-const SET_GROUPS = [[L('Geral'), ['set:model', 'set:tools', 'set:auto', 'set:context', 'set:economy', 'set:api']], [L('Recursos'), ['v:server', 'v:mcp', 'v:plugins', 'v:skills', 'v:personas', 'v:tools']], [L('Segurança'), ['set:safety', 'set:auditor', 'set:sandbox']], [L('Sistema'), ['set:look', 'set:window', 'set:backup', 'set:cloud', 'set:share', 'set:updates', 'set:advanced', 'set:tests']]];
+const SET_GROUPS = [[L('Conversa'), ['set:model', 'set:replies', 'set:tools', 'set:auto', 'set:context', 'set:economy']], [L('Modelos e recursos'), ['set:api', 'v:server', 'v:mcp', 'v:plugins', 'v:skills', 'v:personas', 'v:tools']], [L('Segurança'), ['set:safety', 'set:auditor', 'set:sandbox']], [L('Sistema'), ['set:look', 'set:window', 'set:backup', 'set:cloud', 'set:share', 'set:updates', 'set:advanced', 'set:tests']]];
 let SET_PAGES = [];
 let setPage = null;
 function openSettings(page) { setPage = page; setView('settings'); }
@@ -217,8 +222,59 @@ function showSetPage(id) {
   drawSetNav('set:' + id);
 }
 const CLOUD_HIDE = ['v:server', 'set:sandbox', 'set:window', 'set:updates', 'set:cloud'];
+/* Busca: acha qualquer ajuste pelo nome ou pela descrição, sem ligar para acentos */
+const fold = (t) => String(t || '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+let setSearchBox = null;
+function setSearchIndex() {
+  const out = [];
+  const txt = (el, sel) => el.querySelector(sel)?.textContent || '';
+  for (const p of SET_PAGES) {
+    if (S.info.cloud && CLOUD_HIDE.includes('set:' + p.id)) continue;
+    out.push({ page: p, el: null, title: p.title, desc: p.desc || '' });
+    const box = h('div', null, ...p.body); // só para varrer; os nós voltam para p.body ao mostrar a página
+    for (const el of box.querySelectorAll('.tcard, .field, .set-group-title')) {
+      if (el.matches('.set-group-title')) out.push({ page: p, el, title: el.textContent, desc: '' });
+      else if (el.matches('.tcard')) out.push({ page: p, el, title: txt(el, '.tc-title'), desc: txt(el, '.tc-desc') });
+      else { const t = el.querySelector(':scope > label')?.textContent; if (t) out.push({ page: p, el, title: t, desc: el.querySelector(':scope > small')?.textContent || '' }); }
+    }
+  }
+  for (const [id, t] of SET_EMBED) if (!(S.info.cloud && CLOUD_HIDE.includes('v:' + id))) out.push({ view: id, title: t, desc: '' });
+  return out;
+}
+function runSetSearch(q0) {
+  const q = fold(q0).trim();
+  if (!q) { showSetPage(store.get('setPage') || 'model'); return; }
+  if (S.view !== 'settings') { setView('settings'); }
+  const words = q.split(/\s+/);
+  const hits = setSearchIndex().map((it) => {
+    const t = fold(it.title), d = fold(it.desc);
+    if (!words.every((w) => t.includes(w) || d.includes(w))) return null;
+    return { it, score: (words.every((w) => t.includes(w)) ? 2 : 0) + (t.startsWith(words[0]) ? 1 : 0) };
+  }).filter(Boolean).sort((a, b) => b.score - a.score).slice(0, 40);
+  const f = $('#settings-form'); f.innerHTML = '';
+  const list = h('div.set-results');
+  for (const { it } of hits) {
+    const where = it.view ? L('Página') : it.el ? it.page.title : L('Página');
+    list.append(h('button.set-hit', { type: 'button', onclick: () => {
+      setSearchBox.value = '';
+      if (it.view) { setView(it.view); return; }
+      showSetPage(it.page.id);
+      if (it.el) { const el = it.el.closest('.tcard, .field, .set-group') || it.el; el.scrollIntoView({ block: 'center' }); el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 2200); }
+    } }, h('span.set-hit-t', null, it.title), h('span.set-hit-w', null, where), it.desc ? h('span.set-hit-d', null, it.desc) : null));
+  }
+  f.append(h('section.set-sec', null, h('h2.set-title', null, L('Busca')), h('p.set-desc', null, hits.length ? L('{0} resultado(s) para "{1}"', hits.length, q0.trim()) : L('Nada encontrado para "{0}". Tente outra palavra.', q0.trim())), list));
+  $('#set-pane').scrollTop = 0;
+  $$('button', $('#set-nav')).forEach((b) => b.classList.remove('on'));
+}
 function drawSetNav(active) {
   const nav = $('#set-nav'); nav.innerHTML = '';
+  if (!setSearchBox) {
+    setSearchBox = h('input.input.set-search', { type: 'search', placeholder: L('Buscar nas configurações'), autocomplete: 'off', spellcheck: false });
+    let t = 0;
+    setSearchBox.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => runSetSearch(setSearchBox.value), 120); });
+    setSearchBox.addEventListener('keydown', (e) => { if (e.key === 'Escape' && setSearchBox.value) { e.stopPropagation(); setSearchBox.value = ''; runSetSearch(''); } if (e.key === 'Enter') { e.preventDefault(); $('#settings-form .set-hit')?.click(); } });
+  }
+  nav.append(h('div.set-search-wrap', null, setSearchBox));
   for (const [title, keys0] of SET_GROUPS) {
     const keys = S.info.cloud ? keys0.filter((k) => !CLOUD_HIDE.includes(k)) : keys0;
     const items = keys.map((key) => {
