@@ -39,6 +39,8 @@ function renderSettings() {
         field(L('Máximo de tokens'), input('input.input', { value: st.maxTokens, placeholder: L('sem limite'), inputmode: 'numeric' }, (x) => put({ maxTokens: x.value.trim() }))))),
     group(L('Raciocínio e imagens'),
       field(L('Raciocínio nas conversas novas'), (() => { const x = h('select.select', null, THINK_OPTS.map(([v, l]) => h('option', { value: v }, l))); x.value = thinkDefault(); x.addEventListener('change', () => { put({ thinkDefault: x.value }); updatePickers(); }); return x; })(), L('Econômico: o modelo pensa no começo de cada pedido, quando algo falha e na conferência final; nos passos seguintes (ler, editar, rodar) age direto. Sanduíche: igual, mas com um pouco de raciocínio no meio. Cada conversa pode mudar pelo botão de raciocínio.')),
+      field(L('Tamanho do raciocínio'), seg([['short', L('Curto')], ['med', L('Médio')], ['long', L('Longo')], ['max', L('Sem limite')]], thinkLen(), (v) => put({ thinkLen: v })),
+        L('Quanto o modelo pode pensar antes de ser obrigado a escrever a resposta. Curto ≈ 1 mil tokens, médio ≈ 3 mil, longo ≈ 8 mil. Modelo local: o servidor corta o pensamento nesse ponto e manda responder. APIs: vira o esforço de raciocínio (baixo, médio, alto) e, se o modelo passar do tamanho sem escrever nada, o studio corta e pede a resposta direto, levando o que ele já pensou. Sem limite: vale o limite da página Servidor, se houver.')),
       field(L('Enviar imagens ao modelo'), seg([['auto', L('Automático ({0})', S.vision ? L('tem visão') : L('sem visão'))], ['on', L('Sempre')], ['off', L('Nunca')]], st.vision, (v) => put({ vision: v })), L('Capturas de tela e imagens coladas na mensagem.'))));
 
   // 2) Respostas: como o studio responde e conversa com você

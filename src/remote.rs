@@ -13,7 +13,7 @@ use std::time::Duration;
 use crate::app::{ApiProvider, App};
 
 /// Campos do llama.cpp que outros servidores recusam.
-const LLAMA_ONLY: &[&str] = &["id_slot", "cache_prompt", "return_progress", "chat_template_kwargs", "reasoning_budget", "n_probs", "samplers", "timings_per_token", "_fixed", "_remote"];
+const LLAMA_ONLY: &[&str] = &["id_slot", "cache_prompt", "return_progress", "chat_template_kwargs", "reasoning_budget", "reasoning_budget_tokens", "reasoning_budget_message", "n_probs", "samplers", "timings_per_token", "_fixed", "_remote"];
 
 fn err(status: StatusCode, msg: String) -> Response {
     (status, Json(json!({ "error": { "message": msg } }))).into_response()
@@ -273,7 +273,7 @@ fn endpoint(base: &str, path: &str) -> String {
     format!("{}/{}", base.trim().trim_end_matches('/'), path)
 }
 
-fn apply_think(o: &mut serde_json::Map<String, Value>, c: &ApiProvider, mode: Option<&str>) {
+fn apply_think(o: &mut serde_json::Map<String, Value>, c: &ApiProvider, mode: Option<&str>, effort: Option<&str>) {
     let Some(mode) = mode.filter(|m| matches!(*m, "on" | "off" | "eco")) else { return };
     // O botão da conversa tem prioridade sobre o esforço fixo do provedor.
     o.remove("reasoning_effort");
@@ -284,7 +284,7 @@ fn apply_think(o: &mut serde_json::Map<String, Value>, c: &ApiProvider, mode: Op
             }
         }
     } else {
-        o.insert("reasoning_effort".into(), json!(match mode { "on" => "high", "eco" => "low", _ => "none" }));
+        o.insert("reasoning_effort".into(), json!(match mode { "on" => effort.filter(|e| matches!(*e, "low" | "medium" | "high")).unwrap_or("high"), "eco" => "low", _ => "none" }));
     }
 }
 
@@ -300,6 +300,7 @@ pub async fn chat(app: &App, id: &str, body: Bytes, side: bool) -> Response {
 
     if let Some(o) = v.as_object_mut() {
         let think = o.remove("_think").and_then(|v| v.as_str().map(str::to_string));
+        let effort = o.remove("_effort").and_then(|v| v.as_str().map(str::to_string));
         for k in LLAMA_ONLY {
             o.remove(*k);
         }
@@ -313,7 +314,7 @@ pub async fn chat(app: &App, id: &str, body: Bytes, side: bool) -> Response {
                 o.insert(k.clone(), val.clone());
             }
         }
-        apply_think(o, &c, think.as_deref());
+        apply_think(o, &c, think.as_deref(), effort.as_deref());
 
         if o.get("stream").and_then(Value::as_bool).unwrap_or(false) {
             // o uso de tokens chega no último pedaço
@@ -678,10 +679,17 @@ mod t {
         c.think_params.insert("on".into(), [("thinking".into(), json!({"type": "enabled"}))].into());
         let mut o = serde_json::Map::new();
         o.insert("reasoning_effort".into(), json!("low"));
-        apply_think(&mut o, &c, Some("on"));
+        apply_think(&mut o, &c, Some("on"), None);
         assert_eq!(o.get("thinking"), Some(&json!({"type": "enabled"})));
         assert!(!o.contains_key("reasoning_effort"));
-        apply_think(&mut o, &c, Some("off"));
+        apply_think(&mut o, &c, Some("off"), None);
         assert_eq!(o.get("reasoning_effort"), Some(&json!("none")));
+        // sem campos do provedor: o tamanho do raciocínio escolhe o esforço
+        let c2 = ApiProvider::default();
+        let mut o2 = serde_json::Map::new();
+        apply_think(&mut o2, &c2, Some("on"), Some("medium"));
+        assert_eq!(o2.get("reasoning_effort"), Some(&json!("medium")));
+        apply_think(&mut o2, &c2, Some("on"), Some("xyz"));
+        assert_eq!(o2.get("reasoning_effort"), Some(&json!("high")));
     }
 }

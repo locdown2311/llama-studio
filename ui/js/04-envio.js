@@ -530,6 +530,23 @@ function isNetErr(e) {
   return e instanceof TypeError || /network ?error|failed to fetch|load failed|conexão .*caiu|connection .*dropped|respondeu (502|503|504)|responded (502|503|504)|ECONNRESET|socket hang up/i.test(m);
 }
 
+/** O modelo da API pensou demais: o que ele já pensou vai junto, num pedido sem raciocínio, para ele agir já. */
+async function thinkCapFinish(msgs, tools, msg, signal, extra) {
+  const thought = msg.reasoning;
+  const tail = thought.length > 6000 ? '…' + thought.slice(-6000) : thought;
+  const note = { role: 'user', content: L('(Nota do studio: você já pensou o bastante; o raciocínio foi interrompido no limite. O que você pensou até aqui:\n\n{0}\n\nNão pense mais. Agora aja: chame a ferramenta necessária ou escreva a resposta completa para o usuário, no formato que ele pediu.)', tail) };
+  msg.reasoning = thought + L('\n\n[... raciocínio cortado no limite pelo studio]\n\n'); msg.content = ''; msg.tool_calls = []; msg.thinkCut = true;
+  const { _thinkCap, _effort, ...ex } = extra;
+  const base = msg.reasoning;
+  try { return await streamRaw([...msgs, note], tools, msg, signal, scheduleRender, { ...ex, _think: 'off' }); }
+  catch (e) {
+    // modelo que não deixa desligar o raciocínio (o provedor recusa "none"): pede com esforço baixo
+    if (signal?.aborted || e.name === 'AbortError' || e.code) throw e;
+    msg.reasoning = base; msg.content = ''; msg.tool_calls = [];
+    return await streamRaw([...msgs, note], tools, msg, signal, scheduleRender, { ...ex, _think: 'eco' });
+  }
+}
+
 async function streamCompletion(conv, system, tools, msg, signal) {
   const msgs = apiMessages(conv, system);
   const print = reqPrint(conv, system, tools, msgs);
@@ -541,13 +558,20 @@ async function streamCompletion(conv, system, tools, msg, signal) {
   const extra = requestExtras(conv);
   if (tools?.length) extra.parallel_tool_calls = true;
   const mainApi = mainApiForChat(conv);
-  if (mainApi) { extra._remote = true; extra._p = mainApi.id; }
+  if (mainApi) {
+    extra._remote = true; extra._p = mainApi.id;
+    // nas APIs o esforço nem sempre segura o modelo: passou do tamanho do raciocínio (~3,5 caracteres por token)
+    // sem escrever nada, o studio corta e pede a resposta sem pensar mais
+    const n = THINK_LEN[thinkLen()];
+    if (n && extra._think === 'on') extra._thinkCap = Math.round(n * (conv._step ? 0.5 : 1) * 3.5);
+  }
   // a conexão caiu (rede, API ou llama-server reiniciando): tenta de novo do começo, até 2 vezes, sem
   // mostrar o erro; a parte que já tinha chegado é descartada (o pedido é o mesmo)
   let r;
   for (let attempt = 0; ; attempt++) {
     try { r = await streamRaw(msgs, tools, msg, signal, scheduleRender, extra); break; }
     catch (e) {
+      if (e.code === 'THINKCAP' && !signal?.aborted) { r = await thinkCapFinish(msgs, tools, msg, signal, extra); break; }
       if (signal?.aborted || e.name === 'AbortError' || attempt >= 2 || !isNetErr(e)) throw e;
       msg.content = ''; msg.reasoning = ''; msg.tool_calls = []; msg._pp = null;
       msg._retry = L('A conexão caiu; tentando de novo ({0}/2)...', attempt + 1);

@@ -45,13 +45,25 @@ function thinkNow(conv) {
   if (!conv._step || conv._thinkNext) return 'on';
   return t === 'sand' ? 'eco' : 'off';
 }
+/* Tamanho do raciocínio: quantos tokens o modelo local pode pensar antes de ser obrigado a responder
+   (o llama-server fecha o bloco de pensamento e insere a mensagem abaixo). Nas APIs vira o esforço. */
+const THINK_LEN = { short: 1024, med: 3072, long: 8192, max: 0 };
+const THINK_EFFORT = { short: 'low', med: 'medium', long: 'high', max: 'high' };
+const THINK_STOP_MSG = '\n\nOkay, I have thought about this enough. Now I will write the complete answer for the user.\n';
+function thinkLen() { return THINK_LEN[S.settings.thinkLen] != null ? S.settings.thinkLen : 'med'; }
 function requestExtras(conv) {
   const x = {};
   const t = thinkNow(conv);
   x._think = t;
   // eco (sanduíche no meio): API recebe esforço baixo; no modelo local é o mesmo que direto
   if (t !== 'auto') x.chat_template_kwargs = { enable_thinking: t === 'on' };
-  if (t === 'off' || (t === 'eco' && !mainApiForChat(conv))) x.reasoning_budget = 0;
+  if (t === 'off' || (t === 'eco' && !mainApiForChat(conv))) { x.reasoning_budget = 0; x.reasoning_budget_tokens = 0; }
+  else if (t === 'on' || t === 'auto') {
+    const len = thinkLen(), n = THINK_LEN[len];
+    // depois de um erro no meio da tarefa, metade do limite basta para corrigir o rumo
+    if (n) { x.reasoning_budget_tokens = conv._step ? Math.max(512, Math.round(n / 2)) : n; x.reasoning_budget_message = THINK_STOP_MSG; }
+    if (t === 'on') x._effort = THINK_EFFORT[len];
+  }
   if (conv._slot != null) x.id_slot = conv._slot;
   return x;
 }
@@ -308,12 +320,12 @@ function looping(t) {
 }
 
 async function streamRaw(messages, tools, msg, signal, onDelta, extra = {}) {
-  const { _fixed, _remote, _p, _think, _bg, ...rest } = extra;
+  const { _fixed, _remote, _p, _think, _bg, _effort, _thinkCap, ...rest } = extra;
   // return_progress: o llama-server conta quanto do prompt já leu (barra de progresso antes da 1ª palavra)
   const body = { messages, stream: true, ...(_remote ? {} : { cache_prompt: true }), ...rest };
   if (!noProgress && !_remote) body.return_progress = true;
   // O backend escolhe os campos do modo Pensar configurados para este provedor.
-  if (_remote && _think && _think !== 'auto') body._think = _think;
+  if (_remote && _think && _think !== 'auto') { body._think = _think; if (_effort) body._effort = _effort; }
   msg._t0 = Date.now(); msg._pp = null;
   if (tools.length) body.tools = tools;
   const st = S.settings;
@@ -385,6 +397,13 @@ async function streamRaw(messages, tools, msg, signal, onDelta, extra = {}) {
         if (d.reasoning_content) msg.reasoning += d.reasoning_content;
         else if (typeof d.reasoning === 'string') msg.reasoning += d.reasoning; // OpenRouter, Groq
         if (d.content) msg.content += d.content;
+        // pensou além do tamanho escolhido sem escrever nada: corta e o chamador pede a resposta direto
+        if (_thinkCap && !msg.content && !d.tool_calls && msg.reasoning.length > _thinkCap && !msg.tool_calls.length) {
+          try { reader.cancel(); } catch { /* já fechado */ }
+          const e = new Error(L('O raciocínio passou do tamanho escolhido.'));
+          e.code = 'THINKCAP';
+          throw e;
+        }
         // raciocínio (ou texto) repetindo o mesmo trecho: corta já, em vez de deixar girar até o limite
         const grow = msg.reasoning.length + msg.content.length;
         if (grow - (msg._loopAt || 0) > 1200) {
