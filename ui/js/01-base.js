@@ -202,8 +202,10 @@ addEventListener('pagehide', () => { uiFlush(); });
 /* Duas telas na mesma conta (o PC e o celular, ou duas janelas): a cada poucos segundos traz o que mudou no
    servidor. Conversa que está rodando aqui não é trocada; a que está aberta é redesenhada. */
 let uiPolling = false;
-async function uiPoll() {
-  if (uiPolling || !UI.loaded || document.hidden) return;
+async function uiPoll(force) {
+  // forçado: espera a busca em andamento terminar e busca de novo (mesmo com a tela escondida)
+  if (force) for (let i = 0; uiPolling && i < 50; i++) await new Promise((ok) => setTimeout(ok, 100));
+  if (uiPolling || !UI.loaded || (document.hidden && !force)) return;
   uiPolling = true;
   try {
     const r = await fetch('/api/ui?since=' + Math.max(0, UI.now - 2000), { headers: { 'X-Studio': '1' }, cache: 'no-store' });

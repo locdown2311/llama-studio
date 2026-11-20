@@ -19,6 +19,12 @@ struct Job {
     created: u64,
     finished: u64,
     note: String,
+    /// O que o agente está fazendo agora ("Pesquisando na web", "Escrevendo a resposta"), para quem pediu.
+    progress: String,
+    /// Última notícia do executor sobre esta tarefa.
+    pat: u64,
+    /// A resposta final (rede de segurança: se a conversa não sincronizar, quem pediu ainda recebe o texto).
+    result: String,
 }
 
 #[derive(Default)]
@@ -63,7 +69,7 @@ fn now_ms() -> u64 {
 }
 
 fn pub_job(j: &Job) -> Value {
-    json!({ "id": j.id, "conv": j.conv, "title": j.title, "state": j.state, "created": j.created, "finished": j.finished, "note": j.note })
+    json!({ "id": j.id, "conv": j.conv, "title": j.title, "state": j.state, "created": j.created, "finished": j.finished, "note": j.note, "progress": j.progress, "pat": j.pat, "result": j.result })
 }
 
 /// Fecha um executor que sobrou de uma execução anterior do studio (atualização, reinício): ele segura a pasta
@@ -172,7 +178,7 @@ pub fn start(app: &App, conv: &str, title: &str) -> Result<Value, String> {
             return Err(L!("Essa conversa já está rodando em segundo plano.", "This chat is already running in the background.").into());
         }
         let id = format!("{:x}", now_ms());
-        s.jobs.push(Job { id: id.clone(), conv: conv.into(), title: title.chars().take(80).collect(), state: "queued", created: now_ms(), finished: 0, note: String::new() });
+        s.jobs.push(Job { id: id.clone(), conv: conv.into(), title: title.chars().take(80).collect(), state: "queued", created: now_ms(), finished: 0, note: String::new(), progress: String::new(), pat: 0, result: String::new() });
         let keep = s.jobs.len().saturating_sub(30);
         s.jobs.drain(..keep);
         s.activity = Some(Instant::now());
@@ -181,6 +187,18 @@ pub fn start(app: &App, conv: &str, title: &str) -> Result<Value, String> {
     wake().notify_waiters();
     let s = st().lock().unwrap();
     Ok(pub_job(s.jobs.last().unwrap()))
+}
+
+/// O executor conta o que está fazendo (vale também como sinal de vida da tarefa).
+pub fn progress(v: &Value) {
+    let id = v["job"].as_str().unwrap_or("");
+    let text: String = v["text"].as_str().unwrap_or("").chars().take(160).collect();
+    let mut s = st().lock().unwrap();
+    if let Some(j) = s.jobs.iter_mut().find(|j| j.id == id && (j.state == "running" || j.state == "queued")) {
+        j.progress = text;
+        j.pat = now_ms();
+    }
+    s.activity = Some(Instant::now());
 }
 
 pub fn list() -> Value {
@@ -254,6 +272,7 @@ pub async fn done(app: Arc<App>, v: &Value) {
         if let Some(t) = v["title"].as_str().filter(|t| !t.is_empty()) {
             j.title = t.chars().take(80).collect();
         }
+        j.result = v["text"].as_str().unwrap_or("").chars().take(60_000).collect();
         (j.title.clone(), j.conv.clone())
     };
     let text: String = v["text"].as_str().unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" ").chars().take(160).collect();

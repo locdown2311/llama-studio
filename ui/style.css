@@ -2134,3 +2134,5 @@ details.verify.warn summary svg { color: var(--warn); }
 .kb-web span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .kb-web svg { width: 13px; height: 13px; flex: none; }
 .kb-web.err { color: var(--err); }
+.bgbar .bg-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.bgbar.warn { background: color-mix(in srgb, #d97706 16%, transparent); }

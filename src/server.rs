@@ -81,6 +81,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/jobs/answer", post(jobs_answer))
         .route("/api/jobs/done", post(jobs_done))
         .route("/api/jobs/ask", post(jobs_ask))
+        .route("/api/jobs/progress", post(jobs_progress))
         .route("/api/config", post(set_config))
         .route("/api/bins", get(bins_list))
         .route("/api/bins/install", post(bins_install))
@@ -767,6 +768,10 @@ async fn jobs_answer(b: Bytes) -> Res {
 }
 async fn jobs_ask(State(app): S, b: Bytes) -> Res {
     crate::jobs::ask(app.clone(), &body(&b)).await;
+    ok(json!({ "ok": true }))
+}
+async fn jobs_progress(b: Bytes) -> Res {
+    crate::jobs::progress(&body(&b));
     ok(json!({ "ok": true }))
 }
 async fn jobs_done(State(app): S, b: Bytes) -> Res {

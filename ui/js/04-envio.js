@@ -21,7 +21,8 @@ async function send(now) {
   if (!item) return;
   const conv = cur() || newConv();
   if (busy) { enqueue(conv, { ...item, ...(now ? { now: true } : {}) }); return; }
-  if (conv.bg) { toast(L('Essa conversa está rodando em segundo plano. Espere terminar ou pare.'), 'err'); return; }
+  // rodando em segundo plano: guarda aqui e manda quando a tarefa terminar (não abre outra tarefa na mesma conversa)
+  if (conv.bg) { (conv._bgQueue ||= []).push(item); toast(L('Vai em seguida, quando a tarefa em segundo plano terminar.')); drawBgBar(); return; }
   await submit(conv, item);
 }
 

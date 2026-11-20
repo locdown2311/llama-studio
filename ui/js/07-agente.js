@@ -1002,6 +1002,7 @@ async function startBg(conv) {
   }
   drawBgBar();
   toast(L('Rodando em segundo plano. Pode fechar o app: você recebe um aviso quando terminar.'));
+  setTimeout(reconcileBg, 1500);
   // o toque em enviar vale como gesto para pedir a permissão de notificação
   window.__hubPush?.();
 }
@@ -1016,14 +1017,26 @@ function drawBgBar() {
   const where = window.__hubTarget === 'pc' ? L('no seu PC') : L('na nuvem');
   // na fila há um tempo e o executor não dá sinal: oferece rodar aqui
   const stuck = c.bg.state === 'queued' && Date.now() - (c.bg.at || 0) > 20000 && BG.executor === false;
+  const j = BG.jobs.get(c.id);
+  const secs = Math.max(0, Math.round((Date.now() - (j?.created || c.bg.at || Date.now())) / 1000));
+  const took = secs >= 60 ? `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` : L('{0}s', secs);
+  // rodando mas sem notícia do executor há um tempo: avisa (pode ter travado)
+  const quiet = j?.state === 'running' && j.pat && Date.now() - j.pat > 90000;
+  let text;
+  if (stuck) text = L('O executor {0} ainda não pegou a tarefa.', where);
+  else if (c.bg.state === 'queued' && j?.state !== 'running') text = L('Na fila {0}...', where);
+  else if (quiet) text = L('Rodando {0}, mas sem notícias há {1} min.', where, Math.round((Date.now() - j.pat) / 60000));
+  else text = (j?.progress || L('Rodando {0}', where)) + ' · ' + took;
+  if (c._bgQueue?.length) text += ' · ' + L('{0} mensagem(ns) na fila', c._bgQueue.length);
+  bar.classList.toggle('warn', !!(stuck || quiet));
   bar.append(h('span.spin', { html: svg('loader') }),
-    h('span', null, stuck ? L('O executor {0} ainda não pegou a tarefa.', where) : c.bg.state === 'queued' ? L('Na fila {0}...', where) : L('Rodando {0}. Pode fechar o app.', where)),
+    h('span.bg-text', { title: L('Rodando {0}. Pode fechar o app: você recebe um aviso quando terminar.', where) }, text),
     h('span.spacer'),
     stuck ? h('button.btn.sm.primary', { type: 'button', onclick: () => bgRunHere(c) }, L('Rodar nesta tela')) : '',
     h('button.btn.sm', { type: 'button', onclick: (e) => bgStop(c, e.currentTarget) }, ic('stop'), L('Parar')));
 }
 
-const BG = { executor: null };
+const BG = { executor: null, jobs: new Map() };
 
 /** Parar: na fila sai na hora; rodando, o executor para e a conversa sincroniza. */
 async function bgStop(c0, btn) {
@@ -1048,25 +1061,63 @@ async function bgRunHere(c0) {
 function remoteAnswer(id, a) { api('/api/jobs/answer', { id, a }).catch(() => {}); }
 
 /** Confere se as tarefas marcadas como em segundo plano ainda estão vivas (o executor pode ter caído). */
+let reconciling = false;
 async function reconcileBg() {
-  if (EXECUTOR || !S.convs.some((c) => c.bg)) return;
-  let r; try { r = await api('/api/jobs'); } catch { return; }
-  BG.executor = !!r.executor;
-  const live = new Set((r.jobs || []).filter((j) => j.state === 'queued' || j.state === 'running').map((j) => j.conv));
-  let changed = false;
-  for (const c of S.convs) {
-    if (c.bg && !live.has(c.id) && Date.now() - (c.bg.at || 0) > 8000) {
-      // terminou com erro sem o executor ter gravado nada (não subiu, ou parado na fila): diz o motivo
-      const j = (r.jobs || []).find((x) => x.conv === c.id);
-      if (j?.state === 'error' && j.note && c.id === S.curId) toast(j.note, 'err');
-      c.bg = null; changed = true;
+  if (EXECUTOR || reconciling || !S.convs.some((c) => c.bg)) return;
+  reconciling = true;
+  try {
+    let r; try { r = await api('/api/jobs'); } catch { return; }
+    BG.executor = !!r.executor;
+    const jobs = r.jobs || [];
+    // a tarefa mais nova de cada conversa
+    BG.jobs = new Map();
+    for (const j of jobs) { const o = BG.jobs.get(j.conv); if (!o || j.created > o.created) BG.jobs.set(j.conv, j); }
+    const live = new Set(jobs.filter((j) => j.state === 'queued' || j.state === 'running').map((j) => j.conv));
+    const ended = S.convs.filter((c) => c.bg && !live.has(c.id) && Date.now() - (c.bg.at || 0) > 8000).map((c) => c.id);
+    if (ended.length) {
+      // terminou: a resposta foi gravada pelo executor. Busca ela ANTES de mexer na conversa daqui, senão a cópia
+      // velha daqui (sem a resposta) seria gravada por cima da do executor.
+      await uiPoll(true);
+      for (const id of ended) {
+        const c = S.convs.find((x) => x.id === id);
+        if (!c) continue;
+        const j = BG.jobs.get(id);
+        if (j?.state === 'error' && j.note && id === S.curId) toast(j.note, 'err');
+        else if (j?.state === 'done' && id !== S.curId) toast(L('Terminou: {0}', c.title));
+        // a conversa não chegou com a resposta (sincronização falhou): usa o texto que o executor entregou
+        const lastU = c.messages.map((m) => m.role).lastIndexOf('user');
+        const answered = c.messages.slice(lastU + 1).some((m) => m.role === 'assistant' && (String(m.content || '').trim() || m.tool_calls?.length));
+        if (!answered && j?.state === 'done' && j.result && j.finished > (c.messages[lastU]?.ts || 0)) {
+          c.bg = null;
+          c.messages.push({ role: 'assistant', content: j.result, ts: j.finished, recovered: true });
+          saveConvsNow(true);
+          continue;
+        }
+        if (c.bg) {
+          // o executor não gravou o fim (caiu): limpa só aqui, sem regravar as mensagens velhas no servidor
+          c.bg = null;
+          const strip = (m) => Object.fromEntries(Object.entries(m).filter(([k]) => !k.startsWith('_')));
+          CONV_SAVED.set(c.id, JSON.stringify({ ...strip(c), messages: c.messages.map(strip) }));
+        }
+      }
+      renderConvList(); renderComposer();
+      if (ended.includes(S.curId) && S.view === 'chat') renderMessages(true);
+      // mensagens escritas enquanto rodava: vai a próxima
+      for (const id of ended) {
+        const c = S.convs.find((x) => x.id === id);
+        const item = c?._bgQueue?.shift();
+        if (item && !c.bg && !running(c)) setTimeout(() => submit(c, item), 300);
+      }
     }
-    else if (c.bg && live.has(c.id) && c.bg.state === 'queued' && (r.jobs || []).some((j) => j.conv === c.id && j.state === 'running')) { c.bg.state = 'running'; }
-  }
-  if (changed) { saveConvsNow(true); renderConvList(); renderComposer(); }
-  drawBgBar();
+    for (const c of S.convs) if (c.bg && c.bg.state === 'queued' && BG.jobs.get(c.id)?.state === 'running') c.bg.state = 'running';
+    drawBgBar();
+  } finally { reconciling = false; }
 }
-if (!EXECUTOR) setInterval(() => { if (!document.hidden) reconcileBg(); }, 5000);
+if (!EXECUTOR) {
+  setInterval(() => { if (!document.hidden) reconcileBg(); }, 3000);
+  // o tempo na faixa anda a cada segundo
+  setInterval(() => { if (!document.hidden && $('#bgbar')) drawBgBar(); }, 1000);
+}
 
 /* ------------------------------------------------------------ o executor
    Roda várias tarefas ao mesmo tempo (uma por conversa). Parado, ele recarrega a página a cada tarefa nova
@@ -1086,10 +1137,59 @@ function execConvOfCall(id) {
   return [...EXEC.running.keys()][0] || null;
 }
 
+/** O que o agente está fazendo agora, em palavras de gente (vai para a faixa de quem pediu). */
+const BG_VERBS = {
+  web_search: 'Pesquisando na web', web_fetch: 'Lendo uma página da web', fetch_url: 'Lendo uma página da web', read_file: 'Lendo arquivos',
+  list_directory: 'Olhando a pasta', search_files: 'Procurando nos arquivos', write_file: 'Escrevendo um arquivo', edit_file: 'Editando um arquivo',
+  run_command: 'Rodando um comando', search_knowledge: 'Procurando na base de conhecimento', ask_user: 'Esperando a sua resposta',
+  explore: 'Pesquisando com um subagente', multi_explore: 'Pesquisando com subagentes', generate_image: 'Criando uma imagem',
+  analyze_image: 'Olhando uma imagem', update_todos: 'Organizando as etapas', send_to_chat: 'Conversando com outra conversa', memory: 'Guardando na memória',
+};
+function bgStatus(conv) {
+  const ms = conv.messages;
+  const lastU = ms.map((m) => m.role).lastIndexOf('user');
+  const step = ms.slice(lastU + 1).filter((m) => m.role === 'assistant').length;
+  const tag = step > 1 ? ' ' + L('(passo {0})', step) : '';
+  for (const k of S.approvals.keys()) {
+    if (execConvOfCall(k) === conv.id) return (S.questions.has(k) ? L('Esperando a sua resposta') : L('Esperando você aprovar uma ação')) + tag;
+  }
+  const last = ms.at(-1);
+  if (!last || last.role === 'user') return L('Começando');
+  if (last.role === 'tool') return L('Pensando no próximo passo') + tag;
+  const done = new Set(ms.filter((m) => m.role === 'tool').map((m) => m.tool_call_id));
+  const pend = (last.tool_calls || []).find((t) => !done.has(t.id));
+  if (pend) {
+    const n = pend.function?.name || '';
+    const v = BG_VERBS[n] ? L(BG_VERBS[n]) : n.startsWith('browser') ? L('Usando o navegador') : n.includes('__') ? L('Usando o conector {0}', n.split('__')[0]) : L('Usando {0}', n);
+    return v + tag;
+  }
+  if (String(last.content || '').trim()) return L('Escrevendo a resposta') + tag;
+  return L('Pensando') + tag;
+}
+
 function execTick() {
   if (EXEC.tick) return;
   EXEC.tick = setInterval(async () => {
     if (!EXEC.running.size) { clearInterval(EXEC.tick); EXEC.tick = 0; return; }
+    // conta o que está fazendo (quando muda, ou a cada 15 s como sinal de vida) e grava a conversa a cada ~4 s,
+    // para quem pediu ver a resposta chegando
+    EXEC.n = (EXEC.n || 0) + 1;
+    for (const [cid, run] of EXEC.running) {
+      const c = S.convs.find((x) => x.id === cid);
+      if (!c) continue;
+      const t = bgStatus(c);
+      if (t !== run.prog || Date.now() - (run.progAt || 0) > 15000) {
+        run.prog = t; run.progAt = Date.now();
+        api('/api/jobs/progress', { job: run.job.id, text: t }).catch(() => {});
+      }
+    }
+    if (EXEC.n % 3 === 0) {
+      saveConvsNow();
+      for (const cid of EXEC.running.keys()) {
+        const k = 'c-' + cid;
+        if (UI.timers.has(k)) { clearTimeout(UI.timers.get(k)); UI.timers.delete(k); uiSend(k, true); }
+      }
+    }
     // o agente parou esperando uma permissão ou uma resposta: avisa o celular
     for (const k of [...S.approvals.keys()].filter((k) => !EXEC.asked.has(k))) {
       EXEC.asked.add(k);
