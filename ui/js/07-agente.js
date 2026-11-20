@@ -993,7 +993,7 @@ async function startBg(conv) {
   saveConvsNow(true);
   await uiFlush();
   try {
-    await api('/api/jobs/start', { conv: conv.id, title: conv.title });
+    await api('/api/jobs/start', { conv: conv.id, title: conv.title, origin: DEV_ID });
   } catch (e) {
     // sem executor (sem navegador no PC, por exemplo): roda aqui mesmo
     conv.bg = null; saveConvsNow(true); drawBgBar();
@@ -1037,6 +1037,8 @@ function drawBgBar() {
 }
 
 const BG = { executor: null, jobs: new Map() };
+/** Este aparelho (só neste navegador, fora da sincronização): os avisos de erro de uma tarefa vão só para quem pediu. */
+const DEV_ID = (() => { try { let d = localStorage.getItem('llamaDevId'); if (!d) { d = uid(); localStorage.setItem('llamaDevId', d); } return d; } catch { return 'x'; } })();
 
 /** Parar: na fila sai na hora; rodando, o executor para e a conversa sincroniza. */
 async function bgStop(c0, btn) {
@@ -1082,8 +1084,8 @@ async function reconcileBg() {
         const c = S.convs.find((x) => x.id === id);
         if (!c) continue;
         const j = BG.jobs.get(id);
-        if (j?.state === 'error' && j.note && id === S.curId) toast(j.note, 'err');
-        else if (j?.state === 'done' && id !== S.curId) toast(L('Terminou: {0}', c.title));
+        if (j?.state === 'error' && j.note && id === S.curId && (!j.origin || j.origin === DEV_ID)) toast(j.note, 'err');
+        else if (j?.state === 'done' && id !== S.curId && (!j.origin || j.origin === DEV_ID)) toast(L('Terminou: {0}', c.title));
         // a conversa não chegou com a resposta (sincronização falhou): usa o texto que o executor entregou
         const lastU = c.messages.map((m) => m.role).lastIndexOf('user');
         const answered = c.messages.slice(lastU + 1).some((m) => m.role === 'assistant' && (String(m.content || '').trim() || m.tool_calls?.length));

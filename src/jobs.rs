@@ -23,6 +23,8 @@ struct Job {
     progress: String,
     /// Última notícia do executor sobre esta tarefa.
     pat: u64,
+    /// Quem pediu (id do aparelho): o aviso de erro aparece só nele.
+    origin: String,
     /// A resposta final (rede de segurança: se a conversa não sincronizar, quem pediu ainda recebe o texto).
     result: String,
 }
@@ -69,7 +71,7 @@ fn now_ms() -> u64 {
 }
 
 fn pub_job(j: &Job) -> Value {
-    json!({ "id": j.id, "conv": j.conv, "title": j.title, "state": j.state, "created": j.created, "finished": j.finished, "note": j.note, "progress": j.progress, "pat": j.pat, "result": j.result })
+    json!({ "id": j.id, "conv": j.conv, "title": j.title, "state": j.state, "created": j.created, "finished": j.finished, "note": j.note, "progress": j.progress, "pat": j.pat, "result": j.result, "origin": j.origin })
 }
 
 /// Fecha um executor que sobrou de uma execução anterior do studio (atualização, reinício): ele segura a pasta
@@ -168,7 +170,7 @@ fn ensure_runner(app: &App) -> Result<(), String> {
     Ok(())
 }
 
-pub fn start(app: &App, conv: &str, title: &str) -> Result<Value, String> {
+pub fn start(app: &App, conv: &str, title: &str, origin: &str) -> Result<Value, String> {
     if !crate::uistate::valid_key(&format!("c-{conv}")) {
         return Err("conversa".into());
     }
@@ -178,7 +180,7 @@ pub fn start(app: &App, conv: &str, title: &str) -> Result<Value, String> {
             return Err(L!("Essa conversa já está rodando em segundo plano.", "This chat is already running in the background.").into());
         }
         let id = format!("{:x}", now_ms());
-        s.jobs.push(Job { id: id.clone(), conv: conv.into(), title: title.chars().take(80).collect(), state: "queued", created: now_ms(), finished: 0, note: String::new(), progress: String::new(), pat: 0, result: String::new() });
+        s.jobs.push(Job { id: id.clone(), conv: conv.into(), title: title.chars().take(80).collect(), state: "queued", created: now_ms(), finished: 0, note: String::new(), progress: String::new(), pat: 0, result: String::new(), origin: origin.chars().take(40).collect() });
         let keep = s.jobs.len().saturating_sub(30);
         s.jobs.drain(..keep);
         s.activity = Some(Instant::now());
@@ -187,6 +189,13 @@ pub fn start(app: &App, conv: &str, title: &str) -> Result<Value, String> {
     wake().notify_waiters();
     let s = st().lock().unwrap();
     Ok(pub_job(s.jobs.last().unwrap()))
+}
+
+/// Sinal de vida do executor (qualquer pedido dele).
+pub fn touch() {
+    if let Ok(mut s) = st().lock() {
+        s.runner_seen = Some(Instant::now());
+    }
 }
 
 /// O executor conta o que está fazendo (vale também como sinal de vida da tarefa).
@@ -198,6 +207,7 @@ pub fn progress(v: &Value) {
         j.progress = text;
         j.pat = now_ms();
     }
+    s.runner_seen = Some(Instant::now());
     s.activity = Some(Instant::now());
 }
 
@@ -328,8 +338,10 @@ pub async fn watch(app: Arc<App>) {
                     lost.push(j.clone());
                 }
             }
-            // rodando e o executor sem dar sinal há 90 s: caiu no meio
-            if busy && (!alive || seen_ago > Duration::from_secs(90)) {
+            // rodando e o processo do executor morreu, ou está de pé mas sem dar nenhum sinal há 10 min
+            // (travado). Sinal = qualquer pedido dele ao studio; uma tarefa longa de exploração faz vários.
+            // (o processo pode ter passado a vez para outra janela do mesmo perfil: aí ela é que dá sinal)
+            if busy && ((!alive && seen_ago > Duration::from_secs(60)) || seen_ago > Duration::from_secs(600)) {
                 for j in s.jobs.iter_mut().filter(|j| j.state == "running") {
                     j.state = "error";
                     j.finished = now_ms();

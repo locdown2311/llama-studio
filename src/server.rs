@@ -278,6 +278,11 @@ async fn guard(req: Request, next: Next) -> Response {
     if !matches!(host.as_str(), "127.0.0.1" | "localhost" | "[::1]") {
         return (StatusCode::FORBIDDEN, L!("Host não permitido", "Host not allowed")).into_response();
     }
+    // qualquer pedido do executor vale como sinal de vida (com vários subagentes, a batida dele pode ficar
+    // presa na fila de conexões do navegador, que abre no máximo 6 por endereço)
+    if is_executor(&req) {
+        crate::jobs::touch();
+    }
     let path = req.uri().path();
     // o <video> da página não manda cabeçalhos: o arquivo renderizado é só leitura
     let is_api = path.starts_with("/api/") && !(req.method() == Method::GET && path == "/api/videos/file");
@@ -754,7 +759,7 @@ async fn jobs_list() -> Res {
 }
 async fn jobs_start(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
-    ok(crate::jobs::start(&app, st(&v, "conv"), st(&v, "title")).map_err(bad)?)
+    ok(crate::jobs::start(&app, st(&v, "conv"), st(&v, "title"), st(&v, "origin")).map_err(bad)?)
 }
 async fn jobs_next(Query(qs): Q) -> Res {
     ok(crate::jobs::next(q(&qs, "wait").parse().unwrap_or(25)).await)

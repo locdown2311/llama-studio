@@ -121,7 +121,7 @@ pub fn fire(app: &App, s: &Value) -> Result<String, String> {
                 }
                 c["updatedAt"] = json!(t);
                 crate::uistate::put(app, &format!("c-{cid}"), t, &c)?;
-                crate::jobs::start(app, cid, name)?;
+                crate::jobs::start(app, cid, name, "agenda")?;
                 return Ok(cid.to_string());
             }
         }
@@ -141,7 +141,7 @@ pub fn fire(app: &App, s: &Value) -> Result<String, String> {
             let _ = crate::uistate::put(app, "schedules", t, &Value::Array(list));
         }
     }
-    crate::jobs::start(app, &cid, name)?;
+    crate::jobs::start(app, &cid, name, "agenda")?;
     Ok(cid)
 }
 
