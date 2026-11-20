@@ -3997,7 +3997,7 @@ function renderTool(tc, res, live) {
 
   // página HTML/SVG que o agente escreveu: a prévia aparece logo abaixo (só na última vez que mexeu no arquivo)
   const pvPath = prevToolPath(name, args, res);
-  if (pvPath && !live && prevIsLastTouch(cur(), tc.id, pvPath)) el.append(prevToolCard(tc, pvPath, cur()));
+  if (pvPath && prevIsLastTouch(cur(), tc.id, pvPath)) el.append(prevToolCard(tc, pvPath, cur()));
 
   return el;
 }
