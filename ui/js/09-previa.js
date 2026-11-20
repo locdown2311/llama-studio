@@ -35,7 +35,7 @@ function prevCodeParts(key, text, lang) {
   return {
     cls: ' has-prev' + (shows ? ' show-prev' : ''),
     tabs: `<span class="prev-tabs"><button type="button" data-prevact="view"${shows ? ' class="on"' : ''}>${L('Visualizar')}</button><button type="button" data-prevact="code"${shows ? '' : ' class="on"'}>${L('Código')}</button></span>`,
-    tools: `<button type="button" class="prev-tool" data-prevact="full" title="${esc(L('Tela cheia'))}" aria-label="${esc(L('Tela cheia'))}">${svg('expand')}</button><button type="button" class="prev-tool" data-prevact="tab" title="${esc(L('Abrir numa aba'))}" aria-label="${esc(L('Abrir numa aba'))}">${svg('external')}</button>`,
+    tools: `<button type="button" class="prev-tool prev-pick" data-prevact="pick" title="${esc(L('Comentar um elemento'))}" aria-label="${esc(L('Comentar um elemento'))}">${svg('chat')}</button><button type="button" class="prev-tool" data-prevact="full" title="${esc(L('Tela cheia'))}" aria-label="${esc(L('Tela cheia'))}">${svg('expand')}</button><button type="button" class="prev-tool" data-prevact="tab" title="${esc(L('Abrir numa aba'))}" aria-label="${esc(L('Abrir numa aba'))}">${svg('external')}</button>`,
     box: `<div class="html-prev" data-keep="${key}" data-lang="${pl}"></div>`,
   };
 }
@@ -44,6 +44,8 @@ function prevCodeParts(key, text, lang) {
 function prevDoc(src, lang) {
   const shim = '<script>(()=>{try{localStorage.length}catch(e){const m=()=>{const d=new Map();return{getItem:k=>d.has(String(k))?d.get(String(k)):null,setItem:(k,v)=>{d.set(String(k),String(v))},removeItem:k=>{d.delete(String(k))},clear:()=>d.clear(),key:i=>[...d.keys()][i]??null,get length(){return d.size}}};for(const n of["localStorage","sessionStorage"])try{Object.defineProperty(window,n,{value:m(),configurable:true})}catch(_){}}})()<\/script>';
   const size = '<script>(()=>{const s=()=>{try{parent.postMessage({studioPrev:1,h:Math.ceil(Math.max(document.documentElement.getBoundingClientRect().height,document.body?document.body.getBoundingClientRect().bottom+parseFloat(getComputedStyle(document.body).marginBottom||0):0))},"*")}catch(_){}};addEventListener("load",s);try{new ResizeObserver(s).observe(document.documentElement)}catch(_){}setTimeout(s,60);setTimeout(s,700)})()<\/script>';
+  // modo comentar: o studio liga por mensagem; um clique na página devolve qual elemento foi (seletor, tag, texto)
+  const pick = '<script>(()=>{let on=0,box=null;const sel=el=>{const p=[];for(let e=el;e&&e.nodeType===1&&e!==document.documentElement&&e!==document.body&&p.length<5;e=e.parentElement){if(e.id){p.unshift("#"+CSS.escape(e.id));break}let s=e.tagName.toLowerCase();const c=[...e.classList].slice(0,2);if(c.length)s+="."+c.map(x=>CSS.escape(x)).join(".");const par=e.parentElement;if(par){const sib=[...par.children].filter(x=>x.tagName===e.tagName);if(sib.length>1)s+=":nth-of-type("+(sib.indexOf(e)+1)+")"}p.unshift(s)}return p.join(" > ")||el.tagName.toLowerCase()};const mark=el=>{if(!box){box=document.createElement("div");box.style.cssText="position:fixed;pointer-events:none;z-index:2147483647;border:2px solid #6366f1;background:rgba(99,102,241,.14);border-radius:3px"}if(!box.isConnected)document.documentElement.appendChild(box);const r=el.getBoundingClientRect();Object.assign(box.style,{left:r.left+"px",top:r.top+"px",width:r.width+"px",height:r.height+"px",display:"block"})};addEventListener("mouseover",e=>{if(on===1)mark(e.target)},true);const stop=e=>{if(on===1){e.preventDefault();e.stopPropagation()}};addEventListener("mousedown",stop,true);addEventListener("pointerdown",stop,true);addEventListener("submit",stop,true);addEventListener("click",e=>{if(on!==1)return;e.preventDefault();e.stopPropagation();const el=e.target;mark(el);on=2;const r=el.getBoundingClientRect();const h=el.outerHTML.replace(/\\s+/g," ");parent.postMessage({studioPick:1,sel:sel(el),tag:el.tagName.toLowerCase(),text:(el.innerText||el.textContent||"").trim().replace(/\\s+/g," ").slice(0,120),html:h.length>240?h.slice(0,240)+"…":h,r:{x:r.left,y:r.top,w:r.width,h:r.height}},"*")},true);addEventListener("keydown",e=>{if(on&&e.key==="Escape")parent.postMessage({studioPick:1,off:1},"*")},true);addEventListener("message",e=>{if(e.source!==parent||!e.data||e.data.studioPick!==1)return;on=e.data.on?1:0;document.documentElement.style.cursor=on?"crosshair":"";if(!on&&box)box.style.display="none"})})()<\/script>';
   let html = lang === 'svg'
     ? `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#fff}body{display:grid;place-items:center;padding:12px}body>svg{max-width:100%;height:auto}</style></head><body>${src}</body></html>`
     : src;
@@ -51,7 +53,7 @@ function prevDoc(src, lang) {
   html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + shim) : html.replace(/<html[^>]*>/i, (m) => m + shim);
   if (!html.includes(shim)) html = shim + html;
   const at = html.toLowerCase().lastIndexOf('</body>');
-  return at >= 0 ? html.slice(0, at) + size + html.slice(at) : html + size;
+  return at >= 0 ? html.slice(0, at) + size + pick + html.slice(at) : html + size + pick;
 }
 
 function prevFrame(doc, inline) {
@@ -74,6 +76,82 @@ addEventListener('message', (e) => {
     const h0 = Math.ceil(Number(e.data.h) || 0);
     f.style.height = Math.max(60, Math.min(h0 || 320, Math.round(innerHeight * 0.7), 720)) + 'px';
   }
+});
+
+/* ------------------------------------------------------------ comentar um elemento da prévia
+   Liga o modo comentar: passar o mouse destaca, um clique escolhe o elemento e abre uma caixa para escrever o pedido.
+   O pedido vai para a mensagem com o seletor e o trecho do elemento, para o modelo saber exatamente o que mudar.
+   O que vem da página (seletor, texto, HTML) entra só como texto na mensagem. */
+function prevPickBtn(box) {
+  const code = box.closest('.code');
+  return code ? code.querySelector('[data-prevact="pick"]') : box.closest('.prev-card')?.querySelector('.prev-pick');
+}
+function prevPick(box, on) {
+  const f = box?.querySelector('iframe.prev-frame');
+  if (!f) { toast(L('A prévia ainda está montando.')); return; }
+  on = on ?? !box.classList.contains('picking');
+  box.classList.toggle('picking', on);
+  prevPickBtn(box)?.classList.toggle('on', on);
+  box.querySelector('.prev-pop')?.remove();
+  try { f.contentWindow.postMessage({ studioPick: 1, on }, '*'); } catch { /* a prévia foi trocada */ }
+  if (on) toast(L('Toque ou clique num elemento da prévia para comentar. Esc sai.'));
+}
+function prevPickText(box, d, note) {
+  const path = box.dataset.path;
+  const where = path ? L('Na página {0}', path) : L('Na prévia do HTML acima');
+  const what = d.text ? `<${d.tag}> "${d.text.slice(0, 80)}"` : `<${d.tag}>`;
+  const html = String(d.html || '').replace(/`/g, "'");
+  return L('{0}, no elemento `{1}` ({2}; HTML: `{3}`): {4}', where, String(d.sel).replace(/`/g, "'"), what, html, note.trim());
+}
+function prevPickAdd(text) {
+  const ed = editor();
+  if (!editorEmpty()) ed.append(document.createElement('br'));
+  ed.append(document.createTextNode(text));
+  focusEditor(true); updateSendBtn();
+}
+function prevPickPop(box, d) {
+  box.querySelector('.prev-pop')?.remove();
+  const ta = h('textarea.textarea', { rows: 2, placeholder: L('O que mudar neste elemento?') });
+  const go = (now) => {
+    const t = ta.value.trim();
+    if (!t) { ta.focus(); return; }
+    prevPickAdd(prevPickText(box, d, t));
+    if (now) { prevPick(box, false); send(); return; }
+    pop.remove();
+    try { box.querySelector('iframe.prev-frame').contentWindow.postMessage({ studioPick: 1, on: true }, '*'); } catch { /* trocada */ }
+    toast(L('Comentário adicionado à mensagem. Escolha outro elemento ou envie.'));
+  };
+  ta.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); go(e.ctrlKey || e.metaKey); }
+    if (e.key === 'Escape') { e.preventDefault(); prevPick(box, false); }
+  });
+  const pop = h('div.prev-pop', null,
+    h('div.prev-pop-el', { title: d.sel }, h('code', null, '<' + d.tag + '>'), d.text ? h('span', null, d.text.slice(0, 60)) : null),
+    ta,
+    h('div.prev-pop-foot', null,
+      h('button.btn.sm', { type: 'button', onclick: () => prevPick(box, false) }, L('Sair')),
+      h('button.btn.sm', { type: 'button', onclick: () => go(false) }, L('Adicionar')),
+      h('button.btn.sm.primary', { type: 'button', onclick: () => go(true) }, L('Enviar'))));
+  const f = box.querySelector('iframe.prev-frame');
+  const fh = f.getBoundingClientRect().height;
+  const r = d.r || { x: 0, y: 0, w: 0, h: 0 };
+  box.append(pop);
+  const ph = pop.offsetHeight || 130, pw = pop.offsetWidth || 280, bw = box.clientWidth;
+  let top = r.y + r.h + 6;
+  if (top + ph > fh) top = Math.max(4, r.y - ph - 6);
+  pop.style.top = Math.max(4, Math.min(top, fh - ph - 4)) + 'px';
+  pop.style.left = Math.max(4, Math.min(r.x, bw - pw - 4)) + 'px';
+  ta.focus();
+}
+addEventListener('message', (e) => {
+  if (!e.data || e.data.studioPick !== 1) return;
+  const f = [...document.querySelectorAll('iframe.prev-frame[data-inline]')].find((x) => x.contentWindow === e.source);
+  const box = f?.closest('.html-prev');
+  if (!box || !box.classList.contains('picking')) return;
+  if (e.data.off) { prevPick(box, false); return; }
+  const s = (v, n) => String(v ?? '').slice(0, n);
+  const r = e.data.r || {};
+  prevPickPop(box, { sel: s(e.data.sel, 300), tag: s(e.data.tag, 20).replace(/[^a-z0-9-]/gi, ''), text: s(e.data.text, 120), html: s(e.data.html, 260), r: { x: +r.x || 0, y: +r.y || 0, w: +r.w || 0, h: +r.h || 0 } });
 });
 
 /** Tela cheia (janela do studio). */
@@ -190,6 +268,7 @@ function prevToolCard(tc, path, conv) {
       h('span.prev-card-ico', { html: svg('eye') }),
       h('span.prev-card-name', { title: path }, basename(path)),
       h('span.spacer'),
+      view ? h('button.prev-tool.prev-pick', { type: 'button', title: L('Comentar um elemento'), 'aria-label': L('Comentar um elemento'), html: svg('chat'), onclick: (e) => prevPick(e.currentTarget.closest('.prev-card').querySelector('.html-prev')) }) : null,
       h('button.prev-tool', { type: 'button', title: L('Atualizar'), 'aria-label': L('Atualizar'), html: svg('refresh'), onclick: (e) => { const b = e.currentTarget.closest('.prev-card').querySelector('.html-prev'); if (b) { delete b.dataset.mounted; b.innerHTML = ''; mountPreviews(); } } }),
       h('button.prev-tool', { type: 'button', title: L('Tela cheia'), 'aria-label': L('Tela cheia'), html: svg('expand'), onclick: async () => { try { prevFull(await prevFromWorkspace(path, ws), basename(path)); } catch (x) { toast(x.message, 'err'); } } }),
       h('button.prev-tool', { type: 'button', title: L('Abrir numa aba'), 'aria-label': L('Abrir numa aba'), html: svg('external'), onclick: async () => { try { prevTab(await prevFromWorkspace(path, ws), basename(path)); } catch (x) { toast(x.message, 'err'); } } }),
@@ -245,6 +324,7 @@ document.addEventListener('click', (e) => {
     code.classList.toggle('show-prev', view);
     code.querySelectorAll('.prev-tabs button').forEach((x) => x.classList.toggle('on', x.dataset.prevact === act));
     mountPreviews();
-  } else if (act === 'full') prevFull(prevDoc(src, lang));
+  } else if (act === 'pick') { if (!code.classList.contains('show-prev')) code.querySelector('[data-prevact="view"]')?.click(); prevPick(box); }
+  else if (act === 'full') prevFull(prevDoc(src, lang));
   else if (act === 'tab') prevTab(prevDoc(src, lang));
 });

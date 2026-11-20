@@ -28,6 +28,7 @@ mod locate;
 mod engines;
 mod hf;
 mod jobs;
+mod kb;
 mod mcp;
 mod models;
 mod nim;

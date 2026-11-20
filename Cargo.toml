@@ -1,6 +1,6 @@
 [package]
 name = "llama-studio"
-version = "2.99.4"
+version = "2.100.0"
 license = "GPL-3.0-or-later"
 edition = "2021"
 description = "Interface local para o llama-server com pasta de trabalho, habilidades e conectores MCP"
@@ -29,6 +29,7 @@ jpeg-encoder = "0.7"
 png = "0.18"
 flate2 = "1"
 base64 = "0.22"
+pdf-extract = "0.12"
 wry = { version = "0.57", optional = true }
 tao = { version = "0.37", optional = true }
 tray-icon = { version = "0.26", optional = true, default-features = false }

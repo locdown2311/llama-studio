@@ -54,7 +54,7 @@ function editorEmpty() { return !readEditor().length; }
 
 async function submit(conv, item) {
   const { content, parts, refs } = item;
-  conv.messages.push({ role: 'user', content, parts, refs, ts: Date.now(), ...(conv.plan ? { plan: true } : {}) });
+  conv.messages.push({ role: 'user', content, parts, refs, ts: Date.now(), ...(conv.plan ? { plan: true } : {}), ...(item.peer ? { peer: item.peer } : {}) });
   if (conv.title === 'Nova conversa' || conv.title === L('Nova conversa')) {
     const plain = parts.filter((p) => p.t === 'text').map((p) => p.v).join(' ').replace(/\s+/g, ' ').trim();
     conv.title = (plain || parts.map((p) => p.name).filter(Boolean).join(', ')).slice(0, 60);
@@ -63,7 +63,7 @@ async function submit(conv, item) {
   if (autoLevelOf(conv) !== 'desligado') await autoRoute(conv, conv.messages[conv.messages.length - 1]);
   saveConvs(); renderConvList();
   if (conv.id === S.curId) { renderChatTitle(); renderMessages(false); updatePickers(); }
-  if (bgMode()) { await startBg(conv); return; }
+  if (bgMode() && !item.noBg) { await startBg(conv); return; }
   await runAgent(conv);
 }
 

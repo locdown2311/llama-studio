@@ -93,6 +93,12 @@ const DEFS: &[Def] = &[
       r#"{"type":"object","properties":{"action":{"type":"string","enum":["list","get","add","update","remove"]},"query":{"type":"string"},"id":{"type":"integer"},"title":{"type":"string"},"kind":{"type":"string","description":"função, endereço, string, hipótese..."},"addr":{"type":"string","description":"ex.: 0x401000"},"status":{"type":"string","enum":["hipótese","confirmado","descartado"]},"text":{"type":"string"}},"required":["action"]}"#),
     d("ask_user", "ask", false, true, "Pergunta ao usuário com opções para ele escolher (ele pode marcar uma ou mais e sempre pode escrever a própria resposta). Use quando houver uma decisão que é dele e muda o resultado: abordagem, escopo, formato, o que priorizar. Até 4 perguntas por vez, 2 a 4 opções cada, a recomendada primeiro; não inclua \"Outro\": o campo para escrever já vem no fim. Espera a resposta.",
       r#"{"type":"object","properties":{"questions":{"type":"array","minItems":1,"maxItems":4,"description":"1 a 4 perguntas","items":{"type":"object","properties":{"question":{"type":"string","description":"A pergunta completa, clara, terminando com ?"},"header":{"type":"string","description":"Rótulo curto (até 12 letras): Abordagem, Formato, Escopo..."},"options":{"type":"array","minItems":2,"maxItems":4,"items":{"type":"object","properties":{"label":{"type":"string","description":"A escolha, em 1 a 5 palavras. Na recomendada, termine com (Recomendado) e ponha primeiro"},"description":{"type":"string","description":"O que acontece se escolher esta (uma linha)"}},"required":["label"]}}},"required":["question","options"]}}},"required":["questions"]}"#),
+    d("search_knowledge", "kb", false, true, "Procura na base de conhecimento do projeto (documentos, PDFs, manuais, anotações e código das fontes que o usuário escolheu) e devolve os trechos mais relevantes, com o arquivo e a linha. Busca por palavras (sem acento, aceita variações): use os termos que estariam no documento, não a pergunta inteira. Faça 2 ou 3 buscas com palavras diferentes se a primeira não achar. Para ler mais de um documento achado, use read_file com o caminho e a linha.",
+      r#"{"type":"object","properties":{"query":{"type":"string","description":"Palavras-chave do que procurar (ex.: \"prazo entrega multa contrato\")"},"k":{"type":"integer","description":"Quantos trechos (padrão 6, até 15)"},"path":{"type":"string","description":"Opcional: só arquivos cujo caminho contém este texto"}},"required":["query"]}"#),
+    d("list_chats", "peers", false, true, "Lista as outras conversas deste projeto: id, título, se está respondendo agora e do que tratam. Use antes de send_to_chat.",
+      r#"{"type":"object","properties":{}}"#),
+    d("send_to_chat", "peers", false, true, "Manda uma mensagem para outra conversa do mesmo projeto, como se fosse um pedido: ela responde com o modelo, as ferramentas e o contexto dela. Use para passar uma descoberta ou decisão, pedir algo que a outra conversa já sabe ou dividir o trabalho. Com wait_reply (padrão), espera a resposta dela (até 10 min) e a devolve aqui; sem, só entrega. Escreva a mensagem completa: a outra conversa não vê esta.",
+      r#"{"type":"object","properties":{"chat":{"type":"string","description":"id ou título da conversa (veja list_chats)"},"message":{"type":"string","description":"O pedido ou a informação, completo"},"wait_reply":{"type":"boolean","description":"Esperar a resposta (padrão true)"}},"required":["chat","message"]}"#),
     d("update_todos", "todo", false, true, "Mantém a lista de tarefas desta conversa, visível para o usuário. Use em tarefas com 3 ou mais passos: crie a lista no começo e atualize ao começar (in_progress) e terminar (done) cada item. Mande sempre a lista inteira; só um item in_progress por vez.",
       r#"{"type":"object","properties":{"todos":{"type":"array","items":{"type":"object","properties":{"text":{"type":"string","description":"O que fazer, curto e no imperativo"},"status":{"type":"string","enum":["pending","in_progress","done"]}},"required":["text","status"]}}},"required":["todos"]}"#),
     d("search_tools", "toolsearch", false, true, "Ferramentas dos conectores MCP. query: procura por palavras-chave e mostra nome e descrição (não carrega). names: carrega essas (nomes exatos) para os próximos passos.",
@@ -419,6 +425,20 @@ pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[Strin
     }
     if has("computer") {
         parts.push(L!("Computador: as ferramentas computer_* controlam a área de trabalho do usuário. Prefira computer_elements (lista numerada) a coordenadas. Confirme o resultado depois de cada ação. Se o programa tem conector MCP (x64dbg, dnspy, Unity...), use as ferramentas do conector em vez de controlar a janela dele.", "Computer: the computer_* tools control the user's desktop. Prefer computer_elements (numbered list) over coordinates. Check the result after each action. If the program has an MCP connector (x64dbg, dnspy, Unity...), use the connector's tools instead of controlling its window.").into());
+    }
+    if has("kb") {
+        parts.push(L!(
+            "Base de conhecimento: este projeto tem documentos indexados (search_knowledge). Antes de responder perguntas sobre o assunto do projeto, procure lá e baseie a resposta nos trechos achados, citando o arquivo (e a linha, quando houver). Se não achar, diga que não está na base em vez de inventar.",
+            "Knowledge base: this project has indexed documents (search_knowledge). Before answering questions about the project's subject, search there and base the answer on the passages found, citing the file (and line, when there is one). If you find nothing, say it is not in the base instead of making it up."
+        )
+        .into());
+    }
+    if has("peers") {
+        parts.push(L!(
+            "Outras conversas do projeto: com list_chats e send_to_chat você conversa com as outras conversas deste projeto. Use quando outra já tem o contexto de que você precisa ou para entregar algo que ela vai usar; não use para o que você mesmo resolve.",
+            "Other chats in the project: with list_chats and send_to_chat you can talk to the other chats in this project. Use it when another one already has the context you need or to hand over something it will use; do not use it for what you can solve yourself."
+        )
+        .into());
     }
     if has("ask") {
         parts.push(L!(

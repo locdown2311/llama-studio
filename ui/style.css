@@ -2064,3 +2064,28 @@ details.verify.warn summary svg { color: var(--warn); }
 .followup span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .followup:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); background: color-mix(in srgb, var(--accent) 6%, var(--bg)); }
 @media (max-width: 640px) { .followup { font-size: 13.5px; padding: 8px 12px 8px 10px; } .followup span { white-space: normal; } }
+
+/* comentar um elemento da prévia */
+.html-prev { position: relative; }
+.html-prev.picking { outline: 2px solid var(--accent); outline-offset: -2px; }
+.prev-tool.on { background: var(--accent-soft, var(--hover)); color: var(--accent); }
+.prev-pop { position: absolute; z-index: 5; width: min(320px, calc(100% - 8px)); background: var(--card); color: var(--text); border: 1px solid var(--line-2, var(--line)); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.18); padding: 10px; display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.prev-pop-el { display: flex; gap: 6px; align-items: baseline; min-width: 0; color: var(--muted); font-size: 12px; }
+.prev-pop-el code { color: var(--accent); flex: none; }
+.prev-pop-el span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.prev-pop .textarea { min-height: 54px; font-size: 13px; }
+.prev-pop-foot { display: flex; gap: 6px; justify-content: flex-end; }
+
+/* mensagem que veio de outra conversa do projeto */
+.u-peer { display: inline-flex; align-items: center; gap: 6px; align-self: flex-end; border: 1px solid var(--line); background: var(--card); color: var(--accent); font: inherit; font-size: 12px; padding: 3px 9px; border-radius: 999px; cursor: pointer; margin-bottom: 4px; max-width: 100%; }
+.u-peer svg { width: 13px; height: 13px; flex: none; }
+.u-peer:hover { background: var(--hover); }
+
+/* base de conhecimento no formulário do projeto */
+.kb-ed { display: flex; flex-direction: column; gap: 8px; }
+.kb-on, .kb-src { display: flex; align-items: center; gap: 8px; font-size: 13px; min-width: 0; }
+.kb-on { font-weight: 600; }
+.kb-src .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; font-size: 12px; }
+.kb-src svg { width: 14px; height: 14px; flex: none; color: var(--muted); }
+.kb-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.kb-info { min-height: 1em; }

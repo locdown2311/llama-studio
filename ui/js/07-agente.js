@@ -391,6 +391,12 @@ async function runAgent(conv) {
     const groups = [...new Set([...enabledGroups(), ...(au.groups || [])])].filter((g) => TOOL_GROUPS.includes(g) && !(au.block || []).includes(g) && !(g === 'ask' && conv.noAsk));
     // conversa de um projeto de vídeo: a equipe escreve as cenas (video_scenes)
     if (projectOf(conv)?.video && !groups.includes('video')) groups.push('video');
+    // base de conhecimento: vale quando o projeto ligou; outras conversas: só em projeto com mais de uma
+    for (const [g, on] of [['kb', kbOn(conv)], ['peers', peersOn(conv) && S.settings.tools.peers !== false]]) {
+      const at = groups.indexOf(g);
+      if (on && at < 0) groups.push(g);
+      if (!on && at >= 0) groups.splice(at, 1);
+    }
     act.mcp = [...new Set([...act.mcp, ...(au.mcp || [])])];
     act.skills = [...new Set([...act.skills, ...(au.skills || [])])].filter((id) => S.skills.some((s) => s.id === id));
     const sel = { groups, mcp: act.mcp.filter((n) => S.mcp.some((s) => s.name === n && s.status === 'connected')), skills: act.skills };

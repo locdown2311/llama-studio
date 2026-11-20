@@ -98,6 +98,9 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/locate", post(locate_h))
         .route("/api/remember", post(remember))
         .route("/api/stat", post(stat))
+        .route("/api/kb/status", post(kb_status))
+        .route("/api/kb/search", post(kb_search))
+        .route("/api/kb/clear", post(kb_clear))
         .route("/api/plugins", get(plugins_list))
         .route("/api/plugins/add", post(plugins_add))
         .route("/api/plugins/market/remove", post(plugins_market_remove))
@@ -1172,6 +1175,15 @@ async fn stat(State(app): S, b: Bytes) -> Res {
 async fn plugins_changed(app: &Arc<App>) -> Res {
     app.mcp.sync(&app.http, &app.mcp_file()).await;
     ok(crate::plugins::summary(&app.root))
+}
+async fn kb_status(State(app): S, b: Bytes) -> Res {
+    ok(crate::kb::status(app, body(&b)).await.map_err(bad)?)
+}
+async fn kb_search(State(app): S, b: Bytes) -> Res {
+    ok(crate::kb::search(app, body(&b)).await.map_err(bad)?)
+}
+async fn kb_clear(State(app): S, b: Bytes) -> Res {
+    ok(crate::kb::clear(app, body(&b)).await.map_err(bad)?)
 }
 async fn plugins_list(State(app): S) -> Res {
     ok(crate::plugins::summary(&app.root))

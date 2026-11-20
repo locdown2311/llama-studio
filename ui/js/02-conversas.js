@@ -972,6 +972,8 @@ async function editProject(p) {
 
   persona.value = p?.personaId || "";
 
+  const kbEd = kbEditor(p);
+
   const browse = h(
     "button.btn",
     {
@@ -1021,6 +1023,7 @@ async function editProject(p) {
         dir: st.path,
         instructions: instr.value.trim(),
         personaId: persona.value || null,
+        kb: kbEd.read(),
         createdAt: Date.now(),
         open: true,
       };
@@ -1039,6 +1042,7 @@ async function editProject(p) {
         dir: st.path,
         instructions: instr.value.trim(),
         personaId: persona.value || null,
+        kb: kbEd.read(),
       });
 
       saveProjects();
@@ -1079,7 +1083,9 @@ async function editProject(p) {
         null,
         h("label", null, L("Personalidade das conversas novas")),
         persona
-      )
+      ),
+
+      h("div.field", null, h("label", null, L("Base de conhecimento")), kbEd.el)
     ),
 
     foot: [
@@ -2554,6 +2560,15 @@ function renderUser(m, idx, conv) {
 
     h("div.stamp", null, fmtStamp(m.ts)),
 
+    m.peer
+      ? h(
+          "button.u-peer",
+          { type: "button", title: L("Abrir a conversa que mandou"), onclick: () => selectConv(m.peer.id) },
+          ic("chat"),
+          L("Mensagem da conversa «{0}»", m.peer.title)
+        )
+      : null,
+
     thumbs,
     descNote,
 
@@ -3169,6 +3184,9 @@ const TOOL_ICON = {
   explore: "compass",
   update_todos: "list",
   ask_user: "chat",
+  search_knowledge: "book",
+  list_chats: "chat",
+  send_to_chat: "chat",
   notebook: "book",
 };
 
