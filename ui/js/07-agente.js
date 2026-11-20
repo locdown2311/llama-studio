@@ -757,7 +757,55 @@ async function runAgent(conv) {
   } finally {
     // parada forçada: a conversa já foi liberada (e talvez já tenha outra resposta rodando)
     if (!ac.dead) finishRun(conv, ac);
+    if (!ac.signal.aborted) followupsSoon(conv);
   }
+}
+
+/* ------------------------------------------------------------ sugestões de continuação */
+/** Depois de uma resposta completa: 2 ou 3 próximos pedidos prováveis, em botões embaixo dela. */
+function followupsSoon(conv) {
+  if (S.settings.followups === false || EXECUTOR) return;
+  const last = conv.messages.at(-1);
+  if (!last || last.role !== 'assistant' || last.tool_calls?.length || last.error || last.followups || last.ab) return;
+  const answer = splitThink(typeof last.content === 'string' ? last.content : '').text.trim();
+  if (answer.length < 40) return;
+  setTimeout(() => makeFollowups(conv, last, answer).catch(() => {}), 50);
+}
+
+async function makeFollowups(conv, msg, answer) {
+  const um = [...conv.messages].reverse().find((m) => m.role === 'user' && !m.hidden);
+  const ask = um ? clipText(userContent(um), 1500) : '';
+  const sys = L('Você sugere os próximos pedidos que o usuário provavelmente vai fazer depois desta resposta de um assistente. Escreva 2 ou 3, cada um com no máximo 8 palavras, no imperativo e na voz do usuário (ex.: "Rode os testes", "Explique a parte do cache", "Faça a versão para celular"), no mesmo idioma do pedido. Concretos e ligados ao que acabou de acontecer; nada genérico como "Obrigado", "Explique melhor" ou "Continue". Se a resposta terminou com uma pergunta ao usuário, sugira respostas curtas a ela. Responda só com um JSON: ["...", "..."]');
+  const user = L('PEDIDO DO USUÁRIO:\n{0}\n\nRESPOSTA DO ASSISTENTE:\n{1}', ask, clipText(answer.length > 5000 ? answer.slice(0, 1500) + '\n[...]\n' + answer.slice(-3000) : answer, 4600));
+  let out = '';
+  const p = apiFor('background') || mainApiForChat(conv)?.id;
+  if (p) {
+    const m = { content: '', reasoning: '', tool_calls: [] };
+    await streamApi([{ role: 'system', content: sys }, { role: 'user', content: user }], [], m, new AbortController().signal, () => {}, { _p: p, temperature: 0.4, max_tokens: 300, _timeout: 60000, _bg: true });
+    out = splitThink(m.content || '').text;
+  } else {
+    if (running(conv)) return;
+    out = await sideAsk(conv, sys, user, { maxTokens: 200, temperature: 0.4 });
+  }
+  let list = [];
+  try { list = JSON.parse((out.match(/\[[\s\S]*\]/) || ['[]'])[0]); } catch { list = out.split('\n').map((l) => l.replace(/^[-*\d.)\s"]+|["\s,]+$/g, '')); }
+  const seen = new Set();
+  list = list.map((x) => String(x || '').trim().replace(/^["']|["']$/g, '')).filter((x) => x.length >= 2 && x.length <= 90 && !seen.has(x.toLowerCase()) && seen.add(x.toLowerCase())).slice(0, 3);
+  // só se a conversa ainda está parada nesta resposta (ninguém mandou outra coisa enquanto isso)
+  if (list.length < 2 || conv.messages.at(-1) !== msg || running(conv)) return;
+  msg.followups = list;
+  saveConvs();
+  if (conv.id === S.curId) scheduleRender();
+}
+
+/** Um toque na sugestão: com a caixa vazia envia; com texto escrito, soma ao que já está lá (não apaga). */
+function useFollowup(conv, text) {
+  if (running(conv)) return;
+  if (!editorEmpty()) { focusEditor(true); document.execCommand('insertText', false, (editor().textContent.endsWith(' ') ? '' : ' ') + text); updateSendBtn(); return; }
+  // somem na hora (o redesenho da conversa vem logo depois)
+  document.querySelectorAll('.followups').forEach((e) => e.remove());
+  setEditorText(text);
+  send();
 }
 
 /** Fecha uma resposta: marca o que ficou pela metade, libera a conversa e segue a fila. */

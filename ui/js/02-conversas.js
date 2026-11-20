@@ -3030,6 +3030,12 @@ function renderAI(b, conv, isLast) {
 
     !live ? verifyPanel(conv, b) : null,
 
+    // sugestões de continuação: só na última resposta, com a conversa parada
+    !live && last?.followups?.length && conv.messages.at(-1) === last && !running(conv)
+      ? h("div.followups", null, last.followups.map((t) =>
+          h("button.followup", { type: "button", title: L("Enviar este pedido"), onclick: () => useFollowup(conv, t) }, ic("arrow-right"), h("span", null, t))))
+      : null,
+
     !live
       ? h(
           "div.chips",

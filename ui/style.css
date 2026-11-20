@@ -2045,3 +2045,11 @@ details.verify.warn summary svg { color: var(--warn); }
   .code.has-prev .prev-tabs { margin-left: 6px; }
   .prev-card-head { padding-left: 10px; }
 }
+
+/* sugestões de continuação */
+.followups { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 2px; }
+.followup { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 6px 12px 6px 10px; border: 1px solid var(--line); border-radius: 99px; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; text-align: left; transition: border-color .12s, background .12s; }
+.followup svg { width: 13px; height: 13px; flex: none; color: var(--accent); }
+.followup span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.followup:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); background: color-mix(in srgb, var(--accent) 6%, var(--bg)); }
+@media (max-width: 640px) { .followup { font-size: 13.5px; padding: 8px 12px 8px 10px; } .followup span { white-space: normal; } }

@@ -2431,4 +2431,9 @@ const I18N_EN = {
   "Esconder a prévia": "Hide the preview",
   "Mostrar a prévia": "Show the preview",
   "Montando a prévia...": "Building the preview...",
+  "Sugestões de continuação": "Follow-up suggestions",
+  "No fim de cada resposta, 2 ou 3 botões com o próximo pedido provável (um toque envia). Gera com uma resposta curta da API de segundo plano, da API da conversa ou do modelo local.": "At the end of each answer, 2 or 3 buttons with the likely next request (one tap sends it). Generated with a short answer from the background API, the chat's API or the local model.",
+  "Você sugere os próximos pedidos que o usuário provavelmente vai fazer depois desta resposta de um assistente. Escreva 2 ou 3, cada um com no máximo 8 palavras, no imperativo e na voz do usuário (ex.: \"Rode os testes\", \"Explique a parte do cache\", \"Faça a versão para celular\"), no mesmo idioma do pedido. Concretos e ligados ao que acabou de acontecer; nada genérico como \"Obrigado\", \"Explique melhor\" ou \"Continue\". Se a resposta terminou com uma pergunta ao usuário, sugira respostas curtas a ela. Responda só com um JSON: [\"...\", \"...\"]": "You suggest the next requests the user will probably make after this answer from an assistant. Write 2 or 3, each with at most 8 words, in the imperative and in the user's voice (e.g. \"Run the tests\", \"Explain the cache part\", \"Make the mobile version\"), in the same language as the request. Concrete and tied to what just happened; nothing generic like \"Thanks\", \"Explain more\" or \"Continue\". If the answer ended with a question to the user, suggest short answers to it. Reply with only a JSON: [\"...\", \"...\"]",
+  "PEDIDO DO USUÁRIO:\n{0}\n\nRESPOSTA DO ASSISTENTE:\n{1}": "USER REQUEST:\n{0}\n\nASSISTANT ANSWER:\n{1}",
+  "Enviar este pedido": "Send this request",
 };
