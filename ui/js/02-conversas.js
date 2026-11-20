@@ -1776,6 +1776,9 @@ function morph(a, b) {
 
   if (a.nodeType !== 1) return;
 
+  // prévia montada (iframe): tirar ou mexer recarregaria a página; mesma chave = fica como está
+  if (a.dataset.keep && a.dataset.keep === b.dataset.keep) return;
+
   for (const { name } of [...a.attributes])
     if (!b.hasAttribute(name)) a.removeAttribute(name);
 
@@ -3985,6 +3988,10 @@ function renderTool(tc, res, live) {
   // pesquisa na web: os resultados viram links (abrem no navegador do sistema, só se você clicar)
   const web = webCards(name, res);
   el.append(h("div.tool-card", null, head, web, bodyEl));
+
+  // página HTML/SVG que o agente escreveu: a prévia aparece logo abaixo (só na última vez que mexeu no arquivo)
+  const pvPath = prevToolPath(name, args, res);
+  if (pvPath && !live && prevIsLastTouch(cur(), tc.id, pvPath)) el.append(prevToolCard(tc, pvPath, cur()));
 
   return el;
 }

@@ -2009,3 +2009,39 @@ details.verify.warn summary svg { color: var(--warn); }
 .askq, .askq-item, .askq-opts { grid-template-columns: minmax(0, 1fr); min-width: 0; }
 .askq-opt, .askq-other, .askq-txt b, .askq-txt span { min-width: 0; overflow-wrap: anywhere; }
 .askq-other { width: 0; }
+
+/* prévia de HTML/SVG (09-previa.js) */
+.code.has-prev .html-prev { display: none; }
+.code.has-prev.show-prev .html-prev { display: block; }
+.code.has-prev.show-prev > pre, .code.has-prev.show-prev > .code-more { display: none; }
+.code.has-prev.show-prev.collapsed { max-height: none; }
+.prev-frame { display: block; width: 100%; height: 320px; border: 0; background: #fff; }
+.html-prev { background: #fff; border-top: 1px solid var(--line); }
+.prev-tabs { display: inline-flex; gap: 2px; margin-left: 10px; padding: 2px; border-radius: 7px; background: var(--bg2); border: 1px solid var(--line); }
+.prev-tabs button { border: 0; background: none; color: var(--muted); font: inherit; font-size: 11.5px; font-weight: 600; padding: 2px 9px; border-radius: 5px; cursor: pointer; }
+.prev-tabs button.on { background: var(--bg); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / .12); }
+.prev-tool { display: inline-grid; place-items: center; width: 26px; height: 24px; border: 0; background: none; color: var(--muted); border-radius: 6px; cursor: pointer; padding: 0; }
+.prev-tool:hover { background: var(--bg2); color: var(--text); }
+.prev-tool svg { width: 14px; height: 14px; }
+.prev-card { margin-top: 8px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--bg); }
+.prev-card-head { display: flex; align-items: center; gap: 6px; padding: 6px 8px 6px 12px; font-size: 12.5px; }
+.prev-card-head .spacer { flex: 1; }
+.prev-card-ico { display: grid; width: 15px; color: var(--accent); }
+.prev-card-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prev-card .html-prev { min-height: 60px; }
+.prev-wait { padding: 14px; color: #555; }
+.prev-full { height: min(78vh, 900px); margin: -4px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); }
+.prev-full .prev-frame { height: 100%; }
+.modal.wide:has(.prev-full) { width: min(1280px, 96vw); max-width: none; }
+.wp-tabs { display: flex; margin: 0 0 8px; align-items: center; }
+.wp-tabs .spacer { flex: 1; }
+.wp-prev { height: calc(100% - 40px); min-height: 300px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; }
+.wp-prev .prev-frame { height: 100%; min-height: 300px; }
+.code.has-prev .code-head { flex-wrap: nowrap; min-width: 0; }
+.code.has-prev .code-head > * { white-space: nowrap; flex: none; }
+.code.has-prev .code-lang { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 640px) {
+  .code.has-prev .code-lines, .code.has-prev .copy-btn span { display: none; }
+  .code.has-prev .prev-tabs { margin-left: 6px; }
+  .prev-card-head { padding-left: 10px; }
+}

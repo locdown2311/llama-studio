@@ -1055,6 +1055,16 @@ async fn ws_read(State(app): S, Query(qs): Q) -> Res {
         return Err(ApiErr(StatusCode::FORBIDDEN, L!("Fora da pasta de trabalho", "Outside the workspace").into()));
     }
     let md = std::fs::metadata(&file).map_err(|e| bad(e.to_string()))?;
+    // b64=1: o arquivo como data URL (imagens, fontes...), para a prévia de uma página HTML levar o que ela usa
+    if q(&qs, "b64") == "1" {
+        if md.len() > 8 * 1024 * 1024 {
+            return ok(json!({"path": file, "tooBig": true, "size": md.len()}));
+        }
+        use base64::Engine;
+        let buf = std::fs::read(&file).map_err(|e| bad(e.to_string()))?;
+        let mime = mime_guess::from_path(&file).first_or_octet_stream();
+        return ok(json!({"path": file, "dataUrl": format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(&buf)), "size": md.len()}));
+    }
     if md.len() > 2 * 1024 * 1024 {
         return ok(json!({"path": file, "tooBig": true, "size": md.len()}));
     }

@@ -2422,4 +2422,13 @@ const I18N_EN = {
   "sem resposta, seguiu a recomendada": "no answer, went with the recommended",
   "O executor {0} ainda não pegou a tarefa.": "The executor {0} hasn't picked up the task yet.",
   "Rodar nesta tela": "Run on this screen",
+  "Visualizar": "Preview",
+  "Tela cheia": "Full screen",
+  "Abrir numa aba": "Open in a tab",
+  "O navegador bloqueou a aba nova.": "The browser blocked the new tab.",
+  "Página grande demais para a prévia ({0}).": "Page too large for the preview ({0}).",
+  "Não é um arquivo de texto.": "It isn't a text file.",
+  "Esconder a prévia": "Hide the preview",
+  "Mostrar a prévia": "Show the preview",
+  "Montando a prévia...": "Building the preview...",
 };

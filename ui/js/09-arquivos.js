@@ -361,7 +361,22 @@ async function previewFile(it) {
     body.innerHTML = '';
     if (r.tooBig) body.append(h('div.wp-note', null, L('Arquivo grande ({0}). Abra no Explorer para ver.', fmtSize(r.size))));
     else if (r.binary) body.append(h('div.wp-note', null, L('Arquivo binário ({0}). O modelo recebe só o caminho.', fmtSize(r.size))));
-    else {
+    else if (/\.(html?|svg)$/i.test(it.name)) {
+      // página: mostra rodando (isolada), com a aba Código para ver o fonte
+      const hl = highlight(r.text.slice(0, 200000), ftype(it.name).lang);
+      const code = h('pre', { hidden: true }, h('code.hljs', { html: hl.html }));
+      const frameBox = h('div.wp-prev', null, h('div.wp-note', null, L('Montando a prévia...')));
+      const tabs = h('div.prev-tabs.wp-tabs', null,
+        h('button.on', { type: 'button', onclick: (e) => { code.hidden = true; frameBox.hidden = false; tabs.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === e.currentTarget)); } }, L('Visualizar')),
+        h('button', { type: 'button', onclick: (e) => { code.hidden = false; frameBox.hidden = true; tabs.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === e.currentTarget)); } }, L('Código')),
+        h('span.spacer'),
+        h('button.prev-tool', { type: 'button', title: L('Tela cheia'), 'aria-label': L('Tela cheia'), html: svg('expand'), onclick: async () => prevFull(await prevFromWorkspace(it.rel, S.ws.path), it.name) }),
+        h('button.prev-tool', { type: 'button', title: L('Abrir numa aba'), 'aria-label': L('Abrir numa aba'), html: svg('external'), onclick: async () => prevTab(await prevFromWorkspace(it.rel, S.ws.path), it.name) }));
+      body.append(tabs, frameBox, code);
+      prevFromWorkspace(it.rel, S.ws.path)
+        .then((doc) => { frameBox.innerHTML = ''; frameBox.append(prevFrame(doc, false)); })
+        .catch((e) => { frameBox.innerHTML = ''; frameBox.append(h('div.wp-note', null, e.message)); });
+    } else {
       const hl = highlight(r.text.slice(0, 200000), ftype(it.name).lang);
       body.append(h('pre', null, h('code.hljs', { html: hl.html })));
     }

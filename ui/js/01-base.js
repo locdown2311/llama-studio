@@ -38,6 +38,8 @@ const ICONS = {
   stop: '<rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/>',
   chev: '<path d="m9 18 6-6-6-6"/>',
   up: '<path d="m18 15-6-6-6 6"/>',
+  expand: '<path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/>',
+  down: '<path d="m6 9 6 6 6-6"/>',
   zap: '<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>',
   info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
   cpu: '<rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>',
@@ -402,7 +404,9 @@ function codeHTML(text, lang, { title, collapse } = {}) {
   const key = codeKey(text);
   const big = collapse && lines > 18;
   const col = big && !CODE_OPEN.has(key);
-  return `<div class="code${col ? ' collapsed' : ''}${big && !col ? ' expanded' : ''}" data-code="${key}"><div class="code-head"><span class="code-lang" style="--lang:${LANG_COLOR[r.lang] || 'var(--muted)'}"><i></i>${esc(label)}</span><span class="spacer"></span><span class="code-lines">${lines} ${lines === 1 ? L('linha') : L('linhas')}</span><button class="copy-btn" data-copy="1">${svg('copy')}<span>${L('Copiar')}</span></button></div><pre><code class="hljs">${r.html}</code></pre>${col ? `<button class="code-more" data-expand="1">${L('Mostrar tudo')}</button>` : ''}</div>`;
+  // HTML e SVG: abas Visualizar / Código e a prévia isolada (09-previa.js)
+  const pv = !title && typeof prevCodeParts === 'function' ? prevCodeParts(key, text, (lang || '').toLowerCase() || r.lang) : null;
+  return `<div class="code${col ? ' collapsed' : ''}${big && !col ? ' expanded' : ''}${pv ? pv.cls : ''}" data-code="${key}"><div class="code-head"><span class="code-lang" style="--lang:${LANG_COLOR[r.lang] || 'var(--muted)'}"><i></i>${esc(label)}</span>${pv ? pv.tabs : ''}<span class="spacer"></span><span class="code-lines">${lines} ${lines === 1 ? L('linha') : L('linhas')}</span>${pv ? pv.tools : ''}<button class="copy-btn" data-copy="1">${svg('copy')}<span>${L('Copiar')}</span></button></div>${pv ? pv.box : ''}<pre><code class="hljs">${r.html}</code></pre>${col ? `<button class="code-more" data-expand="1">${L('Mostrar tudo')}</button>` : ''}</div>`;
 }
 
 if (window.marked) {
@@ -418,7 +422,7 @@ function md(text) {
   const hit = mdCache.get(text);
   if (hit) return hit;
   let html;
-  try { html = DOMPurify.sanitize(marked.parse(text), { ADD_ATTR: ['data-copy', 'data-expand', 'data-code'] }); }
+  try { html = DOMPurify.sanitize(marked.parse(text), { ADD_ATTR: ['data-copy', 'data-expand', 'data-code', 'data-prevact', 'data-keep', 'data-lang'] }); }
   catch { html = `<p>${esc(text)}</p>`; }
   if (mdCache.size > 400) mdCache.clear();
   mdCache.set(text, html);
