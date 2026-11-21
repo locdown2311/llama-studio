@@ -931,7 +931,7 @@ function workflowsPage() {
     }
   };
   const editWorkflow = (x) => {
-    const name = input('text.input', { value: x?.name || '', placeholder: 'meu-workflow' });
+    const name = h('input.input', { value: x?.name || '', placeholder: 'meu-workflow' });
     const ta = h('textarea.textarea', { rows: 16, spellcheck: 'false' }, x ? x.text : "---\nname: meu-workflow\ndescription: O que ele faz\nparams:\n  pasta: Pasta onde trabalhar\n---\nconst { entries } = JSON.parse(await tool('list_directory', { path: params.pasta }));\nreturn entries.length + ' itens';");
     let m;
     m = modal({ title: x ? L('Editar workflow') : L('Novo workflow'), wide: true, body: h('div', null, h('div.field', null, h('label', null, L('Nome')), name), h('div.field', null, h('label', null, L('Arquivo (frontmatter e corpo)')), ta)), foot: [
