@@ -127,6 +127,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/skills/delete", post(skills_delete))
         .route("/api/skills/test-tool", post(skills_test_tool))
         .route("/api/tools/stop", post(tools_stop))
+        .route("/api/shell/jobs", get(shell_jobs))
         .route("/api/web/sources", post(web_sources))
         .route("/api/skills/import-path", post(skills_import_path))
         .route("/api/skills/import-zip", post(skills_import_zip))
@@ -2053,6 +2054,11 @@ async fn tools_stop(b: Bytes) -> Res {
         return Err(bad(L!("Falta a conversa.", "Missing the chat.")));
     }
     ok(json!({ "stopped": crate::shell::stop(run) }))
+}
+
+/// Comandos em segundo plano de uma conversa (ou de todas, sem `run`).
+async fn shell_jobs(Query(qs): Q) -> Res {
+    ok(json!({ "jobs": crate::shell::job_list(&q(&qs, "run")) }))
 }
 
 /// O texto das páginas que o web_fetch leu (para a verificação das afirmações).
