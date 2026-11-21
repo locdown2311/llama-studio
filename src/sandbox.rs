@@ -135,6 +135,22 @@ pub fn script(ws_win: &str, cwd: &str, command: &str, no_net: bool) -> String {
     )
 }
 
+/// O script que prepara o Linux para um terminal interativo: monta a pasta de trabalho, entra nela e abre o
+/// shell (ou roda o comando pedido). O mesmo mount do `script`, sem o comando de uma vez só.
+pub fn pty_script(ws_win: &str, cwd: &str, command: Option<&str>) -> String {
+    let sub = cwd.trim().trim_matches(['/', '\\']).replace('\\', "/");
+    let to = if sub.is_empty() || sub == "." { "/workspace".to_string() } else { format!("/workspace/{sub}") };
+    let run = match command.filter(|c| !c.trim().is_empty()) {
+        Some(c) => format!("exec bash -c {}", q(c)),
+        None => "exec bash".to_string(),
+    };
+    format!(
+        "mkdir -p /workspace\nmountpoint -q /workspace || mount -t drvfs {} /workspace -o metadata || {{ echo 'llama-studio: não consegui montar a pasta de trabalho no Linux isolado' >&2; exit 97; }}\ncd {} || exit 98\nexport HOME=/root LANG=C.UTF-8 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n{run}\n",
+        q(ws_win),
+        q(&to)
+    )
+}
+
 /// wsl.exe devolve texto em UTF-16 (listas e mensagens).
 fn wsl_text(b: &[u8]) -> String {
     if b.len() >= 2 && b.iter().skip(1).step_by(2).take(8).all(|&x| x == 0) {
@@ -377,7 +393,7 @@ async fn finish_base(app: &App, d: &Path, rootfs: &Path, base_dir: &Path) -> Res
 }
 
 /// A distro da pasta de trabalho, criada da base na primeira vez.
-async fn ensure(app: &App, ws: &Path) -> Result<String, String> {
+pub async fn ensure(app: &App, ws: &Path) -> Result<String, String> {
     let name = distro_of(ws);
     if distros().await.iter().any(|d| d == &name) {
         return Ok(name);
