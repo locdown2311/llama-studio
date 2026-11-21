@@ -64,10 +64,9 @@ O 1.1 e o 1.2 já foram para o `main` pelo PR do `master`; o 1.3 (`6cfd4e3`) ain
 - O Parar da conversa encerra os terminais (`pty::stop`); fechamento por `taskkill /T /F`.
 - Corrigido no caminho: deadlock do `job_output`/`terminal_read` (lock de `out` e `job_json`/`view` travando o mesmo mutex).
 
-### 2.2 LSP ⏳
-- `src/lsp.rs`: processo por (projeto, linguagem), JSON-RPC por stdio, handshake mínimo (`initialize`, `initialized`, `didOpen`), depois `definition`, `references`, `hover`, `documentSymbol`.
-- Mapa `linguagem → comando` em Configurações (rust-analyzer, clangd, pyright, gopls, tsserver).
-- Ferramentas read-only no grupo `read`. Custo: 3–4 dias. Risco: vida útil do servidor e caminhos Windows (timeout + reinício).
+### 2.2 LSP ⏭ pulado (decisão de 21/11/2026)
+- Motivo: exige language server instalado por linguagem e o ganho não compensa agora; o `search_files`/rg cobre a busca de texto.
+- Se voltar: `src/lsp.rs` com JSON-RPC por stdio, ferramentas read-only `lsp_definition`/`lsp_references`/`lsp_hover`/`lsp_symbols`.
 
 ---
 
