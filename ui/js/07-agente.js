@@ -269,6 +269,8 @@ function checkNote(conv, g) {
    gastar instrução — nada a apontar custa zero tokens. Devolve uma nota (ou ''). A checagem 3 do plano
    (comando citado fora do PATH) ficou de fora: exigiria endpoint novo e o erro já aparece no run_command. */
 const PREFLIGHT_CMDS = [['Cargo.toml', 'cargo build'], ['package.json', 'npm test'], ['pyproject.toml', 'uv run pytest'], ['Makefile', 'make'], ['go.mod', 'go test ./...']];
+// só documentação não pede build (mudar um .md não recompila nada)
+const PREFLIGHT_DOC = /\.(md|markdown|txt|rst|adoc)$/i;
 const PREFLIGHT_PATH = /([A-Za-z0-9_./\\-]+\.(?:rs|js|mjs|cjs|ts|tsx|jsx|py|toml|json|md|html|css|sh|ps1|bat|cmd|c|h|cpp|hpp|go|java|xml|yml|yaml|ini|cfg|txt|lock))\b/gi;
 const PREFLIGHT_CLAIM = /[^\n]{0,40}\b(?:criei|criado|salvei|escrevi|alterei|modifiquei|renomeei|exclu[ií]|apaguei|mov[ií]|editei|gere[iu]|adicionei|removi|deixei em|está em|ficou em|salvo em)\b[^\n]{0,90}/gi;
 /** Caminhos que a resposta final afirma ter criado/alterado (para o verificador conferir no disco). */
@@ -285,8 +287,8 @@ function preflightPaths(text) {
 async function preflight(conv, g, msg) {
   const notes = [];
   const text = splitThink(msg.content || '').text;
-  // 1. alterou arquivos e nada rodou depois: o projeto tem comando conhecido?
-  if (g.writes > 0 && g.lastRun < g.lastWrite) {
+  // 1. alterou arquivos e nada rodou depois: o projeto tem comando conhecido? (só vale se mexeu em código)
+  if (g.writes > 0 && g.lastRun < g.lastWrite && [...g.files.keys()].some((f) => !PREFLIGHT_DOC.test(f))) {
     for (const [f, cmd] of PREFLIGHT_CMDS) {
       const st = await api('/api/stat', { path: f, ws: wsOf(conv) }).catch(() => null);
       if (st?.exists) { notes.push(L('(Nota do studio — verificação automática) Você alterou arquivos ({0}) e nenhum comando rodou depois da última alteração. O projeto tem {1}: rode-o agora e leia a saída antes de concluir.', [...g.files.keys()].slice(0, 6).join(', '), cmd)); break; }

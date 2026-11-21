@@ -61,6 +61,10 @@ eq('sem nota: rodou depois e caminho real', await preflight({}, g2, { content: '
 const g3 = { writes: 0, lastRun: -1, lastWrite: -1, files: new Map() };
 const n3 = await preflight({}, g3, { content: 'O resultado está em out/relatorio.md.' });
 has('nota 2 isolada', n3, 'out/relatorio.md');
+
+// só documentação alterada: não pede build
+const g4 = { writes: 1, lastRun: -1, lastWrite: 2, files: new Map([['plano.md', 1]]) };
+eq('sem nota: só documentação', await preflight({}, g4, { content: 'Pronto, atualizei o plano.' }), '');
 if (n3.includes('cargo build')) { fails++; console.error('FALHOU: nota 1 veio sem ter havido edição\n  nota: ' + n3); }
 else console.log('ok  nota 1 não veio sem edição');
 
