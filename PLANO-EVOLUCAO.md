@@ -1,8 +1,21 @@
 # Plano de evolução (inspirado no DeepSeek Harness)
 
-Comparação feita com o dsh em 21/11/2026. Estado do studio: **2.104.0**.
+Comparação feita com o dsh em 21/11/2026. Estado do studio: **2.106.0**.
 
 Legenda: ✅ feito · ⏳ pendente
+
+## Progresso (21/11/2026)
+
+| Item | Estado | Versão | Commit |
+|---|---|---|---|
+| 1.1 Jobs de shell | ✅ | 2.104.0 | `d033f7b` |
+| 1.2 Workflows salvos | ✅ | 2.105.0 | `a6a3121` |
+| 1.3 `list_plugins` | ✅ | 2.106.0 | `6cfd4e3` |
+| 1.4 Webhook de entrada | ⏳ | — | — |
+
+Também nesta leva: preflight só pede build quando a mudança não é só documentação (2.104.1, `a276f14`) e este plano (`53e0042`).
+
+O 1.1 e o 1.2 já foram para o `main` pelo PR do `master`; o 1.3 (`6cfd4e3`) ainda está só no `master` (precisa de push + PR).
 
 ## Já existe no studio (não precisa fazer)
 
