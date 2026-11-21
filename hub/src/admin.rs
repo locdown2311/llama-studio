@@ -62,6 +62,7 @@ pub async fn users(State(h): State<H>, headers: HeaderMap) -> Response {
             "id": id, "email": email, "created": created, "lastLogin": last, "disabled": disabled != 0, "twofa": twofa != 0,
             "admin": admin_flag, "quotaMb": if quota > 0 { quota as u64 } else { h.cfg.disk_mb }, "customQuota": quota > 0,
             "diskMb": disk, "running": h.boxes.running(id), "pc": online.get(&id), "devices": devices,
+            "api": std::fs::read(crate::boxes::dir(&h, id).join("admin-api-info.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()),
         }));
     }
     let running = out.iter().filter(|u| u["running"] == json!(true)).count();
@@ -84,6 +85,10 @@ pub async fn action(State(h): State<H>, headers: HeaderMap, Json(v): Json<Value>
     }
     let id = v["id"].as_i64().unwrap_or(0);
     let act = v["action"].as_str().unwrap_or("");
+    // conta nova criada pelo administrador (vale mesmo com o cadastro fechado)
+    if act == "create" {
+        return create(&h, &me, &v).await;
+    }
     if id == me.id && matches!(act, "disable" | "delete" | "removeAdmin") {
         return err(StatusCode::BAD_REQUEST, "Não dá para fazer isso com a sua própria conta.");
     }
@@ -135,6 +140,11 @@ pub async fn action(State(h): State<H>, headers: HeaderMap, Json(v): Json<Value>
             let _ = db.execute("UPDATE users SET pass = ?1 WHERE id = ?2", params![ph, id]);
             let _ = db.execute("DELETE FROM sessions WHERE uid = ?1", params![id]);
         }
+        "setApi" => {
+            if let Err(e) = set_api(&h, id, &v) {
+                return err(StatusCode::BAD_REQUEST, &e);
+            }
+        }
         "delete" => {
             if v["confirm"].as_str() != Some("APAGAR") {
                 return err(StatusCode::BAD_REQUEST, "Confirme digitando APAGAR.");
@@ -155,6 +165,74 @@ pub async fn action(State(h): State<H>, headers: HeaderMap, Json(v): Json<Value>
     }
     eprintln!("admin {} -> {act} em {id} ({})", me.email, now());
     Json(json!({ "ok": true })).into_response()
+}
+
+/// Senha de 14 letras e números, para quando o administrador não escolhe uma.
+fn gen_password() -> String {
+    const A: &[u8] = b"abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    // o token é hexadecimal: cada par vira um byte aleatório
+    let t = crate::db::token() + &crate::db::token();
+    let bytes: Vec<u8> = (0..t.len() / 2).filter_map(|i| u8::from_str_radix(&t[i * 2..i * 2 + 2], 16).ok()).collect();
+    bytes.iter().take(14).map(|b| A[*b as usize % A.len()] as char).collect()
+}
+
+async fn create(h: &crate::Hub, me: &crate::db::User, v: &Value) -> Response {
+    let email = v["email"].as_str().unwrap_or("").trim().to_lowercase();
+    if !crate::auth::valid_email(&email) {
+        return err(StatusCode::BAD_REQUEST, "E-mail inválido.");
+    }
+    let mut pass = v["password"].as_str().unwrap_or("").to_string();
+    let generated = pass.is_empty();
+    if generated {
+        pass = gen_password();
+    }
+    if pass.chars().count() < 8 || pass.len() > 256 {
+        return err(StatusCode::BAD_REQUEST, "A senha precisa de pelo menos 8 caracteres.");
+    }
+    let Some(ph) = crate::auth::hash_pass(pass.clone()).await else { return err(StatusCode::INTERNAL_SERVER_ERROR, "hash") };
+    let uid = {
+        let db = h.db.lock().unwrap();
+        if db.execute("INSERT INTO users(email, pass, created, secret) VALUES(?1, ?2, ?3, ?4)", params![email, ph, now(), crate::db::token()]).is_err() {
+            return err(StatusCode::CONFLICT, "Esse e-mail já tem conta.");
+        }
+        db.last_insert_rowid()
+    };
+    let mut api_err = None;
+    if v["api"].is_object() {
+        if let Err(e) = set_api(h, uid, &v["api"]) {
+            api_err = Some(e);
+        }
+    }
+    eprintln!("admin {} -> create {email} ({uid})", me.email);
+    Json(json!({ "ok": true, "id": uid, "password": if generated { Some(pass) } else { None }, "apiError": api_err })).into_response()
+}
+
+/// A API padrão do cliente: vai para a pasta dele e o studio da nuvem dele junta às APIs e a deixa ativa
+/// (na hora, se estiver ligado; senão, quando ligar). A chave não fica guardada na central.
+fn set_api(h: &crate::Hub, uid: i64, v: &Value) -> Result<(), String> {
+    let s = |k: &str| v[k].as_str().unwrap_or("").trim().to_string();
+    let (name, base, key, model) = (s("name"), s("base"), s("key"), s("model"));
+    if !(base.starts_with("https://") || base.starts_with("http://")) {
+        return Err("Endereço da API inválido (comece com https://).".into());
+    }
+    if model.is_empty() {
+        return Err("Informe o modelo.".into());
+    }
+    let d = crate::boxes::dir(h, uid);
+    crate::boxes::mkdir_owned(&d);
+    let p = json!({ "id": "adm", "name": if name.is_empty() { "API padrão".to_string() } else { name.clone() }, "base": base.trim_end_matches('/'), "key": key, "model": model });
+    let write = |path: &std::path::Path, body: String| -> Result<(), String> {
+        std::fs::write(path, body).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        {
+            let _ = std::os::unix::fs::chown(path, Some(crate::boxes::UID), Some(crate::boxes::UID));
+        }
+        Ok(())
+    };
+    write(&d.join("admin-apis.json"), json!({ "providers": [p], "default": "adm" }).to_string())?;
+    // o que o painel mostra depois (sem a chave)
+    write(&d.join("admin-api-info.json"), json!({ "name": name, "base": base, "model": model, "at": now() }).to_string())?;
+    Ok(())
 }
 
 /// Busca a versão nova do studio da nuvem; os studios parados trocam no próximo acesso e os ligados sem

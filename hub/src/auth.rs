@@ -41,7 +41,7 @@ fn new_session(h: &crate::Hub, uid: i64) -> Response {
     r
 }
 
-fn valid_email(e: &str) -> bool {
+pub fn valid_email(e: &str) -> bool {
     let Some((a, d)) = e.split_once('@') else { return false };
     !a.is_empty() && d.contains('.') && !d.starts_with('.') && !d.ends_with('.') && e.len() <= 200 && !e.chars().any(|c| c.is_whitespace() || c.is_control())
 }
@@ -62,7 +62,7 @@ fn failed(h: &crate::Hub, keys: &[String]) {
     }
 }
 
-async fn hash_pass(p: String) -> Option<String> {
+pub async fn hash_pass(p: String) -> Option<String> {
     tokio::task::spawn_blocking(move || {
         let salt = SaltString::encode_b64(&{
             use rand::RngCore;

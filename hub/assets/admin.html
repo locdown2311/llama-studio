@@ -44,6 +44,16 @@ button.danger { color:var(--err); }
 .toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); background:#222; color:#fff; padding:8px 14px; border-radius:9px; font-size:13px; opacity:0; transition:opacity .2s; pointer-events:none; }
 .toast.on { opacity:1; }
 .cfg { color:var(--muted); font-size:12.5px; margin:-6px 0 14px; }
+button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+dialog { border:1px solid var(--line); border-radius:14px; background:var(--card); color:var(--text); padding:18px; width:min(460px, calc(100vw - 32px)); }
+dialog::backdrop { background:rgba(0,0,0,.45); }
+dialog h2 { font-size:16px; margin:0 0 12px; }
+dialog label { display:block; font-size:12.5px; color:var(--muted); margin:10px 0 4px; }
+dialog input, dialog select { width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:9px; background:var(--bg); color:var(--text); font:inherit; }
+dialog .sec { margin-top:14px; padding-top:10px; border-top:1px solid var(--line); font-weight:600; font-size:13px; }
+dialog .hint { font-size:12px; color:var(--muted); margin-top:4px; }
+dialog .foot { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
+.newpass { background:var(--bg); border:1px dashed var(--accent); border-radius:9px; padding:10px; margin-top:10px; font-family:ui-monospace, monospace; word-break:break-all; }
 </style>
 </head>
 <body>
@@ -51,11 +61,28 @@ button.danger { color:var(--err); }
 <main>
   <div class="stats" id="stats"></div>
   <div class="cfg" id="cfg"></div>
-  <div class="bar"><input id="q" type="search" autocomplete="off"><button id="reload"></button><button id="pull"></button></div>
+  <div class="bar"><input id="q" type="search" autocomplete="off"><button id="new" class="primary"></button><button id="reload"></button><button id="pull"></button></div>
   <div class="err" id="err" role="alert"></div>
   <div class="list" id="list"></div>
 </main>
 <div class="toast" id="toast"></div>
+<dialog id="dlg"><form method="dialog" id="dlgForm">
+  <h2 id="dlgTitle"></h2>
+  <div id="dlgAcct">
+    <label id="lEmail"></label><input id="fEmail" type="email" autocomplete="off">
+    <label id="lPass"></label><input id="fPass" type="text" autocomplete="new-password"><div class="hint" id="hPass"></div>
+  </div>
+  <div class="sec" id="lApiSec"></div>
+  <label id="lPreset"></label><select id="fPreset"></select>
+  <label id="lName"></label><input id="fName" type="text" autocomplete="off">
+  <label id="lBase"></label><input id="fBase" type="url" placeholder="https://..." autocomplete="off">
+  <label id="lKey"></label><input id="fKey" type="password" autocomplete="new-password">
+  <label id="lModel"></label><input id="fModel" type="text" autocomplete="off">
+  <div class="hint" id="hApi"></div>
+  <div class="newpass" id="newPass" hidden></div>
+  <div class="err" id="dlgErr"></div>
+  <div class="foot"><button value="cancel" id="dlgCancel" formnovalidate></button><button class="primary" id="dlgOk" value="ok"></button></div>
+</form></dialog>
 <script>
 const en = !/^pt/i.test(navigator.language || '');
 const T = en ? {
@@ -63,12 +90,16 @@ const T = en ? {
   signupOpen: 'sign-up open', signupClosed: 'sign-up closed', cfg: (s) => `Per studio: ${s.mem} RAM, ${s.cpus} CPU, turns off after ${s.idleMin} min idle, default quota ${s.defaultQuotaMb} MB. Image: ${s.image}`,
   created: 'created', last: 'last sign-in', never: 'never', devices: 'linked PCs', on: 'cloud on', pc: 'PC online', twofa: '2FA', admin: 'admin', disabled: 'blocked',
   disable: 'Block', enable: 'Unblock', stop: 'Turn off cloud', logout: 'End sessions', reset2fa: 'Reset 2FA', setQuota: 'Disk quota', setPassword: 'New password', makeAdmin: 'Make admin', removeAdmin: 'Remove admin', del: 'Delete',
+  newClient: 'New client', newTitle: 'New client', email: 'E-mail', pass: 'Password', passHint: 'Leave empty to generate one (shown once at the end).', apiSec: 'Default API (optional)', preset: 'Provider', name: 'Name', base: 'API address (OpenAI-compatible)', key: 'API key', model: 'Model',
+  apiHint: 'It becomes the default model of this client\'s cloud studio (right away if it is on, otherwise next time it turns on). The key is not stored by the hub.', create: 'Create', save: 'Save', cancel: 'Cancel', close: 'Close', setApi: 'Default API', apiTitle: 'Default API of {0}', apiTag: 'API', created2: 'Account created.', genPass: 'Password (copy it now, it is not shown again): ', custom: 'Other (enter the address)',
   askQuota: 'Disk quota in MB (0 = server default):', askPass: 'New password for {0} (min. 8 characters). Their sessions are ended:', askDel: 'Delete {0} and ALL their cloud files? Type APAGAR to confirm:', sure: 'Are you sure? ({0})', done: 'Done',
 } : {
   pull: 'Buscar versão nova da nuvem', pulling: 'Buscando...', pulled: 'Versão nova baixada: cada studio da nuvem troca quando a página dele for aberta.', same: 'Já está na versão mais nova.', title: 'Administração', back: 'Voltar ao studio', search: 'Buscar por e-mail', reload: 'Atualizar', users: 'contas', running: 'studios ligados na nuvem', pcs: 'PCs online', disk: 'disco em uso',
   signupOpen: 'cadastro aberto', signupClosed: 'cadastro fechado', cfg: (s) => `Cada studio: ${s.mem} de RAM, ${s.cpus} CPU, desliga após ${s.idleMin} min parado, cota padrão de ${s.defaultQuotaMb} MB. Imagem: ${s.image}`,
   created: 'criada', last: 'último login', never: 'nunca', devices: 'PCs vinculados', on: 'nuvem ligada', pc: 'PC online', twofa: 'duas etapas', admin: 'admin', disabled: 'bloqueada',
   disable: 'Bloquear', enable: 'Desbloquear', stop: 'Desligar a nuvem', logout: 'Encerrar sessões', reset2fa: 'Zerar duas etapas', setQuota: 'Cota de disco', setPassword: 'Nova senha', makeAdmin: 'Tornar admin', removeAdmin: 'Tirar admin', del: 'Apagar',
+  newClient: 'Novo cliente', newTitle: 'Novo cliente', email: 'E-mail', pass: 'Senha', passHint: 'Deixe vazio para gerar uma (aparece uma vez, no fim).', apiSec: 'API padrão (opcional)', preset: 'Provedor', name: 'Nome', base: 'Endereço da API (compatível com OpenAI)', key: 'Chave da API', model: 'Modelo',
+  apiHint: 'Vira o modelo padrão do studio da nuvem desse cliente (na hora, se estiver ligado; senão, quando ligar). A chave não fica guardada na central.', create: 'Criar', save: 'Salvar', cancel: 'Cancelar', close: 'Fechar', setApi: 'API padrão', apiTitle: 'API padrão de {0}', apiTag: 'API', created2: 'Conta criada.', genPass: 'Senha (copie agora, não aparece de novo): ', custom: 'Outro (digite o endereço)',
   askQuota: 'Cota de disco em MB (0 = a padrão do servidor):', askPass: 'Senha nova para {0} (mín. 8 caracteres). As sessões dela são encerradas:', askDel: 'Apagar {0} e TODOS os arquivos dela na nuvem? Digite APAGAR para confirmar:', sure: 'Tem certeza? ({0})', done: 'Feito',
 };
 const $ = (id) => document.getElementById(id);
@@ -106,7 +137,7 @@ function draw() {
     el.className = 'u' + (u.disabled ? ' off' : '');
     el.innerHTML = `<div class="top"><span class="em">${esc(u.email)}</span>
       ${u.admin ? `<span class="tag adm">${T.admin}</span>` : ''}${u.disabled ? `<span class="tag bad">${T.disabled}</span>` : ''}
-      ${u.twofa ? `<span class="tag on">${T.twofa}</span>` : ''}${u.running ? `<span class="tag on">${T.on}</span>` : ''}${u.pc ? `<span class="tag on">${T.pc}: ${esc(u.pc)}</span>` : ''}</div>
+      ${u.api ? `<span class="tag adm">${T.apiTag}: ${esc(u.api.name || u.api.model)}</span>` : ''}${u.twofa ? `<span class="tag on">${T.twofa}</span>` : ''}${u.running ? `<span class="tag on">${T.on}</span>` : ''}${u.pc ? `<span class="tag on">${T.pc}: ${esc(u.pc)}</span>` : ''}</div>
       <div class="meta"><span>#${u.id}</span><span>${T.created} ${fmtDate(u.created)}</span><span>${T.last} ${fmtDate(u.lastLogin)}</span><span>${T.devices}: ${u.devices}</span><span>${fmtMb(u.diskMb)} / ${fmtMb(u.quotaMb)}</span></div>
       <div class="disk"><i class="${pct >= 100 ? 'full' : ''}" style="width:${pct}%"></i></div>
       <div class="acts"></div>`;
@@ -114,6 +145,7 @@ function draw() {
     const btn = (label, fn, danger) => { const b = document.createElement('button'); b.textContent = label; if (danger) b.className = 'danger'; b.onclick = fn; acts.append(b); };
     const sure = (label, action) => () => { if (confirm(T.sure.replace('{0}', label))) act(u, action); };
     if (u.running) btn(T.stop, () => act(u, 'stop'));
+    btn(T.setApi, () => openDlg(u));
     btn(T.setQuota, () => { const v = prompt(T.askQuota, u.customQuota ? u.quotaMb : 0); if (v != null) act(u, 'setQuota', { quotaMb: parseInt(v, 10) || 0 }); });
     btn(T.setPassword, () => { const v = prompt(T.askPass.replace('{0}', u.email)); if (v) act(u, 'setPassword', { password: v }); });
     if (u.twofa) btn(T.reset2fa, sure(T.reset2fa, 'reset2fa'));
@@ -125,6 +157,54 @@ function draw() {
     list.append(el);
   }
 }
+// ---------------- novo cliente / API padrão
+const PRESETS = [
+  ['OpenAI', 'https://api.openai.com/v1', 'gpt-4.1-mini'],
+  ['Google Gemini', 'https://generativelanguage.googleapis.com/v1beta/openai', 'gemini-2.5-flash'],
+  ['Groq', 'https://api.groq.com/openai/v1', 'llama-3.3-70b-versatile'],
+  ['OpenRouter', 'https://openrouter.ai/api/v1', 'openai/gpt-4.1-mini'],
+  ['NVIDIA NIM', 'https://integrate.api.nvidia.com/v1', 'meta/llama-3.3-70b-instruct'],
+  ['DeepSeek', 'https://api.deepseek.com/v1', 'deepseek-chat'],
+];
+for (const [k, v] of Object.entries({ lEmail: T.email, lPass: T.pass, hPass: T.passHint, lApiSec: T.apiSec, lPreset: T.preset, lName: T.name, lBase: T.base, lKey: T.key, lModel: T.model, hApi: T.apiHint, dlgCancel: T.cancel })) $(k).textContent = v;
+$('fPreset').innerHTML = PRESETS.map(([n], i) => `<option value="${i}">${esc(n)}</option>`).join('') + `<option value="">${esc(T.custom)}</option>`;
+$('fPreset').onchange = () => { const p = PRESETS[$('fPreset').value]; if (p) { $('fName').value = p[0]; $('fBase').value = p[1]; $('fModel').value = p[2]; } else { $('fBase').value = ''; $('fBase').focus(); } };
+let dlgUser = null, dlgDone = false;
+function openDlg(u) {
+  dlgUser = u; dlgDone = false;
+  $('dlgAcct').hidden = !!u;
+  $('dlgTitle').textContent = u ? T.apiTitle.replace('{0}', u.email) : T.newTitle;
+  $('dlgOk').textContent = u ? T.save : T.create; $('dlgOk').hidden = false; $('dlgCancel').textContent = T.cancel;
+  for (const id of ['fEmail', 'fPass', 'fKey']) $(id).value = '';
+  $('fPreset').value = '0'; $('fPreset').onchange();
+  if (u?.api) { $('fPreset').value = ''; $('fName').value = u.api.name || ''; $('fBase').value = u.api.base || ''; $('fModel').value = u.api.model || ''; }
+  $('lApiSec').textContent = u ? T.apiSec.replace(/ \(.*\)$/, '') : T.apiSec;
+  $('newPass').hidden = true; $('dlgErr').textContent = '';
+  $('dlg').showModal();
+}
+$('dlgOk').onclick = async (e) => {
+  e.preventDefault();
+  if (dlgDone) { $('dlg').close(); return; }
+  $('dlgErr').textContent = '';
+  const api = { name: $('fName').value.trim(), base: $('fBase').value.trim(), key: $('fKey').value.trim(), model: $('fModel').value.trim() };
+  const withApi = !!(api.base || api.key);
+  const body = dlgUser ? { id: dlgUser.id, action: 'setApi', ...api } : { action: 'create', email: $('fEmail').value.trim(), password: $('fPass').value, ...(withApi ? { api } : {}) };
+  const r = await fetch('/hub/api/admin/action', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-hub': '1' }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $('dlgErr').textContent = j.error || r.statusText; return; }
+  if (j.apiError) $('dlgErr').textContent = j.apiError;
+  load();
+  if (j.password) {
+    $('newPass').hidden = false; $('newPass').textContent = T.genPass + j.password;
+    dlgDone = true; $('dlgOk').textContent = T.close; $('dlgCancel').hidden = true;
+    return;
+  }
+  toast(dlgUser ? T.done : T.created2);
+  $('dlg').close();
+};
+$('dlg').addEventListener('close', () => { $('dlgCancel').hidden = false; });
+$('new').textContent = T.newClient;
+$('new').onclick = () => openDlg(null);
 $('q').oninput = () => data && draw();
 $('reload').onclick = load;
 $('pull').textContent = T.pull;

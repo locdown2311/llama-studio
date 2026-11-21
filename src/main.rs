@@ -188,6 +188,9 @@ fn main() {
                 tokio::spawn(cloud::run(app2.clone()));
                 tokio::spawn(jobs::watch(app2.clone()));
                 tokio::spawn(agenda::run(app2.clone()));
+                if app::cloud() {
+                    tokio::spawn(cloud::admin_apis(app2.clone()));
+                }
                 plugins::refresh(&app2.root);
                 let a = app2.clone();
                 tokio::spawn(async move { a.mcp.sync(&a.http, &a.mcp_file()).await });

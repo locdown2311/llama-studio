@@ -460,3 +460,39 @@ pub async fn sync(app: &App, url: &str, token: &str) -> Result<(usize, usize), S
     }
     Ok((pulled, pushed))
 }
+
+/* ---------------------------------------------------------------- API padrão posta pelo administrador
+   Na nuvem, o painel de administração da central grava `admin-apis.json` na pasta do usuário
+   ({"providers": [...], "default": "id"}). O studio junta essas APIs às dele (trocando a de mesmo id),
+   torna a padrão ativa e apaga o arquivo (a chave não fica largada fora do config.json). */
+pub async fn admin_apis(app: Arc<App>) {
+    let f = app.root.join("admin-apis.json");
+    loop {
+        if let Some(v) = std::fs::read(&f).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()) {
+            let list: Vec<crate::app::ApiProvider> = v["providers"].as_array().into_iter().flatten().filter_map(|p| serde_json::from_value(p.clone()).ok()).filter(|p: &crate::app::ApiProvider| !p.id.trim().is_empty()).collect();
+            {
+                let mut c = app.config.write().unwrap();
+                for p in list {
+                    match c.api_providers.iter_mut().find(|x| x.id == p.id) {
+                        Some(x) => *x = p,
+                        None => c.api_providers.push(p),
+                    }
+                }
+            }
+            // a padrão vai para o começo da lista: na nuvem, sem escolha salva, a primeira API é a ativa
+            if let Some(d) = v["default"].as_str() {
+                let mut c = app.config.write().unwrap();
+                if let Some(i) = c.api_providers.iter().position(|x| x.id == d) {
+                    let p = c.api_providers.remove(i);
+                    c.api_providers.insert(0, p);
+                }
+            }
+            app.save_config();
+            if let Some(d) = v["default"].as_str().filter(|d| !d.is_empty()) {
+                let _ = crate::models::activate(&app, &format!("api_{d}")).await;
+            }
+            let _ = std::fs::remove_file(&f);
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+    }
+}
