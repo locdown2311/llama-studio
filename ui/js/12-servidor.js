@@ -277,7 +277,7 @@ function engineCards(box, { compact = false } = {}) {
   const job = (v) => E.jobs?.find((j) => j.variant === v && j.status === 'downloading');
   const inst = (v) => (E.installed || []).filter((x) => x.id.startsWith(v + '-'));
   if (E.error) box.append(h('div.eng-err', null, ic('alert'), E.error));
-  const fams = [['llama', 'llama.cpp', L('O oficial. Suporte a tudo que sai de novo.')], ['ik', 'ik_llama.cpp', L('Fork focado em velocidade na CPU e em MoE com camadas na CPU (como o Qwen 35B-A3B). Compilado pelo projeto do Llama Studio.')]];
+  const fams = [['llama', 'llama.cpp', L('O oficial. Suporte a tudo que sai de novo.')]];
   for (const [fam, title, sub] of fams) {
   const list = (E.available || []).filter((a) => (a.family || 'llama') === fam);
   if (!list.length || (compact && fam !== 'llama')) continue;
@@ -292,7 +292,7 @@ function engineCards(box, { compact = false } = {}) {
       const pct = jb.total ? Math.min(100, jb.done / jb.total * 100) : 0;
       action = h('div.eng-prog', null, h('div.dl-bar', null, h('i', { style: { width: pct.toFixed(1) + '%' } })), h('span', null, L('{0} de {1}', fmtBytes(jb.done), fmtBytes(jb.total))),
         h('button.icon-btn.sm', { title: L('Cancelar'), 'aria-label': L('Cancelar'), html: svg('x'), onclick: async () => { await api('/api/engines/cancel', { id: jb.id }); loadEngines(false); } }));
-    } else if (a.missing) action = h('span.muted', null, a.family === 'ik' ? L('Ainda não compilado') : L('Sem pacote para Windows agora'));
+    } else if (a.missing) action = h('span.muted', null, L('Sem pacote para Windows agora'));
     else if (act && !newer) action = h('span.tag.ok', null, L('em uso'));
     else if (mine.length && !newer) action = h('button.btn.sm', { onclick: async () => { try { S.llama = await api('/api/engines/use', { path: mine[0].path }); toast(L('Motor trocado')); loadEngines(false); drawServerStatus?.(); } catch (e) { toast(e.message, 'err'); } } }, ic('play'), L('Usar'));
     else action = h('button.btn.sm' + (rec || newer ? '.primary' : ''), { onclick: () => installEngine(a.id) }, ic('download'), newer ? L('Atualizar para {0}', a.tag) : L('Instalar · {0}', fmtBytes(a.size)));
@@ -308,6 +308,10 @@ function engineCards(box, { compact = false } = {}) {
     box.append(h('div.eng-cur', null, ic(E.currentExists ? 'check' : 'alert'),
       h('span', null, E.currentExists ? (E.managed ? L('Em uso: ') : L('Em uso (fora do studio): ')) : L('O llama-server configurado não existe: ')), h('code', { title: cur }, cur || 'nenhum'),
       (E.gpus || []).length ? h('span.muted', null, L(' · placa: ') + E.gpus.join(', ')) : null));
+    // motor do ik_llama.cpp (suporte retirado): continua rodando, mas sem atualização
+    if ((E.installed || []).some((x) => x.active && x.id.startsWith('ik-'))) {
+      box.append(h('div.eng-err', null, ic('alert'), L('O motor em uso é do ik_llama.cpp, que o studio não suporta mais: ele continua funcionando, mas não recebe atualização. Instale um motor do llama.cpp acima e remova este.')));
+    }
     const others = (E.installed || []).filter((x) => !x.active);
     if (others.length) {
       box.append(h('div.eng-inst', null, h('span.muted', null, L('Também instalados:')),

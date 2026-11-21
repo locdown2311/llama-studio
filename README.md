@@ -31,7 +31,6 @@ O Llama Studio transforma o `llama-server` num agente que trabalha no seu comput
 1. Baixe o `llama-studio-setup-X.Y.Z.exe` da [última versão](../../releases/latest).
 2. Abra o programa. Na primeira vez, um guia sugere o motor pela placa de vídeo detectada e baixa:
    - **llama.cpp**: Vulkan (AMD, NVIDIA e Intel), CUDA, ROCm, SYCL ou só CPU, da release oficial;
-   - **ik_llama.cpp**: fork mais rápido para MoE com camadas na CPU, compilado pelo CI deste projeto.
 3. No mesmo guia, baixe um modelo GGUF do Hugging Face.
 
 O instalador começa perguntando o idioma (português do Brasil ou inglês) e o studio já abre nele.
@@ -45,7 +44,7 @@ O instalador não pede administrador: instala em `%LOCALAPPDATA%\Programs\Llama 
 <table>
   <tr>
     <td width="50%"><img src="assets/screenshots/primeiro-uso.png" alt="Guia da primeira abertura"><br><sub>Primeira abertura: motor sugerido pela placa de vídeo e modelos para começar.</sub></td>
-    <td width="50%"><img src="assets/screenshots/motor-e-modelos.png" alt="Motores do llama.cpp e modelos"><br><sub>Motores (llama.cpp e ik_llama.cpp), modelos e "Otimizar para o seu PC".</sub></td>
+    <td width="50%"><img src="assets/screenshots/motor-e-modelos.png" alt="Motores do llama.cpp e modelos"><br><sub>Motores do llama.cpp, modelos e "Otimizar para o seu PC".</sub></td>
   </tr>
   <tr>
     <td colspan="2"><img src="assets/screenshots/escuro.png" alt="Tema escuro com o painel de arquivos do projeto"><br><sub>Tema escuro, projeto com pasta própria e personalidade.</sub></td>
@@ -91,7 +90,7 @@ O instalador não pede administrador: instala em `%LOCALAPPDATA%\Programs\Llama 
 - Exportar a conversa em Markdown, histórico pesquisável e medidor de contexto.
 
 ### Modelos
-- **Motores** direto do programa: llama.cpp (Vulkan, CUDA, ROCm, SYCL ou CPU) e ik_llama.cpp. Dá para ter vários instalados e trocar com um clique. Opções que um motor não aceita são ignoradas automaticamente.
+- **Motores** direto do programa: llama.cpp (Vulkan, CUDA, ROCm, SYCL ou CPU). Dá para ter vários instalados e trocar com um clique. Opções que um motor não aceita são ignoradas automaticamente.
 - **Otimizar para o seu PC**: o programa mede algumas combinações de microlote e threads com o `llama-bench` e grava no modelo a combinação mais rápida.
 - **Vários modelos cadastrados, um carregado por vez.** Cada conversa escolhe o seu, e o studio troca quando precisa, esperando as respostas em andamento.
 - **Busca e download do Hugging Face**: lista as quantizações com o tamanho, inclui o projetor de visão, retoma downloads interrompidos e cria o modelo pronto para usar.
@@ -219,7 +218,6 @@ cargo build --release
 | `ui/i18n/` | Traduções. O texto em português é a chave: na interface `L('texto', ...)` com `{0}`, `{1}`; no Rust `L!(pt, en)` e `LF!(pt, en, args)` (`src/i18n.rs`). As descrições das ferramentas em inglês ficam em `src/tools_en.rs`. |
 | `tests/` | `rotas/`: frases que conferem os recursos automáticos. `ordem/`: confere a regra de ordem dos arquivos de `ui/js`. Os dois rodam no CI. |
 | `installer/` | Instalador (Inno Setup) |
-| `.github/workflows/ik-llama.yml` | Compila o ik_llama.cpp para Windows e publica como pré-release `ik-*` |
 | `assets/` | Ícone |
 | `.github/workflows/` | CI e publicação |
 

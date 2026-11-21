@@ -89,7 +89,7 @@ jobs:
             dist/ui.zip
             dist/SHA256SUMS.txt
           generate_release_notes: true
-          body: ${{ steps.setup.outcome == 'success' && format('**Instalar pela primeira vez:** baixe `llama-studio-setup-{0}.exe`. Não pede administrador; na primeira abertura o programa ajuda a instalar o motor (llama.cpp ou ik_llama.cpp) certo para a sua placa e a baixar um modelo.<br>**Já tem instalado:** o programa avisa e se atualiza sozinho (Procurar atualizações).', env.STUDIO_VERSION) || '' }}
+          body: ${{ steps.setup.outcome == 'success' && format('**Instalar pela primeira vez:** baixe `llama-studio-setup-{0}.exe`. Não pede administrador; na primeira abertura o programa ajuda a instalar o motor do llama.cpp certo para a sua placa e a baixar um modelo.<br>**Já tem instalado:** o programa avisa e se atualiza sozinho (Procurar atualizações).', env.STUDIO_VERSION) || '' }}
 
       - name: Guardar artefatos (sem versão nova)
         if: steps.ver.outputs.publicar != 'true'

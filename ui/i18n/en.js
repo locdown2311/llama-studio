@@ -2657,4 +2657,5 @@ const I18N_EN = {
   "Organizando as etapas": "Organizing the steps",
   "Conversando com outra conversa": "Talking to another chat",
   "Guardando na memória": "Saving to memory",
+  "O motor em uso é do ik_llama.cpp, que o studio não suporta mais: ele continua funcionando, mas não recebe atualização. Instale um motor do llama.cpp acima e remova este.": "The engine in use is from ik_llama.cpp, which the studio no longer supports: it keeps working, but gets no updates. Install a llama.cpp engine above and remove this one.",
 };

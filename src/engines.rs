@@ -12,7 +12,7 @@ use crate::app::App;
 
 pub struct Variant {
     pub id: &'static str,
-    /// "llama" (ggml-org/llama.cpp) ou "ik" (builds do ik_llama.cpp feitas no CI deste repositório)
+    /// "llama" (ggml-org/llama.cpp)
     pub family: &'static str,
     name_t: (&'static str, &'static str),
     desc_t: (&'static str, &'static str),
@@ -33,8 +33,6 @@ pub const VARIANTS: &[Variant] = &[
     Variant { id: "rocm", family: "llama", name_t: ("ROCm (HIP)", "ROCm (HIP)"), desc_t: ("Placas AMD Radeon compatíveis com ROCm. Pode ser mais rápido que o Vulkan na leitura do prompt.", "AMD Radeon cards compatible with ROCm. Can be faster than Vulkan at reading the prompt."), pat: r"-bin-win-(rocm|hip)[^/]*-x64\.zip$", runtime: None },
     Variant { id: "sycl", family: "llama", name_t: ("SYCL", "SYCL"), desc_t: ("Placas Intel Arc e iGPUs Intel recentes.", "Intel Arc cards and recent Intel iGPUs."), pat: r"-bin-win-sycl-x64\.zip$", runtime: None },
     Variant { id: "cpu", family: "llama", name_t: ("Só CPU", "CPU only"), desc_t: ("Sem placa de vídeo. Funciona em qualquer computador.", "No graphics card. Works on any computer."), pat: r"-bin-win-cpu-x64\.zip$", runtime: None },
-    Variant { id: "ik-cpu", family: "ik", name_t: ("CPU", "CPU"), desc_t: ("ik_llama.cpp: bem mais rápido que o llama.cpp para MoE na CPU e quantizações IQ_K.", "ik_llama.cpp: much faster than llama.cpp for MoE on the CPU and IQ_K quantizations."), pat: r"^ik_llama-.*-bin-win-cpu-x64\.zip$", runtime: None },
-    Variant { id: "ik-vulkan", family: "ik", name_t: ("Vulkan", "Vulkan"), desc_t: ("ik_llama.cpp com Vulkan (AMD, NVIDIA, Intel). Suporte mais novo que o de CUDA.", "ik_llama.cpp with Vulkan (AMD, NVIDIA, Intel). Newer support than CUDA."), pat: r"^ik_llama-.*-bin-win-vulkan-x64\.zip$", runtime: None },
 ];
 
 fn engines_dir(app: &App) -> PathBuf {
@@ -47,8 +45,8 @@ fn server_name() -> String {
 
 static RELEASES: Mutex<Option<std::collections::HashMap<&'static str, (Instant, Vec<Value>)>>> = Mutex::new(None);
 
-fn repo_of(family: &str) -> &'static str {
-    if family == "ik" { crate::update::REPO } else { "ggml-org/llama.cpp" }
+fn repo_of(_family: &str) -> &'static str {
+    "ggml-org/llama.cpp"
 }
 
 async fn releases(app: &App, family: &'static str) -> Result<Vec<Value>, String> {
@@ -62,10 +60,7 @@ async fn releases(app: &App, family: &'static str) -> Result<Vec<Value>, String>
     if status != 200 {
         return Err(format!("GitHub respondeu {status}."));
     }
-    let mut v: Vec<Value> = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
-    if family == "ik" {
-        v.retain(|r| r["tag_name"].as_str().is_some_and(|t| t.starts_with("ik-")));
-    }
+    let v: Vec<Value> = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
     RELEASES.lock().unwrap().get_or_insert_with(Default::default).insert(family, (Instant::now(), v.clone()));
     Ok(v)
 }
@@ -173,7 +168,7 @@ pub async fn list(app: &App, check: bool) -> Value {
     out["gpus"] = json!(g);
     if check {
         let mut avail = vec![];
-        for fam in ["llama", "ik"] {
+        for fam in ["llama"] {
             match releases(app, fam).await {
                 Ok(rels) => {
                     for v in VARIANTS.iter().filter(|v| v.family == fam) {

@@ -156,7 +156,7 @@ impl Llama {
     }
 
     /// Monta os argumentos. Com `help` (saída do --help do motor), tira o que o motor não aceita
-    /// (ex.: opções novas do llama.cpp no ik_llama.cpp) e devolve o que foi ignorado.
+    /// (ex.: opções novas do llama.cpp num motor mais antigo) e devolve o que foi ignorado.
     fn args_for(&self, help: Option<&Help>) -> (String, Vec<String>) {
         let c = self.cfg();
         let has = |f: &str| help.map(|h| h.flags.contains(f)).unwrap_or(true);
@@ -366,7 +366,7 @@ fn sticky(s: String) -> &'static str {
 
 pub struct Help {
     pub flags: std::collections::HashSet<String>,
-    /// opções que aceitam valor on|off|auto (o -fa no llama.cpp novo; no ik_llama é só -fa)
+    /// opções que aceitam valor on|off|auto (o -fa no llama.cpp novo; nos motores antigos é só -fa)
     fa_takes_value: bool,
 }
 
@@ -479,7 +479,7 @@ fn filter_args(extra: &str, h: &Help) -> (String, Vec<String>) {
                 i += 1;
             }
         } else if (flag == "-fa" || flag == "--flash-attn") && !h.fa_takes_value {
-            // ik_llama.cpp: -fa sem valor
+            // motor antigo: -fa sem valor
             let v = if has_value { toks[i + 1].to_lowercase() } else { String::new() };
             if matches!(v.as_str(), "on" | "off" | "auto" | "1" | "0" | "true" | "false") {
                 i += 1;
