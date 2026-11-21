@@ -2692,4 +2692,13 @@ const I18N_EN = {
   "Informe o texto do workflow (frontmatter e corpo).": "Give the workflow text (frontmatter and body).",
   "Workflow {0} salvo ({1} linhas de código). Rode com run_workflow.": "Workflow {0} saved ({1} lines of code). Run it with run_workflow.",
   "[workflow {0}]\n": "[workflow {0}]\n",
+  "ligado": "on",
+  "Nenhum plugin instalado (Configurações › Plugins).": "No plugins installed (Settings › Plugins).",
+  "habilidades: {0}": "skills: {0}",
+  "comandos: {0}": "commands: {0}",
+  "agentes: {0}": "agents: {0}",
+  "ganchos: {0}": "hooks: {0}",
+  "conectores: {0}": "connectors: {0}",
+  "erros: {0}": "errors: {0}",
+  "Habilidades de plugin entram com use_skill; comandos (nome) são do usuário na caixa de mensagem; ganchos rodam sozinhos nos eventos; conectores .mcp.json aparecem em Conectores.": "Plugin skills load with use_skill; commands (name) are typed by the user in the message box; hooks run by themselves on events; .mcp.json connectors show up in Connectors.",
 };

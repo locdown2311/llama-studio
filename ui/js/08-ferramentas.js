@@ -104,6 +104,7 @@ async function execTool(name, args, info, tctx, tmsg) {
     if (name === 'list_workflows') return await listWorkflows();
     if (name === 'run_workflow') return await runWorkflow(args || {}, tctx, tmsg);
     if (name === 'save_workflow') return await saveWorkflow(args || {});
+    if (name === 'list_plugins') return await listPlugins();
     if (name === 'apply_edit') return await runApplyEdit(args || {}, tctx, tmsg);
     if (name === 'video_scenes') return await runVideoScenes(args || {}, tctx, tmsg);
     if (name === 'video_look') return await runVideoLook(args || {}, tctx, tmsg);
@@ -303,6 +304,25 @@ async function saveWorkflow(args) {
     const w = await api('/api/workflows', { name, text: String(args.text) });
     return { content: L('Workflow {0} salvo ({1} linhas de código). Rode com run_workflow.', w.name, w.lines), isError: false };
   } catch (e) { return { content: e.message || String(e), isError: true }; }
+}
+
+/** O que está instalado em plugins (o modelo não vê a página de Plugins). */
+async function listPlugins() {
+  let s;
+  try { s = await api('/api/plugins'); } catch (e) { return { content: e.message || String(e), isError: true }; }
+  const p = s.plugins || [];
+  if (!p.length) return { content: L('Nenhum plugin instalado (Configurações › Plugins).'), isError: false };
+  const lines = p.map((x) => {
+    const parts = [];
+    if (x.skills?.length) parts.push(L('habilidades: {0}', x.skills.join(', ')));
+    if (x.commands?.length) parts.push(L('comandos: {0}', x.commands.join(', ')));
+    if (x.agents?.length) parts.push(L('agentes: {0}', x.agents.join(', ')));
+    if (x.hooks?.length) parts.push(L('ganchos: {0}', [...new Set(x.hooks.map((h) => h.event))].join(', ')));
+    if (x.mcp?.length) parts.push(L('conectores: {0}', x.mcp.map((m) => m.name).join(', ')));
+    if (x.errors?.length) parts.push(L('erros: {0}', x.errors.length));
+    return `- ${x.name}${x.id && x.id !== x.name ? ` (${x.id})` : ''}${x.version ? ' v' + x.version : ''} · ${x.enabled ? L('ligado') : L('desligado')}${x.description ? ' — ' + x.description : ''}${parts.length ? '\n  ' + parts.join(' · ') : ''}`;
+  });
+  return { content: lines.join('\n') + '\n\n' + L('Habilidades de plugin entram com use_skill; comandos (nome) são do usuário na caixa de mensagem; ganchos rodam sozinhos nos eventos; conectores .mcp.json aparecem em Conectores.'), isError: false };
 }
 
 /* ---- equipe de subagentes (exploradores e escritores de cena) ----
