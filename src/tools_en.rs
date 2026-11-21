@@ -36,6 +36,8 @@ pub fn def_en(name: &str) -> Option<(&'static str, &'static str)> {
             r#"{"type":"object","properties":{"name":{"type":"string","description":"Workflow name (from list_workflows)"},"params":{"type":"object","description":"Values for the parameters described in the workflow"}},"required":["name"]}"#),
         "save_workflow" => ("Creates or replaces a workflow (reusable JS script). Pass the whole file in text: frontmatter between --- (name:, description:, params:) and the JS body, like execute_code.",
             r#"{"type":"object","properties":{"name":{"type":"string","description":"Workflow name (becomes dados/workflows/<name>.mjs)"},"text":{"type":"string","description":"Whole file: frontmatter and JS body"}},"required":["name","text"]}"#),
+        "list_plugins" => ("Lists the installed plugins (Claude Code format): name, version, on/off and what each one brings (skills, commands, agents, hooks, connectors). Use it before saying something does not exist.",
+            r#"{"type":"object","properties":{}}"#),
         "web_search" => ("Searches the web (without opening a browser) and returns numbered results with title, link and snippet. Use it for current facts, documentation, versions, known errors. Then read the pages that matter with web_fetch.",
             r#"{"type":"object","properties":{"query":{"type":"string","description":"What to search for (keywords; include the year for recent things)"},"count":{"type":"integer","description":"How many results (default 8, up to 15)"}},"required":["query"]}"#),
         "web_fetch" => ("Reads the text of a web page (without opening a browser): headings, paragraphs, lists and code. Long pages come in chunks (use offset). For pages that need login or JavaScript, use the browser.",

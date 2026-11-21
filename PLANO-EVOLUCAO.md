@@ -31,10 +31,9 @@ Legenda: ✅ feito · ⏳ pendente
 - Rotas `GET/POST /api/workflows`, `/api/workflows/get`, `/api/workflows/delete`; parser em `src/workflows.rs` (sem YAML).
 - Limite: só JavaScript de worker (sem Node/Python), como o `execute_code`.
 
-### 1.3 `list_plugins` para o modelo ⏳
-- Ferramenta de leitura sobre o que `/api/plugins` já devolve (id, nome, ligado, o que contribui: skills, comandos, hooks).
-- Opcional: `enable_plugin` atrás de aprovação.
-- Custo: ~meio dia. Ganho: o modelo para de adivinhar o que está instalado.
+### 1.3 `list_plugins` para o modelo ✅ 2.106.0
+- Ferramenta de leitura `list_plugins` (grupo `toolsearch`): nome, versão, ligado/desligado, descrição e o que cada plugin traz (habilidades, comandos, agentes, ganchos, conectores), direto de `/api/plugins`.
+- Ganho: o modelo para de adivinhar o que está instalado.
 
 ### 1.4 Webhook de entrada ⏳
 - `POST /api/hooks/<nome>` com regra em `dados/hooks.json` (`{nome, secret, prompt, projeto, modelo}`).

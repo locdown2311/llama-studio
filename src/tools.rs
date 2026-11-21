@@ -62,6 +62,8 @@ const DEFS: &[Def] = &[
       r#"{"type":"object","properties":{"name":{"type":"string","description":"Nome do workflow (de list_workflows)"},"params":{"type":"object","description":"Valores dos parâmetros descritos no workflow"}},"required":["name"]}"#),
     d("save_workflow", "code", true, true, "Cria ou substitui um workflow (script JS reutilizável). Passe o arquivo inteiro em text: frontmatter entre --- (name:, description:, params:) e o corpo em JS, como no execute_code.",
       r#"{"type":"object","properties":{"name":{"type":"string","description":"Nome do workflow (vira dados/workflows/<nome>.mjs)"},"text":{"type":"string","description":"Arquivo inteiro: frontmatter e corpo JS"}},"required":["name","text"]}"#),
+    d("list_plugins", "toolsearch", false, true, "Lista os plugins instalados (formato Claude Code): nome, versão, ligado/desligado e o que cada um traz (habilidades, comandos, agentes, ganchos, conectores). Use antes de dizer que algo não existe.",
+      r#"{"type":"object","properties":{}}"#),
     // ---------------- navegador
     d("web_search", "web", false, false, "Pesquisa na web (sem abrir navegador) e devolve os resultados numerados com título, link e trecho. Use para fatos atuais, documentação, versões, erros conhecidos. Depois leia as páginas que importam com web_fetch.",
         r#"{"type":"object","properties":{"query":{"type":"string","description":"O que pesquisar (palavras-chave; inclua o ano para coisas recentes)"},"count":{"type":"integer","description":"Quantos resultados (padrão 8, até 15)"}},"required":["query"]}"#),
