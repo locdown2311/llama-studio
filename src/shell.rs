@@ -247,14 +247,17 @@ fn push_line(out: &Mutex<VecDeque<String>>, line: String) {
 /// As últimas `tail` linhas da saída de um job.
 pub fn job_output(id: &str, tail: usize) -> Result<Value, String> {
     let j = job_find(id).ok_or_else(|| L!("Job não encontrado (já saiu da lista).", "Job not found (it left the list).").to_string())?;
-    let out = j.out.lock().unwrap();
-    let n = tail.clamp(1, JOB_LINES);
-    let start = out.len().saturating_sub(n);
-    let text = out.iter().skip(start).cloned().collect::<Vec<_>>().join("\n");
+    // o lock de `out` fica só aqui: job_json também o pega (Mutex não é reentrante)
+    let (text, start, total) = {
+        let out = j.out.lock().unwrap();
+        let n = tail.clamp(1, JOB_LINES);
+        let start = out.len().saturating_sub(n);
+        (out.iter().skip(start).cloned().collect::<Vec<_>>().join("\n"), start, out.len())
+    };
     let mut v = job_json(&j);
     v["out"] = json!(text);
     v["from"] = json!(start);
-    v["total"] = json!(out.len());
+    v["total"] = json!(total);
     Ok(v)
 }
 
@@ -304,7 +307,7 @@ pub fn start(ws: &Path, command: &str, cwd: &str) -> Result<String, String> {
     }
     // o job segura o próprio processo até terminar; o Parar da conversa continua valendo (está em PROCS)
     let job_task = job.clone();
-    tokio::spawn(async move {
+    let spawned = tokio::runtime::Handle::try_current().map(|h| h.spawn(async move {
         let mut guard = Guard::new(Some(pid), None);
         let mut o = BufReader::new(child.stdout.take().unwrap()).lines();
         let mut e = BufReader::new(child.stderr.take().unwrap()).lines();
@@ -326,7 +329,15 @@ pub fn start(ws: &Path, command: &str, cwd: &str) -> Result<String, String> {
             let ok = job_task.code.lock().unwrap().map(|c| c == 0).unwrap_or(true);
             job_task.state.store(if ok { 1 } else { 2 }, Ordering::SeqCst);
         }
-    });
+    }));
+    match spawned {
+        Ok(_) => {}
+        // sem runtime (teste síncrono): o processo não pode ficar órfão nem travar o chamador
+        Err(_) => {
+            kill(&Proc { pid, owner: job.owner.clone(), distro: None });
+            job.state.store(3, Ordering::SeqCst);
+        }
+    }
     Ok(job.id.clone())
 }
 
@@ -334,37 +345,50 @@ pub fn start(ws: &Path, command: &str, cwd: &str) -> Result<String, String> {
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn job_roda_e_mostra_a_saida() {
-        let ws = std::env::temp_dir();
-        let id = start(&ws, "echo ola-mundo", "").unwrap();
-        for _ in 0..100 {
-            let v = job_output(&id, 50).unwrap();
-            if v["state"] != "running" {
-                assert_eq!(v["state"], "done");
-                assert!(v["out"].as_str().unwrap().contains("ola-mundo"), "saída: {}", v["out"]);
-                return;
+    // runtime próprio e desligamento com prazo: o job que não terminou não pendura o teste
+    fn rt() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap()
+    }
+
+    #[test]
+    fn job_roda_e_mostra_a_saida() {
+        let rt = rt();
+        rt.block_on(async {
+            let ws = std::env::temp_dir();
+            let id = start(&ws, "echo ola-mundo", "").unwrap();
+            for _ in 0..100 {
+                let v = job_output(&id, 50).unwrap();
+                if v["state"] != "running" {
+                    assert_eq!(v["state"], "done");
+                    assert!(v["out"].as_str().unwrap().contains("ola-mundo"), "saída: {}", v["out"]);
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        panic!("job não terminou");
+            panic!("job não terminou");
+        });
+        rt.shutdown_timeout(Duration::from_secs(2));
     }
 
-    #[tokio::test]
-    async fn job_kill_encerra() {
-        let ws = std::env::temp_dir();
-        #[cfg(windows)]
-        let cmd = "Start-Sleep -Seconds 30";
-        #[cfg(not(windows))]
-        let cmd = "sleep 30";
-        let id = start(&ws, cmd, "").unwrap();
-        tokio::time::sleep(Duration::from_millis(400)).await;
-        let v = job_kill(&id).unwrap();
-        assert_eq!(v["state"], "killed");
+    #[test]
+    fn job_kill_encerra() {
+        let rt = rt();
+        rt.block_on(async {
+            let ws = std::env::temp_dir();
+            #[cfg(windows)]
+            let cmd = "Start-Sleep -Seconds 30";
+            #[cfg(not(windows))]
+            let cmd = "sleep 30";
+            let id = start(&ws, cmd, "").unwrap();
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            let v = job_kill(&id).unwrap();
+            assert_eq!(v["state"], "killed");
+        });
+        rt.shutdown_timeout(Duration::from_secs(2));
     }
 
-    #[tokio::test]
-    async fn job_desconhecido() {
+    #[test]
+    fn job_desconhecido() {
         assert!(job_output("nao-existe", 10).is_err());
         assert!(job_kill("nao-existe").is_err());
     }

@@ -58,12 +58,11 @@ O 1.1 e o 1.2 já foram para o `main` pelo PR do `master`; o 1.3 (`6cfd4e3`) ain
 
 ## Fase 2 — média
 
-### 2.1 Terminais persistentes (PTY) ⏳
-- `src/pty.rs` com `portable-pty` (única dependência nova; ConPTY à mão não compensa).
-- Sessão por (conversa, nome), registro em `Mutex<BTreeMap>`, `Guard`/job object como `shell.rs` para morrer junto com o studio.
-- Rotas `/api/pty/{create,write,read,close,list}`; `read` com offset.
-- Ferramentas `terminal_start`, `terminal_send`, `terminal_read`, `terminal_close`; saída por `compact::clean` (ANSI).
-- Ganho alto em RE (debugger, REPL, servidor que precisa continuar vivo). Custo: 2–3 dias.
+### 2.1 Terminais persistentes (PTY) ✅ 2.107.0
+- `src/pty.rs` com `portable-pty` (ConPTY no Windows, PTY no Linux): `terminal_start`, `terminal_send` (Enter por padrão), `terminal_read` (ANSI limpo, `alive`), `terminal_close`, `terminal_list`; 12 sessões, 2.000 linhas cada.
+- **Ambientes**: pasta normal → PowerShell (Windows) ou `$SHELL`; com o Linux isolado (WSL) ligado → `wsl.exe -d <distro> -u root -e sh -c "<mount /workspace; cd; exec bash>"` (mesmo mount do `run_command`).
+- O Parar da conversa encerra os terminais (`pty::stop`); fechamento por `taskkill /T /F`.
+- Corrigido no caminho: deadlock do `job_output`/`terminal_read` (lock de `out` e `job_json`/`view` travando o mesmo mutex).
 
 ### 2.2 LSP ⏳
 - `src/lsp.rs`: processo por (projeto, linguagem), JSON-RPC por stdio, handshake mínimo (`initialize`, `initialized`, `didOpen`), depois `definition`, `references`, `hover`, `documentSymbol`.
