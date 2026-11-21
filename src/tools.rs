@@ -46,8 +46,14 @@ const DEFS: &[Def] = &[
     d("edit_file", "edit", true, false, "Altera parte de um arquivo. Três formas: old_text + new_text (old_text exato, aparece uma vez, ou replace_all); start_line + end_line + new_text (troca essas linhas, sem repetir o texto antigo; end_line = start_line - 1 insere antes; mande expect com o começo da linha start_line); ou edits = lista de {old_text, new_text} aplicadas juntas.",
       r#"{"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"},"replace_all":{"type":"boolean"},"start_line":{"type":"integer"},"end_line":{"type":"integer"},"expect":{"type":"string","description":"Com start_line: o começo da linha start_line como está agora (confere que o número não mudou)"},"edits":{"type":"array","items":{"type":"object","properties":{"old_text":{"type":"string"},"new_text":{"type":"string"}},"required":["old_text","new_text"]}}},"required":["path"]}"#),
     // ---------------- shell
-    d("run_command", "shell", true, false, "Executa um comando no PowerShell (Windows) dentro da pasta de trabalho e devolve a saída e o código de saída. Use para compilar, rodar scripts, git, instalar pacotes etc. Não use para comandos interativos.",
-      r#"{"type":"object","properties":{"command":{"type":"string","description":"Comando ou script do PowerShell"},"cwd":{"type":"string","description":"Subpasta onde rodar (padrão: raiz da pasta de trabalho)"},"timeout":{"type":"integer","description":"Segundos até encerrar (padrão 120, máximo 1800)"}},"required":["command"]}"#),
+    d("run_command", "shell", true, false, "Executa um comando no PowerShell (Windows) dentro da pasta de trabalho e devolve a saída e o código de saída. Use para compilar, rodar scripts, git, instalar pacotes etc. Não use para comandos interativos. Com background=true o comando fica rodando em segundo plano (build, render, servidor) e a chamada volta na hora com o id do job: acompanhe com job_output e encerre com job_kill.",
+      r#"{"type":"object","properties":{"command":{"type":"string","description":"Comando ou script do PowerShell"},"cwd":{"type":"string","description":"Subpasta onde rodar (padrão: raiz da pasta de trabalho)"},"timeout":{"type":"integer","description":"Segundos até encerrar (padrão 120, máximo 1800)"},"background":{"type":"boolean","description":"Roda em segundo plano e devolve o id do job na hora (para comandos longos; acompanhe com job_output)"}},"required":["command"]}"#),
+    d("job_list", "shell", false, false, "Lista os comandos em segundo plano desta conversa (run_command com background=true): id, comando, estado (running/done/error/killed), código de saída e tempo.",
+      r#"{"type":"object","properties":{}}"#),
+    d("job_output", "shell", false, false, "Lê as últimas linhas da saída de um comando em segundo plano. Chame de novo para acompanhar; o estado diz se ainda está rodando.",
+      r#"{"type":"object","properties":{"id":{"type":"string","description":"Id do job (de job_list ou devolvido no início)"},"tail":{"type":"integer","description":"Quantas linhas do fim (padrão 80, máximo 600)"}},"required":["id"]}"#),
+    d("job_kill", "shell", true, false, "Encerra um comando em segundo plano (a árvore inteira de processos que ele abriu).",
+      r#"{"type":"object","properties":{"id":{"type":"string","description":"Id do job"}},"required":["id"]}"#),
     d("execute_code", "code", true, true, "Executa JavaScript (assíncrono, num worker do navegador: sem Node, require, import estático nem Python) para orquestrar várias ferramentas de uma vez, sem encher o contexto com resultados intermediários. Dentro do código: `await tool('nome_da_ferramenta', {argumentos})` devolve o texto do resultado (lança erro se a ferramenta falhar); `console.log(...)` registra; `return valor` devolve o resultado final. Ex.: laços sobre arquivos, filtrar resultados, chamar várias ferramentas e resumir.",
       r#"{"type":"object","properties":{"code":{"type":"string","description":"Corpo de uma função async em JavaScript"}},"required":["code"]}"#),
     // ---------------- navegador
@@ -567,6 +573,14 @@ pub async fn call(app: &Arc<App>, ws: PathBuf, name: &str, args: Value, allow: &
         }
         let fixed = fix_command(s(&args, "command"));
         let command = fixed.as_str();
+        // em segundo plano: o comando segue rodando e a chamada volta com o id na hora
+        if args.get("background").and_then(Value::as_bool) == Some(true) {
+            if app.cfg().sandbox.on_for(&ws) {
+                return out(Err(L!("Com o Linux isolado ligado, run_command não roda em segundo plano: use um timeout maior.", "With the isolated Linux on, run_command does not run in the background: use a longer timeout.").to_string()));
+            }
+            let res = crate::shell::start(&ws, command, s(&args, "cwd"));
+            return out(res.map(|id| (LF!("Rodando em segundo plano (job {}). Acompanhe com job_output e encerre com job_kill.", "Running in the background (job {}). Follow it with job_output and stop it with job_kill.", id), vec![])));
+        }
         // Linux isolado (WSL) ligado: o comando roda lá, só com a pasta de trabalho à vista
         if app.cfg().sandbox.on_for(&ws) {
             let res = crate::sandbox::run(app, &ws, command, s(&args, "cwd"), timeout).await;
@@ -597,6 +611,15 @@ pub async fn call(app: &Arc<App>, ws: PathBuf, name: &str, args: Value, allow: &
             };
             format!("{note}{t}{hint}")
         });
+        return out(res.map(|t| (t, vec![])));
+    }
+    if matches!(name, "job_list" | "job_output" | "job_kill") {
+        let owner = crate::shell::OWNER.try_with(|o| o.clone()).unwrap_or_default();
+        let res = match name {
+            "job_list" => Ok(json!({ "jobs": crate::shell::job_list(&owner) }).to_string()),
+            "job_output" => crate::shell::job_output(s(&args, "id"), args.get("tail").and_then(Value::as_u64).unwrap_or(80) as usize).map(|v| serde_json::to_string_pretty(&v).unwrap_or_default()),
+            _ => crate::shell::job_kill(s(&args, "id")).map(|v| serde_json::to_string_pretty(&v).unwrap_or_default()),
+        };
         return out(res.map(|t| (t, vec![])));
     }
     if def(name).is_some_and(|d| d.client) {
