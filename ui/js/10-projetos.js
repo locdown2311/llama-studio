@@ -181,3 +181,68 @@ async function runSendToChat(tctx, tmsg, args) {
     if (tmsg) delete tmsg._peerWait;
   }
 }
+
+/* ============================================================ ramo com pasta própria (git)
+   "Ramificar" cria, além da conversa nova, uma pasta só do ramo (src/ramos.rs): worktree do git quando a pasta
+   é de um repositório, cópia com git dentro quando não é. O ramo mexe só nela; a faixa mostra o que mudou e
+   leva as mudanças para a pasta original quando você quiser. */
+async function forkFolder(orig, c, conv, upto) {
+  const dir = wsOf(conv);
+  if (S.settings.forkWs === false || !dir) return;
+  // ações da conversa original depois do ponto do ramo (da mais nova para a mais antiga): o ramo começa antes delas
+  const rewind = conv.messages.slice(upto + 1).flatMap((m) => (m.tool_calls || []).map((t) => t.id)).reverse();
+  try {
+    const r = await api('/api/fork/create', { id: c.id, orig: dir, conv: conv.id, rewind });
+    c.forkWs = { dir: r.dir, root: r.root, base: r.base, kind: r.kind, top: r.top, orig: r.orig };
+    saveConvs();
+    if (S.curId === c.id) { syncWsRoot(true); drawForkBar(); }
+    toast(r.kind === 'worktree' ? L('Ramo com pasta própria (git worktree): o que ele mudar não mexe na original.') : L('Ramo com pasta própria (cópia): o que ele mudar não mexe na original.'));
+  } catch (e) {
+    toast(L('O ramo usa a mesma pasta da original: {0}', e.message), 'err');
+  }
+}
+
+function forkInfo(c) { const f = c.forkWs; return { root: f.root, base: f.base, kind: f.kind, top: f.top, orig: f.orig }; }
+
+function drawForkBar() {
+  let bar = $('#forkbar');
+  const c = cur();
+  if (!c?.forkWs) { bar?.remove(); return; }
+  if (!bar) { bar = h('div.bgbar.forkbar#forkbar'); $('.composer-wrap')?.prepend(bar); }
+  bar.innerHTML = '';
+  bar.append(ic('branch' in ICONS ? 'branch' : 'folder'),
+    h('span.bg-text', { title: c.forkWs.dir }, c.forkWs.kind === 'worktree' ? L('Pasta do ramo (git worktree)') : L('Pasta do ramo (cópia)')),
+    h('span.spacer'),
+    h('button.btn.sm', { type: 'button', onclick: () => forkReview(c) }, L('Ver mudanças')));
+}
+
+async function forkReview(c) {
+  let r;
+  try { r = await api('/api/fork/diff', forkInfo(c)); } catch (e) { toast(e.message, 'err'); return; }
+  const files = r.files || [];
+  let m;
+  const body = files.length
+    ? h('div.fork-diff', null,
+        h('div.fork-files', null, files.map((f) => h('div.fork-file', null, h('code', null, f.path), h('span.add', null, f.add == null ? L('binário') : '+' + f.add), f.del ? h('span.del', null, '−' + f.del) : null))),
+        h('pre.fork-patch', null, r.patch))
+    : h('p.muted', null, L('Nada mudou na pasta do ramo desde que ele começou (ou desde a última vez que você levou as mudanças).'));
+  m = modal({
+    title: L('Mudanças do ramo'), wide: true, body,
+    foot: [
+      h('button.btn', { onclick: () => m.close() }, L('Fechar')),
+      files.length ? h('button.btn.primary', { onclick: async () => {
+        if (!(await confirmBox(L('Levar {0} arquivo(s) para a pasta original ({1})?', files.length, c.forkWs.orig), L('Levar'), false))) return;
+        try {
+          const a = await api('/api/fork/apply', forkInfo(c));
+          c.forkWs.base = a.base; saveConvs();
+          m.close(); toast(L('Mudanças levadas para a pasta original.'));
+        } catch (e) { toast(e.message, 'err'); }
+      } }, L('Levar para a original')) : null,
+    ],
+  });
+}
+
+/** Ao apagar a conversa do ramo, a pasta dele vai junto. */
+function forkCleanup(c) {
+  if (c?.forkWs) api('/api/fork/remove', forkInfo(c)).catch(() => {});
+}

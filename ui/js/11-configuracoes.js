@@ -50,6 +50,8 @@ function renderSettings() {
       sw(L('Mostrar o raciocínio do modelo'), L('Os blocos de "pensando" aparecem na conversa, recolhidos.'), st.showThinking, (v) => { put({ showThinking: v }); renderMessages(); }),
       sw(L('Sugestões de continuação'), L('No fim de cada resposta, 2 ou 3 botões com o próximo pedido provável (um toque envia). Gera com uma resposta curta da API de segundo plano, da API da conversa ou do modelo local.'), st.followups !== false, (v) => put({ followups: v })),
       sw(L('Comparar respostas de vez em quando'), L('Com outra API pronta, 1 em cada ~15 respostas sem ferramentas também é gerada por ela e você escolhe a melhor (no máximo uma vez a cada 10 minutos). O placar fica no menu da conversa.'), st.abAuto !== false, (v) => put({ abAuto: v }))),
+    group(L('Ramos'),
+      sw(L('Ramo com pasta própria'), L('Ao ramificar uma conversa, o ramo ganha uma pasta só dele, com o git (worktree, se a pasta for de um repositório; senão, uma cópia sem node_modules e afins). O que o ramo mudar não mexe na original; pela faixa do ramo você vê as mudanças e leva para a original. Precisa do Git instalado.'), S.settings.forkWs !== false, (v) => put({ forkWs: v }))),
     group(L('Perguntas com sugestões'),
       field(L('Quanto o modelo pergunta'), seg([['pouco', L('Só o essencial')], ['', L('Equilibrado')], ['muito', L('Sempre que houver dúvida')]], st.askLevel || '', (v) => put({ askLevel: v })),
         L('Só o essencial: pergunta apenas quando errar sairia caro. Sempre que houver dúvida: confirma abordagem, escopo e formato antes de começar tarefas maiores.')),

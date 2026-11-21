@@ -99,6 +99,10 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/locate", post(locate_h))
         .route("/api/remember", post(remember))
         .route("/api/stat", post(stat))
+        .route("/api/fork/create", post(fork_create))
+        .route("/api/fork/diff", post(fork_diff))
+        .route("/api/fork/apply", post(fork_apply))
+        .route("/api/fork/remove", post(fork_remove))
         .route("/api/schedules/state", get(sched_state))
         .route("/api/schedules/run", post(sched_run))
         .route("/api/kb/status", post(kb_status))
@@ -1187,6 +1191,22 @@ async fn stat(State(app): S, b: Bytes) -> Res {
 async fn plugins_changed(app: &Arc<App>) -> Res {
     app.mcp.sync(&app.http, &app.mcp_file()).await;
     ok(crate::plugins::summary(&app.root))
+}
+async fn fork_create(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    ok(tokio::task::spawn_blocking(move || crate::ramos::create(&app, &v)).await.map_err(|e| bad(e.to_string()))?.map_err(bad)?)
+}
+async fn fork_diff(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    ok(tokio::task::spawn_blocking(move || crate::ramos::diff(&app, &v)).await.map_err(|e| bad(e.to_string()))?.map_err(bad)?)
+}
+async fn fork_apply(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    ok(tokio::task::spawn_blocking(move || crate::ramos::apply(&app, &v)).await.map_err(|e| bad(e.to_string()))?.map_err(bad)?)
+}
+async fn fork_remove(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    ok(tokio::task::spawn_blocking(move || crate::ramos::remove(&app, &v)).await.map_err(|e| bad(e.to_string()))?.map_err(bad)?)
 }
 async fn sched_state(State(app): S) -> Res {
     ok(crate::agenda::state(&app))

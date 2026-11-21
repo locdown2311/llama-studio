@@ -2136,3 +2136,12 @@ details.verify.warn summary svg { color: var(--warn); }
 .kb-web.err { color: var(--err); }
 .bgbar .bg-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
 .bgbar.warn { background: color-mix(in srgb, #d97706 16%, transparent); }
+
+/* ramo com pasta própria */
+.forkbar svg { width: 15px; height: 15px; color: var(--accent); flex: none; }
+.fork-files { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.fork-file { display: flex; gap: 10px; align-items: baseline; font-size: 13px; min-width: 0; }
+.fork-file code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.fork-file .add { color: var(--ok, #2f9e58); font-size: 12px; }
+.fork-file .del { color: var(--err); font-size: 12px; }
+.fork-patch { max-height: 50vh; overflow: auto; font-size: 12px; background: var(--code-bg, var(--hover)); border-radius: 10px; padding: 10px; white-space: pre; }

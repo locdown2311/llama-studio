@@ -204,6 +204,7 @@ function renderComposer() {
   drawQueue();
   updatePickers();
   drawCtxMeter();
+  if (typeof drawForkBar === 'function') drawForkBar();
 }
 
 function updateSendBtn() {

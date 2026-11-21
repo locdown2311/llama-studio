@@ -39,6 +39,7 @@ mod plugins;
 mod packs;
 mod procmem;
 mod projmap;
+mod ramos;
 mod remote;
 mod share;
 mod server;

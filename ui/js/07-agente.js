@@ -1009,6 +1009,7 @@ async function startBg(conv) {
 
 /** Faixa acima da caixa de texto: a conversa aberta está rodando no executor. */
 function drawBgBar() {
+  drawForkBar();
   let bar = $('#bgbar');
   const c = cur();
   if (!c?.bg) { bar?.remove(); return; }

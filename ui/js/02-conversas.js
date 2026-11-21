@@ -101,7 +101,7 @@ function personaOf(c) {
 /** Pasta de trabalho da conversa: a do projeto ou a geral. */
 
 function wsOf(c) {
-  return projectOf(c)?.dir || S.info.workspace || "";
+  return c?.forkWs?.dir || projectOf(c)?.dir || S.info.workspace || "";
 }
 
 /** Painel de arquivos acompanha a pasta da conversa aberta. */
@@ -218,6 +218,7 @@ async function deleteConv(c) {
     return;
 
   S.runs.get(c.id)?.abort();
+  forkCleanup(c);
 
   S.convs = S.convs.filter((x) => x.id !== c.id);
 
@@ -4085,10 +4086,12 @@ function forkConv(conv, idx) {
     forkOf: { id: conv.id, at: upto, title: conv.title },
   };
   delete c.pinned;
+  delete c.forkWs;
   S.convs.unshift(c);
   saveConvs();
   selectConv(c.id);
   toast(L('Ramo criado: siga por outro caminho. A conversa original não muda.'));
+  forkFolder(null, c, conv, upto);
 }
 
 /** Quanto do contexto o llama-server reaproveitou do cache nesta resposta (o resto ele releu). Abaixo de ~80%
