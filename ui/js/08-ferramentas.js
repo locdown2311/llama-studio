@@ -101,6 +101,9 @@ async function execTool(name, args, info, tctx, tmsg) {
       return { ...r, content: L('[O sumário deste arquivo já está mais acima. Seguem as linhas a partir da {0}, que você ainda não leu; continue com offset para o resto.]\n', next) + r.content };
     }
     if (name === 'execute_code') return await runCode(args?.code ?? '', tctx, tmsg);
+    if (name === 'list_workflows') return await listWorkflows();
+    if (name === 'run_workflow') return await runWorkflow(args || {}, tctx, tmsg);
+    if (name === 'save_workflow') return await saveWorkflow(args || {});
     if (name === 'apply_edit') return await runApplyEdit(args || {}, tctx, tmsg);
     if (name === 'video_scenes') return await runVideoScenes(args || {}, tctx, tmsg);
     if (name === 'video_look') return await runVideoLook(args || {}, tctx, tmsg);
@@ -265,6 +268,41 @@ function runCode(code, tctx, tmsg) {
     w.onerror = (e) => finish('[erro]\n' + (e.message || L('falha ao executar o código')), true);
     w.postMessage({ t: 'run', code });
   });
+}
+
+/* ---- workflows salvos (dados/workflows/<nome>.mjs) ----
+   Um workflow é o corpo de um execute_code guardado em disco, com frontmatter (name, description, params).
+   Rodar é o mesmo caminho: o worker com `tool()`; a diferença é só que o código vem do arquivo. */
+async function listWorkflows() {
+  const r = await api('/api/workflows');
+  const w = r.workflows || [];
+  if (!w.length) return { content: L('Nenhum workflow salvo ainda. Um workflow é um .mjs em dados/workflows com frontmatter (name, description, params) e o corpo em JS, como no execute_code.'), isError: false };
+  return {
+    content: w.map((x) => `- ${x.name}: ${x.description || ''}${(x.params || []).length ? L(' (parâmetros: {0})', x.params.map((p) => p.name + (p.desc ? ' — ' + p.desc : '')).join(', ')) : ''}`).join('\n'),
+    isError: false,
+  };
+}
+
+/** Roda um workflow salvo no mesmo worker do execute_code, com `params` já definido. */
+async function runWorkflow(args, tctx, tmsg) {
+  const name = String(args.name || '').trim();
+  if (!name) return { content: L('Informe o nome do workflow (veja list_workflows).'), isError: true };
+  let w;
+  try { w = await api('/api/workflows/get', { name }); } catch (e) { return { content: e.message || String(e), isError: true }; }
+  const code = `const params = ${JSON.stringify(args.params || {})};\n${w.body || ''}`;
+  const r = await runCode(code, tctx, tmsg);
+  return { ...r, content: L('[workflow {0}]\n', w.name || name) + r.content };
+}
+
+/** Cria ou substitui um workflow (arquivo inteiro: frontmatter + corpo). */
+async function saveWorkflow(args) {
+  const name = String(args.name || '').trim();
+  if (!name) return { content: L('Informe o nome do workflow.'), isError: true };
+  if (!String(args.text || '').trim()) return { content: L('Informe o texto do workflow (frontmatter e corpo).'), isError: true };
+  try {
+    const w = await api('/api/workflows', { name, text: String(args.text) });
+    return { content: L('Workflow {0} salvo ({1} linhas de código). Rode com run_workflow.', w.name, w.lines), isError: false };
+  } catch (e) { return { content: e.message || String(e), isError: true }; }
 }
 
 /* ---- equipe de subagentes (exploradores e escritores de cena) ----

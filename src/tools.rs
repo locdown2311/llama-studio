@@ -56,6 +56,12 @@ const DEFS: &[Def] = &[
       r#"{"type":"object","properties":{"id":{"type":"string","description":"Id do job"}},"required":["id"]}"#),
     d("execute_code", "code", true, true, "Executa JavaScript (assíncrono, num worker do navegador: sem Node, require, import estático nem Python) para orquestrar várias ferramentas de uma vez, sem encher o contexto com resultados intermediários. Dentro do código: `await tool('nome_da_ferramenta', {argumentos})` devolve o texto do resultado (lança erro se a ferramenta falhar); `console.log(...)` registra; `return valor` devolve o resultado final. Ex.: laços sobre arquivos, filtrar resultados, chamar várias ferramentas e resumir.",
       r#"{"type":"object","properties":{"code":{"type":"string","description":"Corpo de uma função async em JavaScript"}},"required":["code"]}"#),
+    d("list_workflows", "code", false, true, "Lista os workflows salvos (scripts JS reutilizáveis em dados/workflows): nome, descrição e parâmetros. Para rodar, use run_workflow.",
+      r#"{"type":"object","properties":{}}"#),
+    d("run_workflow", "code", true, true, "Roda um workflow salvo: o corpo é JavaScript de worker com `params` já definido e as ferramentas em `tool(nome, args)`, igual ao execute_code. Os parâmetros esperados aparecem em list_workflows.",
+      r#"{"type":"object","properties":{"name":{"type":"string","description":"Nome do workflow (de list_workflows)"},"params":{"type":"object","description":"Valores dos parâmetros descritos no workflow"}},"required":["name"]}"#),
+    d("save_workflow", "code", true, true, "Cria ou substitui um workflow (script JS reutilizável). Passe o arquivo inteiro em text: frontmatter entre --- (name:, description:, params:) e o corpo em JS, como no execute_code.",
+      r#"{"type":"object","properties":{"name":{"type":"string","description":"Nome do workflow (vira dados/workflows/<nome>.mjs)"},"text":{"type":"string","description":"Arquivo inteiro: frontmatter e corpo JS"}},"required":["name","text"]}"#),
     // ---------------- navegador
     d("web_search", "web", false, false, "Pesquisa na web (sem abrir navegador) e devolve os resultados numerados com título, link e trecho. Use para fatos atuais, documentação, versões, erros conhecidos. Depois leia as páginas que importam com web_fetch.",
         r#"{"type":"object","properties":{"query":{"type":"string","description":"O que pesquisar (palavras-chave; inclua o ano para coisas recentes)"},"count":{"type":"integer","description":"Quantos resultados (padrão 8, até 15)"}},"required":["query"]}"#),

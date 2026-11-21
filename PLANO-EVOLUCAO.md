@@ -24,11 +24,12 @@ Legenda: ✅ feito · ⏳ pendente
 - Limite conhecido: com o Linux isolado (WSL) ligado, `background` é recusado (o sandbox é one-shot).
 - Testes: `shell::tests::job_roda_e_mostra_a_saida`, `job_kill_encerra`, `job_desconhecido`.
 
-### 1.2 Workflows JS salvos ⏳
-- `dados/workflows/<nome>.mjs` com frontmatter (`name`, `description`, `params`); corpo com `params` e `tool()` disponíveis (reaproveita `runCode` inteiro).
-- Ferramentas `list_workflows` e `run_workflow(name, params)`; página simples em Configurações.
-- Ganho: orquestração sai do contexto e vira arquivo revisável, determinístico, agendável.
-- Custo: ~1 dia. Risco: baixo (aditivo).
+### 1.2 Workflows JS salvos ✅ 2.105.0
+- `dados/workflows/<nome>.mjs` com frontmatter (`name`, `description`, `params`) e corpo JS; o corpo roda no mesmo worker do `execute_code` com `params` definido.
+- Ferramentas `list_workflows`, `run_workflow(name, params)` e `save_workflow(name, text)` (grupo `code`).
+- Página Configurações › Workflows (listar, editar, apagar, novo).
+- Rotas `GET/POST /api/workflows`, `/api/workflows/get`, `/api/workflows/delete`; parser em `src/workflows.rs` (sem YAML).
+- Limite: só JavaScript de worker (sem Node/Python), como o `execute_code`.
 
 ### 1.3 `list_plugins` para o modelo ⏳
 - Ferramenta de leitura sobre o que `/api/plugins` já devolve (id, nome, ligado, o que contribui: skills, comandos, hooks).

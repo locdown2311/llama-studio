@@ -139,6 +139,8 @@ function renderSettings() {
     field(L('Pedir confirmação antes de'), seg([['writes', L('O que altera algo')], ['all', L('Qualquer ferramenta')], ['never', L('Nunca perguntar')]], st.approval, (v) => put({ approval: v })), L('Arquivos, comandos e ações de conectores que alteram algo. Conectores marcados como confiáveis (escudo no cartão do conector) não perguntam.')),
     h('button.btn.sm', { type: 'button', style: { alignSelf: 'flex-start' }, onclick: () => setView('mcp') }, ic('plug'), L('Confiança e carregamento de cada conector')));
 
+  section('workflows', L('Workflows'), 'code', L('Scripts JS reutilizáveis que o modelo roda com run_workflow: o corpo fica em dados/workflows e só o nome e os parâmetros entram no contexto.'), ...workflowsPage());
+
   section('auditor', L('Auditor'), 'eye', L('Um subagente que lê cada ação, avalia o risco e aprova sozinho o que é seguro. Funciona até em "Nunca perguntar".'),
     auditorSection());
 
@@ -217,7 +219,7 @@ function renderSettings() {
 /* As configurações são um painel só: as subpáginas de ajuste e as páginas de recursos (servidor,
    conectores, habilidades...) ficam no mesmo menu. Os itens da barra lateral são atalhos para elas. */
 const SET_EMBED = [['server', L('Servidor'), 'server'], ['mcp', L('Conectores'), 'plug'], ['plugins', L('Plugins'), 'puzzle'], ['skills', L('Habilidades'), 'sparkles'], ['personas', L('Personalidades'), 'user'], ['tools', L('Utilitários'), 'wrench']];
-const SET_GROUPS = [[L('Conversa'), ['set:model', 'set:replies', 'set:memory', 'set:schedules', 'set:tools', 'set:auto', 'set:context', 'set:economy']], [L('Modelos e recursos'), ['set:api', 'v:server', 'v:mcp', 'v:plugins', 'v:skills', 'v:personas', 'v:tools']], [L('Segurança'), ['set:safety', 'set:auditor', 'set:sandbox']], [L('Sistema'), ['set:look', 'set:window', 'set:backup', 'set:cloud', 'set:share', 'set:updates', 'set:advanced', 'set:tests']]];
+const SET_GROUPS = [[L('Conversa'), ['set:model', 'set:replies', 'set:memory', 'set:schedules', 'set:tools', 'set:auto', 'set:context', 'set:economy']], [L('Modelos e recursos'), ['set:api', 'v:server', 'v:mcp', 'v:plugins', 'v:skills', 'set:workflows', 'v:personas', 'v:tools']], [L('Segurança'), ['set:safety', 'set:auditor', 'set:sandbox']], [L('Sistema'), ['set:look', 'set:window', 'set:backup', 'set:cloud', 'set:share', 'set:updates', 'set:advanced', 'set:tests']]];
 let SET_PAGES = [];
 let setPage = null;
 function openSettings(page) { setPage = page; setView('settings'); }
@@ -906,3 +908,40 @@ async function sandboxPackages(d) {
   });
   load();
 }
+
+/* ---- workflows: scripts JS reutilizáveis (dados/workflows/<nome>.mjs) ---- */
+function workflowsPage() {
+  const list = h('div.sched-list');
+  const draw = async () => {
+    list.innerHTML = '';
+    let w = [];
+    try { w = (await api('/api/workflows')).workflows || []; } catch { /* sem servidor */ }
+    if (!w.length) { list.append(h('div.muted.small', null, L('Nenhum workflow salvo. Um workflow é um script JS reutilizável que o modelo roda com run_workflow; peça numa conversa: "salve como workflow o que você acabou de fazer".'))); return; }
+    for (const x of w) {
+      list.append(h('div.sched-item', null,
+        h('div.sched-main', null,
+          h('div.sched-name', null, x.name),
+          h('div.sched-sub.muted', null, [x.description, (x.params || []).length ? L('parâmetros: {0}', x.params.map((p) => p.name).join(', ')) : '', L('{0} linhas', x.lines)].filter(Boolean).join(' · '))),
+        h('div.sched-acts', null,
+          h('button.icon-btn.sm', { type: 'button', title: L('Editar'), 'aria-label': L('Editar'), html: svg('edit'), onclick: () => editWorkflow(x) }),
+          h('button.icon-btn.sm', { type: 'button', title: L('Apagar'), 'aria-label': L('Apagar'), html: svg('trash'), onclick: async () => {
+            if (!(await confirmBox(L('Apagar o workflow "{0}"?', x.name), L('Apagar'), true))) return;
+            try { await api('/api/workflows/delete', { name: x.name }); draw(); } catch (e) { toast(e.message, 'err'); }
+          } }))));
+    }
+  };
+  const editWorkflow = (x) => {
+    const name = input('text.input', { value: x?.name || '', placeholder: 'meu-workflow' });
+    const ta = h('textarea.textarea', { rows: 16, spellcheck: 'false' }, x ? x.text : "---\nname: meu-workflow\ndescription: O que ele faz\nparams:\n  pasta: Pasta onde trabalhar\n---\nconst { entries } = JSON.parse(await tool('list_directory', { path: params.pasta }));\nreturn entries.length + ' itens';");
+    let m;
+    m = modal({ title: x ? L('Editar workflow') : L('Novo workflow'), wide: true, body: h('div', null, h('div.field', null, h('label', null, L('Nome')), name), h('div.field', null, h('label', null, L('Arquivo (frontmatter e corpo)')), ta)), foot: [
+      h('button.btn', { onclick: () => m.close() }, L('Fechar')),
+      h('button.btn.primary', { onclick: async () => {
+        try { await api('/api/workflows', { name: name.value.trim(), text: ta.value }); m.close(); draw(); toast(L('Workflow salvo.')); } catch (e) { toast(e.message, 'err'); }
+      } }, L('Salvar')),
+    ] });
+  };
+  draw();
+  return [h('div.page-actions', null, h('button.btn.primary', { type: 'button', onclick: () => editWorkflow(null) }, ic('plus'), L('Novo workflow'))), list,
+    h('small.muted', null, L('O corpo roda no mesmo worker do execute_code: `await tool(nome, args)`, `console.log` e `return`. Só JavaScript (sem Node/Python). O modelo cria e edita com save_workflow.'))];
+}

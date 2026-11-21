@@ -124,6 +124,9 @@ pub fn router(app: Arc<App>) -> Router {
 .route("/api/nim-status", get(nim_status_handler))
         .route("/api/limit-status", get(nim_status_handler))
         .route("/api/skills/save", post(skills_save))
+        .route("/api/workflows", get(workflows_list).post(workflows_save))
+        .route("/api/workflows/get", post(workflows_get))
+        .route("/api/workflows/delete", post(workflows_delete))
         .route("/api/skills/delete", post(skills_delete))
         .route("/api/skills/test-tool", post(skills_test_tool))
         .route("/api/tools/stop", post(tools_stop))
@@ -1330,6 +1333,28 @@ async fn nim_status_handler(State(app): S, Query(q): Query<HashMap<String, Strin
         }
         None => json!({ "limited": false }),
     })
+}
+
+async fn workflows_list(State(app): S) -> Res {
+    ok(json!({ "workflows": crate::workflows::list(&app) }))
+}
+
+async fn workflows_get(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let w = crate::workflows::get(&app, st(&v, "name")).map_err(bad)?;
+    ok(w)
+}
+
+async fn workflows_save(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let w = crate::workflows::save(&app, st(&v, "name"), st(&v, "text")).map_err(bad)?;
+    ok(w)
+}
+
+async fn workflows_delete(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let w = crate::workflows::remove(&app, st(&v, "name")).map_err(bad)?;
+    ok(w)
 }
 
 async fn skills_save(State(app): S, b: Bytes) -> Res {
