@@ -28,6 +28,15 @@ fn git_bin() -> Result<PathBuf, String> {
     crate::bins::which("git").ok_or_else(|| L!("O ramo com pasta própria usa o Git, que não está instalado (git-scm.com). Sem ele, o ramo usa a mesma pasta da conversa original.", "A branch with its own folder uses Git, which is not installed (git-scm.com). Without it, the branch uses the same folder as the original chat.").to_string())
 }
 
+/// `git add -A` sem o que a cópia já ignora (node_modules, dist, target...): o agente do ramo recria essas
+/// pastas, e indexá-las dá erro no Windows (o `.bin/esbuild` do npm é um link que o git não abre) e enche o diff.
+fn add_all(dir: &Path, env: &[(&str, &str)]) -> Result<String, String> {
+    let mut args = vec!["add", "-A", "--"];
+    let ex: Vec<String> = SKIP.iter().map(|s| format!(":(exclude,glob)**/{s}/**")).collect();
+    args.extend(ex.iter().map(String::as_str));
+    git(dir, &args, env, None)
+}
+
 fn git(dir: &Path, args: &[&str], env: &[(&str, &str)], input: Option<&[u8]>) -> Result<String, String> {
     let mut c = Command::new(git_bin()?);
     c.arg("-C").arg(dir).args(args).envs(env.iter().copied());
@@ -61,7 +70,7 @@ fn snapshot_commit(top: &Path, idx: &Path, parent: Option<&str>, msg: &str) -> R
     if let Some(p) = parent {
         git(top, &["read-tree", p], &env, None)?;
     }
-    git(top, &["add", "-A"], &env, None)?;
+    add_all(top, &env)?;
     let tree = git(top, &["write-tree"], &env, None)?;
     let _ = std::fs::remove_file(idx);
     let mut args = vec!["commit-tree", tree.as_str(), "-m", msg];
@@ -152,7 +161,7 @@ pub fn create(app: &App, v: &Value) -> Result<Value, String> {
             let _ = std::fs::remove_dir_all(&dest);
         })?;
         git(&dest, &["init", "-q"], &[], None)?;
-        git(&dest, &["add", "-A"], &[], None)?;
+        add_all(&dest, &[])?;
         git(&dest, &["commit", "-q", "--allow-empty", "--no-verify", "-m", &msg], &[], None)?;
         let c = git(&dest, &["rev-parse", "HEAD"], &[], None)?;
         ("copy", dest.clone(), c, String::new())
@@ -194,7 +203,7 @@ fn patch_of(froot: &Path, base: &str, stat: bool) -> Result<String, String> {
     let idx_s = std::env::temp_dir().join(format!("studio-ramo-{}.idx", crate::app::now_ms())).to_string_lossy().to_string();
     let env = [("GIT_INDEX_FILE", idx_s.as_str())];
     git(froot, &["read-tree", base], &env, None)?;
-    git(froot, &["add", "-A"], &env, None)?;
+    add_all(froot, &env)?;
     let r = if stat { git(froot, &["diff", "--cached", "--numstat", base], &env, None) } else { git(froot, &["diff", "--cached", "--binary", base], &env, None) };
     let _ = std::fs::remove_file(&idx_s);
     // o patch precisa terminar em quebra de linha (a saída vem aparada)
@@ -274,6 +283,20 @@ pub fn remove(app: &App, v: &Value) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn add_ignora_o_que_a_copia_pula() {
+        let d = std::env::temp_dir().join(format!("studio-ramo-add-{}", crate::app::now_ms()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("node_modules/.bin")).unwrap();
+        std::fs::write(d.join("node_modules/.bin/x"), b"x").unwrap();
+        std::fs::write(d.join("a.txt"), b"a").unwrap();
+        git(&d, &["init", "-q"], &[], None).unwrap();
+        add_all(&d, &[]).unwrap();
+        let files = git(&d, &["ls-files"], &[], None).unwrap();
+        assert_eq!(files, "a.txt");
+        let _ = std::fs::remove_dir_all(&d);
+    }
 
     #[test]
     fn subpasta_relativa() {
