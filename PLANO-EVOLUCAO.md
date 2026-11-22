@@ -12,6 +12,9 @@ Legenda: ✅ feito · ⏳ pendente
 | 1.2 Workflows salvos | ✅ | 2.105.0 | `a6a3121` |
 | 1.3 `list_plugins` | ✅ | 2.106.0 | `6cfd4e3` |
 | 1.4 Webhook de entrada | ⏳ | — | — |
+| 2.1 Terminais PTY | ✅ | 2.107.0 | `5a04435` |
+| 2.2 LSP | ⏭ pulado | — | — |
+| Loop de habilidades automáticas | ✅ | 2.108.0 | — |
 
 Também nesta leva: preflight só pede build quando a mudança não é só documentação (2.104.1, `a276f14`) e este plano (`53e0042`).
 
@@ -86,8 +89,13 @@ O 1.1 e o 1.2 já foram para o `main` pelo PR do `master`; o 1.3 (`6cfd4e3`) ain
 
 ---
 
+## Loop de habilidades automáticas ✅ 2.108.0
+- Detecção no fim do turno (`maybeAutoSkill`): trabalho de verdade (arquivos alterados ou 6+ ferramentas), sem erro/parada, uma vez por conversa.
+- Rascunho via `sideAsk` (`draftSkill`, mesmo prompt do "Habilidade a partir da conversa").
+- Modo **Perguntar** (padrão): card na conversa com Revisar / Ativar / Descartar; **Automático** salva direto; **Desligado**. Em Configurações › Respostas › Aprender com a conversa.
+- A sugestão não entra no catálogo do modelo sem aprovação.
+
 ## Ordem recomendada
-1. Fase 1: 1.2 → 1.3 → 1.4 (cada uma com commit e versão).
-2. PTY (maior valor prático depois disso).
-3. LSP se houver linguagem com servidor bom.
-4. Event-sourced e Agent Teams quando houver demanda concreta.
+1. 1.4 webhook (fecha a fase 1).
+2. Loop de melhoria das skills (peça 4: propõe diff quando uma skill falha).
+3. 3.1 event-sourced e 3.2 Agent Teams quando houver demanda.
