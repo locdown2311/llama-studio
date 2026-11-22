@@ -16,7 +16,8 @@ Legenda: ✅ feito · ⏳ pendente
 | 2.2 LSP | ⏭ pulado | — | — |
 | Loop de habilidades automáticas | ✅ | 2.108.0 | `594e32e` |
 | Auto-serviço de ferramentas (`enable_tools`) | ✅ | 2.109.0 | `eaad403` |
-| Recursos automáticos: regras curadas (B) | ✅ | 2.110.0 | — |
+| Recursos automáticos: regras curadas (B) | ✅ | 2.110.0 | `1936fa1` |
+| Recursos automáticos: aprender com os erros (C) | ✅ | 2.111.0 | — |
 
 Também nesta leva: preflight só pede build quando a mudança não é só documentação (2.104.1, `a276f14`) e este plano (`53e0042`).
 
@@ -109,6 +110,12 @@ O 1.1 e o 1.2 já foram para o `main` pelo PR do `master`; o 1.3 (`6cfd4e3`) ain
 - Conector citado pelo nome conta como pedido concreto ("como funciona o x64dbg?" liga RE).
 - Teste novo `tests/rotas/falsos.mjs` com frases do dia a dia (jogo, processo, memória) e os casos de negação; o teste agora passa os conectores ao roteador.
 - Resultado: 286/286 no equilibrado, liberal com 42 extras (era 72).
+
+## Recursos automáticos: aprender com os erros ✅ 2.111.0
+- Botão **+** no chip "Ativado" (faltou ligar): marca grupos/conectores/habilidades que o pedido precisava, liga e registra a frase.
+- O **×** (desfazer) também registra o que ligou sem precisar ("sobra").
+- Lista em Configurações › Recursos automáticos › Erros do roteador, com "Copiar como teste" (gera a linha `['frase', ['grupo']]` para `tests/rotas/falsos.mjs`).
+- Registros em `dados/ui/rotas.json` (via store), limite de 200.
 
 ## Ordem recomendada
 1. 1.4 webhook (fecha a fase 1).

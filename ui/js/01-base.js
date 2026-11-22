@@ -489,6 +489,7 @@ const S = {
   sel: { skills: [], mcp: [], builtin: true, ...store.get('sel', {}) },
   settings: (() => { const s = { ...DEFAULT_SETTINGS, ...store.get('settings', {}) }; s.tools = { ...DEFAULT_SETTINGS.tools, ...(s.tools || {}) }; return s; })(),
   vision: false,
+  routeMisses: store.get('rotas', []),
   nCtx: 0,
   refs: [],
   projects: store.get('projects', []),
