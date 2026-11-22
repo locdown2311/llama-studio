@@ -104,8 +104,27 @@ function renderSettings() {
     r.addEventListener('change', () => put({ autoLevel: v, autoRoute: v !== 'desligado' }));
     return h('label.set-choice', null, r, h('span', null, h('b', null, l), h('small', null, d)));
   }));
+  const missBox = h('div');
+  SET_DRAWS.auto = () => {
+    missBox.innerHTML = '';
+    const missList = (S.routeMisses || []).slice(-10).reverse();
+    if (!missList.length) { missBox.append(h('div.muted.small', null, L('Nenhum erro registrado. No chip "Ativado" da mensagem, o + marca o que faltou ligar; o × marca o que ligou sem precisar.'))); return; }
+    for (const x of missList) {
+      missBox.append(h('div.eco-fact', null,
+        h('span', null, (x.kind === 'faltou' ? L('Faltou: ') : L('Sobrou: ')) + x.text),
+        h('small.muted', null, (x.what || []).join(', ')),
+        h('button.icon-btn', { type: 'button', title: L('Copiar como teste'), 'aria-label': L('Copiar como teste'), html: svg('copy'), onclick: () => {
+          const line = `  ['${String(x.text).replace(/'/g, "\\'")}', [${(x.what || []).filter((w) => TOOL_GROUPS.includes(w)).map((w) => `'${w}'`).join(', ')}]],`;
+          navigator.clipboard?.writeText(line).then(() => toast(L('Linha copiada para tests/rotas.')), () => toast(L('Não consegui copiar.'), 'err'));
+        } }),
+        h('button.icon-btn', { type: 'button', title: L('Apagar'), 'aria-label': L('Apagar'), html: svg('trash'), onclick: () => { S.routeMisses = (S.routeMisses || []).filter((y) => y !== x); store.set('rotas', S.routeMisses); SET_DRAWS.auto(); } })));
+    }
+  };
   section('auto', L('Recursos automáticos'), 'signpost', L('Pelo pedido, o studio liga sozinho ferramentas, conectores, habilidades e o raciocínio da conversa, sem gastar tokens. Este é o padrão das conversas novas; cada conversa pode mudar pelo botão de placa na barra do chat.'),
-    autoList);
+    autoList,
+    h('h4.set-sub', null, L('Erros do roteador')),
+    h('p.muted', null, L('Frases em que o roteador errou, para virarem teste em tests/rotas (copie a linha e cole no arquivo).')),
+    missBox);
 
   {
     const box = h('div');
@@ -225,6 +244,7 @@ function renderSettings() {
 const SET_EMBED = [['server', L('Servidor'), 'server'], ['mcp', L('Conectores'), 'plug'], ['plugins', L('Plugins'), 'puzzle'], ['skills', L('Habilidades'), 'sparkles'], ['personas', L('Personalidades'), 'user'], ['tools', L('Utilitários'), 'wrench']];
 const SET_GROUPS = [[L('Conversa'), ['set:model', 'set:replies', 'set:memory', 'set:schedules', 'set:tools', 'set:auto', 'set:context', 'set:economy']], [L('Modelos e recursos'), ['set:api', 'v:server', 'v:mcp', 'v:plugins', 'v:skills', 'set:workflows', 'v:personas', 'v:tools']], [L('Segurança'), ['set:safety', 'set:auditor', 'set:sandbox']], [L('Sistema'), ['set:look', 'set:window', 'set:backup', 'set:cloud', 'set:share', 'set:updates', 'set:advanced', 'set:tests']]];
 let SET_PAGES = [];
+const SET_DRAWS = {};
 let setPage = null;
 function openSettings(page) { setPage = page; setView('settings'); }
 function showSetPage(id) {
@@ -232,6 +252,7 @@ function showSetPage(id) {
   store.set('setPage', id);
   const f = $('#settings-form'); f.innerHTML = '';
   f.append(h('section.set-sec', { id: 'set-' + id }, h('h2.set-title', null, p.title), p.desc ? h('p.set-desc', null, p.desc) : null, ...p.body));
+  SET_DRAWS[id]?.();
   $('#set-pane').scrollTop = 0;
   drawSetNav('set:' + id);
 }

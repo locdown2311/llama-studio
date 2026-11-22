@@ -259,6 +259,7 @@ function undoAuto(conv, msg) {
   const a = msg.auto; if (!a || !conv.auto) return;
   for (const k of ['groups', 'mcp', 'skills', 'eager', 'block']) conv.auto[k] = (conv.auto[k] || []).filter((x) => !(a[k] || []).includes(x));
   msg.auto = { ...a, undone: true };
+  recordRouteMiss('sobra', plainOf(msg), [...(a.groups || []), ...(a.mcp || []), ...(a.skills || [])]);
   saveConvs(); renderMessages(); updatePickers();
   toast(L('Recursos automáticos desta mensagem removidos para as próximas respostas'));
 }
@@ -272,7 +273,47 @@ function autoChip(conv, m) {
   if (a.block?.includes('computer')) names.push(L('sem controle da tela'));
   return h('div.auto-chip', { title: L('Ligado automaticamente pelo pedido{0}. Vale para esta conversa.', a.profiles.length ? ` (${a.profiles.join(', ')})` : '') },
     ic('sparkles'), h('span', null, L('Ativado: ') + names.join(', ')),
+    h('button', { title: L('Faltou ligar algo'), 'aria-label': L('Faltou ligar algo'), html: svg('plus'), onclick: () => pickMissing(conv, m) }),
     h('button', { title: L('Desfazer'), 'aria-label': L('Desfazer'), html: svg('x'), onclick: () => undoAuto(conv, m) }));
+}
+
+/** Guarda um erro do roteador (faltou ligar / ligou demais) para virar frase de teste. */
+function recordRouteMiss(kind, text, what) {
+  const list = S.routeMisses || (S.routeMisses = []);
+  list.push({ t: Date.now(), kind, text: String(text || '').slice(0, 300), what: (what || []).slice(0, 12) });
+  while (list.length > 200) list.shift();
+  store.set('rotas', list);
+}
+
+/** O "faltou ligar": marca o que o pedido precisava, liga e registra para melhorar as regras. */
+function pickMissing(conv, msg) {
+  const auto = conv.auto || { groups: [], mcp: [], skills: [] };
+  const haveG = new Set([...enabledGroups(), ...(auto.groups || [])]);
+  const haveM = new Set([...activeSel(conv).mcp, ...(auto.mcp || [])]);
+  const haveS = new Set([...activeSel(conv).skills, ...(auto.skills || [])]);
+  const offG = TOOL_GROUPS.filter((g) => !haveG.has(g) && g !== 'interface' && g !== 'video');
+  const offM = S.mcp.filter((s) => !haveM.has(s.name));
+  const offS = S.skills.filter((s) => !haveS.has(s.id));
+  const sel = { groups: new Set(), mcp: new Set(), skills: new Set() };
+  const chk = (kind, id, label) => {
+    const i = h('input', { type: 'checkbox' });
+    i.addEventListener('change', () => (i.checked ? sel[kind].add(id) : sel[kind].delete(id)));
+    return h('label.chk', null, i, h('span', null, label));
+  };
+  let m;
+  m = modal({ title: L('O que faltou ligar?'), wide: true, body: h('div.form', null,
+    h('p.muted', null, L('Marque o que o pedido precisava e o roteador não ligou. Fica registrado em Configurações › Recursos automáticos para virar frase de teste.')),
+    offG.length ? h('div.field', null, h('label', null, L('Grupos de ferramentas')), h('div.chk-grid', null, offG.map((g) => chk('groups', g, TOOL_INFO[g]?.title || g)))) : null,
+    offM.length ? h('div.field', null, h('label', null, L('Conectores')), h('div.chk-grid', null, offM.map((s) => chk('mcp', s.name, s.name)))) : null,
+    offS.length ? h('div.field', null, h('label', null, L('Habilidades')), h('div.chk-grid', null, offS.map((s) => chk('skills', s.id, s.name)))) : null),
+    foot: [h('button.btn', { onclick: () => m.close() }, L('Cancelar')),
+      h('button.btn.primary', { onclick: () => {
+        const groups = [...sel.groups], mcp = [...sel.mcp], skills = [...sel.skills];
+        if (!groups.length && !mcp.length && !skills.length) { m.close(); return; }
+        const r = enableTools({ conv }, { groups, mcp, skills });
+        recordRouteMiss('faltou', msg ? plainOf(msg) : '', [...groups, ...mcp, ...skills]);
+        m.close(); toast(r.content); renderMessages();
+      } }, L('Ligar e registrar'))] });
 }
 
 /* ============================================================ lista de tarefas do modelo */
