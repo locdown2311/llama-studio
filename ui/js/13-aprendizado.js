@@ -113,15 +113,48 @@ async function skillFromConv(c) {
   const ac = new AbortController();
   const m = modal({ title: L('Criar habilidade'), body: h('div.gen-wait', null, h('span', { html: svg('loader', 'spin') }), L('Lendo a conversa e escrevendo a habilidade...')), foot: [h('button.btn', { onclick: () => { ac.abort(); m.close(); } }, L('Cancelar'))] });
   try {
-    const out = await sideAsk(c, L('Você escreve habilidades (SKILL.md) para um agente de IA local a partir de uma conversa que deu certo. Extraia o procedimento reutilizável: quando usar, passos na ordem, ferramentas e comandos que funcionaram, armadilhas e erros que apareceram e como foram resolvidos, e como verificar o resultado. Generalize (troque nomes de arquivos e valores específicos por descrições). Seja conciso. Responda exatamente neste formato:\nNOME: nome-em-kebab-case\nDESCRIÇÃO: uma frase dizendo quando usar\n---\n# Título\n(corpo em Markdown)'),
-      L('Conversa "{0}":\n\n{1}', c.title, transcriptOf(c)), { maxTokens: 1600, temperature: 0.2, signal: ac.signal });
+    const d = await draftSkill(c, ac.signal);
     m.close();
-    const name = (out.match(/^\s*NOME:\s*(.+)$/mi)?.[1] || c.title).trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50);
-    const description = (out.match(/^\s*DESCRI[CÇ][AÃ]O:\s*(.+)$/mi)?.[1] || '').trim();
-    const i = out.indexOf('\n---');
-    const body = (i >= 0 ? out.slice(i + 4) : out.replace(/^\s*(NOME|DESCRI[CÇ][AÃ]O):.*$/gmi, '')).trim();
-    editSkill(null, { name, description, body });
+    editSkill(null, d);
   } catch (e) { if (!ac.signal.aborted) { m.close(); toast(L('Não consegui gerar: ') + e.message, 'err'); } }
+}
+
+/** O rascunho de uma habilidade a partir da conversa (sem salvar): nome, descrição e corpo. */
+async function draftSkill(c, signal) {
+  const out = await sideAsk(c, L('Você escreve habilidades (SKILL.md) para um agente de IA local a partir de uma conversa que deu certo. Extraia o procedimento reutilizável: quando usar, passos na ordem, ferramentas e comandos que funcionaram, armadilhas e erros que apareceram e como foram resolvidos, e como verificar o resultado. Generalize (troque nomes de arquivos e valores específicos por descrições). Seja conciso. Responda exatamente neste formato:\nNOME: nome-em-kebab-case\nDESCRIÇÃO: uma frase dizendo quando usar\n---\n# Título\n(corpo em Markdown)'),
+    L('Conversa "{0}":\n\n{1}', c.title, transcriptOf(c)), { maxTokens: 1600, temperature: 0.2, signal });
+  const name = (out.match(/^\s*NOME:\s*(.+)$/mi)?.[1] || c.title).trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50);
+  const description = (out.match(/^\s*DESCRI[CÇ][AÃ]O:\s*(.+)$/mi)?.[1] || '').trim();
+  const i = out.indexOf('\n---');
+  const body = (i >= 0 ? out.slice(i + 4) : out.replace(/^\s*(NOME|DESCRI[CÇ][AÃ]O):.*$/gmi, '')).trim();
+  return { name, description, body };
+}
+
+/** Loop de habilidades: uma tarefa que deu certo vira uma sugestão de SKILL.md (uma vez por conversa).
+   Roda depois do turno, sem prender a resposta: se falhar, não atrapalha nada. */
+async function maybeAutoSkill(conv, g) {
+  const mode = S.settings.autoSkill || 'ask';
+  if (mode === 'off' || conv.plan || conv.skillOffered || !g || g.stop) return;
+  // trabalho de verdade: mexeu em arquivo ou usou várias ferramentas
+  if (g.writes === 0 && (g.seen?.size || 0) < 6) return;
+  const last = [...conv.messages].reverse().find((m) => m.role === 'tool');
+  if (last && (last.isError || last.status === 'error' || last.status === 'denied')) return;
+  conv.skillOffered = Date.now();
+  try {
+    const d = await draftSkill(conv);
+    if (!d.body || !d.name) return;
+    const existe = (S.skills || []).some((s) => s.id === d.name);
+    if (mode === 'auto') {
+      if (existe) return; // não duplica
+      await api('/api/skills/save', { name: d.name, description: d.description, body: d.body });
+      conv.messages.push({ role: 'notice', icon: 'sparkles', content: L('Habilidade criada: {0} (Configurações › Habilidades).', d.name) });
+      loadSkills?.();
+    } else {
+      conv.skillDraft = d;
+      conv.messages.push({ role: 'notice', icon: 'sparkles', skill: true, content: L('Essa tarefa pode virar uma habilidade: {0}', d.name) });
+    }
+    saveConvs(); scheduleRender();
+  } catch { /* é um extra: o turno já terminou */ }
 }
 
 /* ------------------------------------------------------------ pré-leitura do projeto */

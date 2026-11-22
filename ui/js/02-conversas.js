@@ -2492,13 +2492,31 @@ function renderBlock(b, conv, isLast) {
     );
   }
 
-  if (b.type === "notice")
+  if (b.type === "notice") {
+    const nm = b.msgs[0];
+    if (nm.skill) {
+      const draft = conv.skillDraft;
+      return h("div.notice-line", { dataset: { start: b.start } }, ic(nm.icon || "sparkles"), h("span", null, nm.content),
+        h("button.btn.sm", { type: "button", onclick: () => { if (draft) editSkill(null, draft); } }, L("Revisar")),
+        h("button.btn.sm.primary", { type: "button", onclick: async (e) => {
+          if (!draft) return;
+          e.currentTarget.disabled = true;
+          try {
+            await api('/api/skills/save', { name: draft.name, description: draft.description, body: draft.body });
+            toast(L('Habilidade criada: {0}', draft.name));
+            conv.skillDraft = null; nm.skill = false; nm.content = L('Habilidade criada: {0}', draft.name);
+            saveConvs(); scheduleRender(); renderSkillsPage?.();
+          } catch (er) { toast(er.message, 'err'); e.currentTarget.disabled = false; }
+        } }, L("Ativar")),
+        h("button.btn.sm", { type: "button", onclick: () => { conv.skillDraft = null; nm.skill = false; nm.content = L('Sugestão de habilidade descartada.'); saveConvs(); scheduleRender(); } }, L("Descartar")));
+    }
     return h(
       "div.notice-line",
       { dataset: { start: b.start } },
-      ic(b.msgs[0].icon || "arrowUp"),
-      h("span", null, b.msgs[0].content)
+      ic(nm.icon || "arrowUp"),
+      h("span", null, nm.content)
     );
+  }
 
   return renderAI(b, conv, isLast);
 }

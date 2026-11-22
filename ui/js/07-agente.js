@@ -581,6 +581,8 @@ async function runAgent(conv) {
             continue;
           }
         }
+        // loop de habilidades: uma tarefa que deu certo vira sugestão de SKILL.md (sem prender a resposta)
+        maybeAutoSkill(conv, g);
         break;
       }
       // JSON quebrado, nome de parâmetro trocado, número como texto...: conserta pelo esquema antes de executar
