@@ -2713,4 +2713,9 @@ const I18N_EN = {
   "Sugestão de habilidade descartada.": "Skill suggestion discarded.",
   "Quando uma tarefa dá certo (alterou arquivos ou usou várias ferramentas), o studio tenta resumir o procedimento numa habilidade. Perguntar: mostra a sugestão na conversa para você revisar; Automático: salva direto (dá para apagar depois).": "When a task succeeds (changed files or used several tools), the studio tries to summarize the procedure into a skill. Ask: shows the suggestion in the chat for you to review; Automatic: saves it right away (you can delete it later).",
   "A sugestão nunca entra no catálogo do modelo sem você ativar (no modo Perguntar).": "The suggestion never enters the model catalog until you activate it (in Ask mode).",
+  "Sem conversa para ligar ferramentas.": "No chat to turn tools on.",
+  "Já estava tudo ligado (ou o nome não existe). Grupos ainda desligados: {0}.": "Everything was already on (or the name does not exist). Groups still off: {0}.",
+  "nenhum": "none",
+  "Ligado para os próximos passos: {0}.": "Turned on for the next steps: {0}.",
+  "(Ferramentas desligadas nesta conversa: {0}. Se a tarefa precisar de uma delas, chame enable_tools com groups=[...] antes de usar.)": "(Tools off in this chat: {0}. If the task needs one of them, call enable_tools with groups=[...] before using it.)",
 };

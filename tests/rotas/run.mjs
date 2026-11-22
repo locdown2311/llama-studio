@@ -11,12 +11,12 @@ const a = src.indexOf('const ROUTES = ['); const b = src.indexOf('async function
 const { routeProfiles, routeExtras } = new Function('const L = (s, ...a) => s.replace(/\\{(\\d+)\\}/g, (m, i) => a[i] ?? "");\n' + src.slice(a, b) + '; return { routeProfiles, routeExtras };')();
 const diff = (got, exp) => [got.filter((x) => !exp.includes(x)), exp.filter((x) => !got.includes(x))];
 let total = 0, ok = 0, extra = 0, miss = 0;
-for (const f of ['treino', 'validacao1', 'validacao2', 'validacao4', 'extras', 'ingles']) {
+for (const f of ['treino', 'validacao1', 'validacao2', 'validacao4', 'extras', 'ingles', 'falsos']) {
   const mod = await import('./' + f + '.mjs');
   const { skills = [], mcps = [] } = mod;
   for (const [t, ep, em, es] of mod.default) {
     total++;
-    const prof = routeProfiles(t);
+    const prof = routeProfiles(t, 'equilibrado', mcps);
     const d = [diff(prof.map((r) => r.id), ep)];
     if (em) {
       const ex = routeExtras(t, skills, mcps);
@@ -32,11 +32,11 @@ console.log(`equilibrado: ${ok}/${total} frases certas · ligou a mais: ${extra}
 
 // os outros níveis: cauteloso nunca pode ligar algo que o equilibrado não ligaria; liberal só mede
 let cautExtra = 0, cautMiss = 0, libExtra = 0, libMiss = 0, n = 0;
-for (const f of ['treino', 'validacao1', 'validacao2', 'validacao4', 'extras', 'ingles']) {
+for (const f of ['treino', 'validacao1', 'validacao2', 'validacao4', 'extras', 'ingles', 'falsos']) {
   const mod = await import('./' + f + '.mjs');
   for (const [t, ep] of mod.default) {
     n++;
-    const c = routeProfiles(t, 'cauteloso').map((r) => r.id); const l = routeProfiles(t, 'liberal').map((r) => r.id);
+    const c = routeProfiles(t, 'cauteloso', mod.mcps || []).map((r) => r.id); const l = routeProfiles(t, 'liberal', mod.mcps || []).map((r) => r.id);
     cautExtra += c.filter((x) => !ep.includes(x)).length; cautMiss += ep.filter((x) => !c.includes(x)).length;
     libExtra += l.filter((x) => !ep.includes(x)).length; libMiss += ep.filter((x) => !l.includes(x)).length;
   }

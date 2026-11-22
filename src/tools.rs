@@ -157,9 +157,12 @@ const DEFS: &[Def] = &[
 const SKILL_TOOL: Def = d("read_skill_file", "", false, false, "Lê um arquivo auxiliar de uma skill ativa (scripts, modelos, referências citadas no SKILL.md). Arquivo grande vem como sumário; leia trechos com offset/limit.",
     r#"{"type":"object","properties":{"skill":{"type":"string","description":"id da skill"},"path":{"type":"string"},"offset":{"type":"integer"},"limit":{"type":"integer"}},"required":["skill","path"]}"#);
 
-
 const USE_SKILL: Def = d("use_skill", "", false, false, "Carrega uma skill do catálogo (instruções completas, arquivos auxiliares e ferramentas que ela traz). Use antes de começar uma tarefa que se encaixe numa skill; as ferramentas dela ficam disponíveis no passo seguinte.",
     r#"{"type":"object","properties":{"skill":{"type":"string","description":"id da skill, como aparece no catálogo"}},"required":["skill"]}"#);
+
+/// Sempre disponível: o modelo liga o que falta quando os recursos automáticos não acertaram.
+const ENABLE_TOOLS: Def = d("enable_tools", "", false, true, "Liga ferramentas que estão desligadas nesta conversa (grupos de ferramentas, conectores ou habilidades). Use quando o pedido precisar de algo que não está na sua lista: leia a nota de 'Ferramentas desligadas' e ligue só o que for usar.",
+    r#"{"type":"object","properties":{"groups":{"type":"array","items":{"type":"string"},"description":"Grupos: read, write, edit, shell, code, web, browser, computer, history, notebook, ask, kb, memory, schedule, peers, todo, toolsearch, explore, video"},"mcp":{"type":"array","items":{"type":"string"},"description":"Nomes de conectores (de search_tools ou do catálogo)"},"skills":{"type":"array","items":{"type":"string"},"description":"ids de habilidades"}}}"#);
 
 /// Descrição e esquema no idioma do studio.
 fn text_of(d: &Def) -> (&'static str, &'static str) {
@@ -227,6 +230,11 @@ pub fn build_tools(app: &App, groups: &[String], servers: &[String], with_skills
     if with_skills && allowed(SKILL_TOOL.name) {
         let (desc, params) = text_of(&SKILL_TOOL);
         add(SKILL_TOOL.name.into(), desc.into(), serde_json::from_str(params).unwrap(), json!({"source":"builtin","group":"read","label":SKILL_TOOL.name,"mutating":false}));
+    }
+    // sempre disponível, mesmo com tudo desligado: é a saída quando o roteador automático erra
+    if allowed(ENABLE_TOOLS.name) {
+        let (desc, params) = text_of(&ENABLE_TOOLS);
+        add(ENABLE_TOOLS.name.into(), desc.into(), serde_json::from_str(params).unwrap(), json!({"source":"client","group":"","label":ENABLE_TOOLS.name,"mutating":false}));
     }
     let mut index = HashMap::new();
     let mut catalog: Vec<(String, Vec<String>)> = vec![];

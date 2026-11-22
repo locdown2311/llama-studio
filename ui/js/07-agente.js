@@ -489,6 +489,7 @@ async function runAgent(conv) {
       conv.hookStart || '',
       askLevelNote(conv),
       groups.includes('memory') ? memNote(conv) : '',
+      offGroupsNote(groups, conv),
       conv.factsNote || '',
       ctx.text,
       catalogSys,
@@ -688,7 +689,7 @@ async function runAgent(conv) {
         tmsg.ms = performance.now() - ts;
         tmsg.content = r.content; tmsg.isError = r.isError; if (r.data) tmsg.data = r.data; tmsg.status = r.isError ? 'error' : 'ok';
         if (r.images?.length) { tmsg._images = r.images; images.push({ name: tc.function.name, images: r.images }); }
-        if (tc.function.name === 'search_tools' || tc.function.name === 'restore_tools') refetch = true;
+        if (tc.function.name === 'search_tools' || tc.function.name === 'restore_tools' || tc.function.name === 'enable_tools') refetch = true;
         // skill carregada: fica marcada na conversa e as ferramentas dela entram no próximo passo
         if (tc.function.name === 'use_skill' && !r.isError) {
           const id = /<skill id="([^"]+)"/.exec(r.content || '')?.[1];

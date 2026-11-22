@@ -106,14 +106,38 @@ const AUTO_LEVELS = [
   ['equilibrado', L('Equilibrado'), L('Sinais claros ou dois indícios juntos. Erra pouco para os dois lados.')],
   ['liberal', L('Liberal'), L('Um indício basta, inclusive em perguntas. Liga mais coisas e gasta mais contexto.')],
 ];
-function routeProfiles(text, level = 'equilibrado') {
+// peso dos sinais fracos: palavra que aparece em pedidos comuns vale 1; as demais, 2; sinal forte, 6.
+// limiar por nível: cauteloso só forte, equilibrado 3, liberal 2.
+const WEAK_GENERIC = new Set('jogo processo rotina comparar senha modulo offset registrador referencia dump hook injecao imports exports endereco ponteiro binario bug erro erros excecao quebr crash precos hoje pagina link atual tutorial lancamento lojas promo comprar botao menu aplicativo app arquivos pastas fotos planilha documentos imagens espaco duplicado mover apagar maiores posts engajamento seguidores feed'.split(' '));
+const weakScore = (t, r) => {
+  const hits = new Set((t.match(r.weak) || []).map((x) => norm(x).replace(/[^a-z0-9]+/g, ' ').trim()));
+  let s = 0;
+  for (const h of hits) if (h) s += h.split(' ').some((w) => WEAK_GENERIC.has(w)) ? 1 : 2;
+  return s;
+};
+// "sem internet", "não use o navegador", "sem controle da tela": o pedido pede explicitamente para não usar
+const NEGATIONS = [
+  ['web', /\b(sem|n[aã]o|no)\s+(internet|web|navegador|browser|online|rede)\b|\bn[aã]o\s+(use|usa|abra|abre|mexa|precise)\s+(o\s+|na\s+|de\s+)?(navegador|browser|internet|web|online)\b|\boffline\b|\bdesligad[oa]\s+(a\s+)?(internet|rede)\b|\bwithout (internet|network|web)\b/i],
+  ['pc', /\b(sem|n[aã]o)\s+(controle|tela|mouse|teclado|print)\b|\bn[aã]o\s+(use|abra|mexa|clique)\s+(na\s+)?(tela|o\s+navegador|o\s+mouse)\b|\bno\s+(screen|mouse|keyboard)\s+control\b/i],
+  ['files', /\b(sem|n[aã]o)\s+(mexa|mexer|altere|apague|mova)\s+(em\s+)?(arquivos|pastas)\b/i],
+];
+/** Um conector citado pelo nome já é um pedido concreto (mesmo em pergunta de conceito). */
+function namedMcp(text, mcps) {
+  const low = ' ' + norm(text).replace(/[^a-z0-9]+/g, ' ') + ' ';
+  return (mcps || []).some((s) => {
+    const k = norm(s.name).replace(/mcp|server|servidor/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
+    return k.length >= 3 && low.includes(' ' + k + ' ');
+  });
+}
+function routeProfiles(text, level = 'equilibrado', mcps = []) {
   if (level === 'desligado') return [];
   const t = String(text).replace(/(ik_)?llama\.cpp/gi, 'llama');
-  if (level !== 'liberal' && ASK_RE.test(t) && !CONCRETE_RE.test(t)) return [];
+  if (level !== 'liberal' && ASK_RE.test(t) && !CONCRETE_RE.test(t) && !namedMcp(t, mcps)) return [];
   const strongHit = ROUTES.filter((r) => r.strong.test(t));
-  const need = level === 'cauteloso' ? Infinity : level === 'liberal' ? 1 : 2;
-  const weakHit = (r) => (level === 'liberal' || !r.need || r.need.test(t)) && new Set((t.match(r.weak) || []).map((x) => x.toLowerCase().slice(0, 5))).size >= need;
-  const out = ROUTES.filter((r) => strongHit.includes(r) || weakHit(r));
+  const need = level === 'cauteloso' ? Infinity : level === 'liberal' ? 2 : 3;
+  const weakHit = (r) => (level === 'liberal' || !r.need || r.need.test(t)) && weakScore(t, r) >= need;
+  const out = ROUTES.filter((r) => strongHit.includes(r) || weakHit(r))
+    .filter((r) => !NEGATIONS.some(([id, re]) => r.id === id && re.test(t)));
   // engenharia reversa explícita: "função", "compila" e "erro" ali não são pedido de programação
   return strongHit.some((r) => r.id === 're') && !strongHit.some((r) => r.id === 'code') ? out.filter((r) => r.id !== 'code') : out;
 }
@@ -123,7 +147,7 @@ const words = (t) => new Set(norm(t).split(/[^a-z0-9]+/).filter((w) => w.length 
 
 /** Conectores citados pelo nome e habilidades cujo nome ou descrição batem com o pedido. */
 function routeExtras(text, skills, mcps, level = 'equilibrado') {
-  if (level === 'desligado' || (level !== 'liberal' && ASK_RE.test(text) && !CONCRETE_RE.test(text))) return { mcp: [], skills: [] };
+  if (level === 'desligado' || (level !== 'liberal' && ASK_RE.test(text) && !CONCRETE_RE.test(text) && !namedMcp(text, mcps))) return { mcp: [], skills: [] };
   const low = ' ' + norm(text).replace(/[^a-z0-9]+/g, ' ') + ' ';
   const mcp = mcps.filter((s) => {
     const key = norm(s.name).replace(/mcp|server|servidor/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
@@ -190,7 +214,7 @@ async function autoRoute(conv, msg) {
   const added = { groups: [], mcp: [], skills: [], profiles: [], eager: [], block: [] };
   const add = (k, v) => { if (!have[k].has(v)) { have[k].add(v); added[k].push(v); } };
   const level = autoLevelOf(conv);
-  const profs = routeProfiles(text, level);
+  const profs = routeProfiles(text, level, S.mcp);
   for (const r of profs) {
     added.profiles.push(r.label);
     for (const g of r.groups || []) add('groups', g);

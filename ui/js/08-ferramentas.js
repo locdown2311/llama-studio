@@ -25,6 +25,47 @@ const TOOL_INFO = {
   explore: { sec: L('Subagentes'), title: L('Subagentes exploradores'), short: 'exploradores', desc: L('Investigação com contexto próprio, vários em paralelo. Com a escrita ligada, também criam e editam os arquivos que o modelo der a cada um.') },
 };
 function enabledGroups() { return TOOL_GROUPS.filter((g) => S.settings.tools[g]); }
+
+/** Liga grupos, conectores e habilidades que estavam desligados nesta conversa (ferramenta enable_tools).
+   É a saída quando os recursos automáticos erram para menos: o modelo pede o que precisa. */
+function enableTools(tctx, args) {
+  const conv = tctx.conv;
+  if (!conv) return { content: L('Sem conversa para ligar ferramentas.'), isError: true };
+  const list = (v) => (Array.isArray(v) ? v : String(v || '').split(/[\s,]+/)).map((x) => String(x).trim()).filter(Boolean);
+  const groups = list(args.groups).filter((g) => TOOL_GROUPS.includes(g));
+  const mcp = list(args.mcp).filter((n) => S.mcp.some((s) => s.name === n));
+  const skills = list(args.skills).filter((id) => S.skills.some((s) => s.id === id));
+  const auto = conv.auto || { groups: [], mcp: [], skills: [] };
+  const haveG = new Set([...enabledGroups(), ...(auto.groups || [])]);
+  const haveM = new Set([...activeSel(conv).mcp, ...(auto.mcp || [])]);
+  const haveS = new Set([...activeSel(conv).skills, ...(auto.skills || [])]);
+  const added = { groups: [], mcp: [], skills: [], profiles: [], eager: [], block: [] };
+  for (const g of groups) if (!haveG.has(g)) { auto.groups.push(g); added.groups.push(g); }
+  for (const n of mcp) if (!haveM.has(n)) { auto.mcp.push(n); added.mcp.push(n); }
+  for (const id of skills) if (!haveS.has(id)) { auto.skills.push(id); added.skills.push(id); }
+  conv.auto = auto;
+  // o pedido que precisou disso fica marcado (o chip "Ativado" mostra o que entrou)
+  const msg = [...conv.messages].reverse().find((m) => m.role === 'user');
+  if (msg) msg.auto = { ...(msg.auto || {}), ...added, ...(msg.auto?.undone ? {} : {}) };
+  saveConvs();
+  const names = [
+    ...added.groups.map((g) => TOOL_INFO[g]?.short || TOOL_INFO[g]?.title || g),
+    ...added.mcp,
+    ...added.skills.map((id) => S.skills.find((s) => s.id === id)?.name || id),
+  ];
+  if (!names.length) {
+    const off = TOOL_GROUPS.filter((g) => !haveG.has(g));
+    return { content: L('Já estava tudo ligado (ou o nome não existe). Grupos ainda desligados: {0}.', off.join(', ') || L('nenhum')), isError: false };
+  }
+  return { content: L('Ligado para os próximos passos: {0}.', names.join(', ')), isError: false };
+}
+
+/** A nota do prompt com os grupos desligados: o modelo sabe o que pode ligar com enable_tools. */
+function offGroupsNote(groups, conv) {
+  const off = TOOL_GROUPS.filter((g) => !groups.includes(g) && g !== 'interface' && g !== 'video' && !(g === 'ask' && conv?.noAsk));
+  if (!off.length) return '';
+  return L('(Ferramentas desligadas nesta conversa: {0}. Se a tarefa precisar de uma delas, chame enable_tools com groups=[...] antes de usar.)', off.join(', '));
+}
 /** O modelo da conversa enxerga? (a conversa importa: com várias respondendo ao mesmo tempo, cada uma tem o seu) */
 function visionOn(conv) {
   if (S.settings.vision === 'on') return true;
@@ -105,6 +146,7 @@ async function execTool(name, args, info, tctx, tmsg) {
     if (name === 'run_workflow') return await runWorkflow(args || {}, tctx, tmsg);
     if (name === 'save_workflow') return await saveWorkflow(args || {});
     if (name === 'list_plugins') return await listPlugins();
+    if (name === 'enable_tools') return enableTools(tctx, args || {});
     if (name === 'apply_edit') return await runApplyEdit(args || {}, tctx, tmsg);
     if (name === 'video_scenes') return await runVideoScenes(args || {}, tctx, tmsg);
     if (name === 'video_look') return await runVideoLook(args || {}, tctx, tmsg);
