@@ -14,7 +14,8 @@ Legenda: ✅ feito · ⏳ pendente
 | 1.4 Webhook de entrada | ⏳ | — | — |
 | 2.1 Terminais PTY | ✅ | 2.107.0 | `5a04435` |
 | 2.2 LSP | ⏭ pulado | — | — |
-| Loop de habilidades automáticas | ✅ | 2.108.0 | — |
+| Loop de habilidades automáticas | ✅ | 2.108.0 | `594e32e` |
+| Auto-serviço de ferramentas (`enable_tools`) | ✅ | 2.109.0 | — |
 
 Também nesta leva: preflight só pede build quando a mudança não é só documentação (2.104.1, `a276f14`) e este plano (`53e0042`).
 
@@ -94,6 +95,12 @@ O 1.1 e o 1.2 já foram para o `main` pelo PR do `master`; o 1.3 (`6cfd4e3`) ain
 - Rascunho via `sideAsk` (`draftSkill`, mesmo prompt do "Habilidade a partir da conversa").
 - Modo **Perguntar** (padrão): card na conversa com Revisar / Ativar / Descartar; **Automático** salva direto; **Desligado**. Em Configurações › Respostas › Aprender com a conversa.
 - A sugestão não entra no catálogo do modelo sem aprovação.
+
+## Auto-serviço de ferramentas ✅ 2.109.0
+- Ferramenta `enable_tools` sempre disponível (mesmo com tudo desligado): o modelo liga grupos, conectores e habilidades que faltam.
+- Nota no prompt de sistema com os grupos desligados (o modelo sabe o que pode ligar).
+- `enable_tools` força o recarregamento das ferramentas no passo seguinte; o que ele liga aparece no chip "Ativado".
+- Ganho: errar para menos no roteador automático deixa de ser fatal. Próximo: curar as palavras fracas (B) e aprender com os erros (C).
 
 ## Ordem recomendada
 1. 1.4 webhook (fecha a fase 1).
