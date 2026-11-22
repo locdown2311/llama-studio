@@ -15,7 +15,8 @@ Legenda: ✅ feito · ⏳ pendente
 | 2.1 Terminais PTY | ✅ | 2.107.0 | `5a04435` |
 | 2.2 LSP | ⏭ pulado | — | — |
 | Loop de habilidades automáticas | ✅ | 2.108.0 | `594e32e` |
-| Auto-serviço de ferramentas (`enable_tools`) | ✅ | 2.109.0 | — |
+| Auto-serviço de ferramentas (`enable_tools`) | ✅ | 2.109.0 | `eaad403` |
+| Recursos automáticos: regras curadas (B) | ✅ | 2.110.0 | — |
 
 Também nesta leva: preflight só pede build quando a mudança não é só documentação (2.104.1, `a276f14`) e este plano (`53e0042`).
 
@@ -101,6 +102,13 @@ O 1.1 e o 1.2 já foram para o `main` pelo PR do `master`; o 1.3 (`6cfd4e3`) ain
 - Nota no prompt de sistema com os grupos desligados (o modelo sabe o que pode ligar).
 - `enable_tools` força o recarregamento das ferramentas no passo seguinte; o que ele liga aparece no chip "Ativado".
 - Ganho: errar para menos no roteador automático deixa de ser fatal. Próximo: curar as palavras fracas (B) e aprender com os erros (C).
+
+## Recursos automáticos: regras curadas ✅ 2.110.0
+- Voto **ponderado** no lugar de contagem: palavra comum vale 1, específica 2, sinal forte 6; limiar 3 no equilibrado, 2 no liberal.
+- **Negação**: "sem internet", "não use o navegador", "sem controle da tela" e "não mexa em arquivos" desligam o perfil.
+- Conector citado pelo nome conta como pedido concreto ("como funciona o x64dbg?" liga RE).
+- Teste novo `tests/rotas/falsos.mjs` com frases do dia a dia (jogo, processo, memória) e os casos de negação; o teste agora passa os conectores ao roteador.
+- Resultado: 286/286 no equilibrado, liberal com 42 extras (era 72).
 
 ## Ordem recomendada
 1. 1.4 webhook (fecha a fase 1).
