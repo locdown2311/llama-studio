@@ -2078,7 +2078,7 @@ async fn tools_stop(b: Bytes) -> Res {
     if run.is_empty() {
         return Err(bad(L!("Falta a conversa.", "Missing the chat.")));
     }
-    ok(json!({ "stopped": crate::shell::stop(run) + crate::pty::stop(run) }))
+    ok(json!({ "stopped": crate::shell::stop(run) }))
 }
 
 /// Comandos em segundo plano de uma conversa (ou de todas, sem `run`).

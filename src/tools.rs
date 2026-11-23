@@ -54,16 +54,6 @@ const DEFS: &[Def] = &[
       r#"{"type":"object","properties":{"id":{"type":"string","description":"Id do job (de job_list ou devolvido no início)"},"tail":{"type":"integer","description":"Quantas linhas do fim (padrão 80, máximo 600)"}},"required":["id"]}"#),
     d("job_kill", "shell", true, false, "Encerra um comando em segundo plano (a árvore inteira de processos que ele abriu).",
       r#"{"type":"object","properties":{"id":{"type":"string","description":"Id do job"}},"required":["id"]}"#),
-    d("terminal_start", "shell", true, false, "Abre um terminal persistente (PTY) na pasta de trabalho: um shell vivo entre chamadas. Use para REPL, debugger, servidor interativo ou programas que perguntam algo. Devolve o id; escreva com terminal_send e leia com terminal_read.",
-      r#"{"type":"object","properties":{"name":{"type":"string","description":"Nome curto para achar na lista"},"cwd":{"type":"string","description":"Subpasta onde abrir (padrão: raiz da pasta de trabalho)"},"command":{"type":"string","description":"Comando a rodar em vez do shell (ex.: python, node)"}}}"#),
-    d("terminal_send", "shell", true, false, "Escreve no terminal e devolve o fim da tela depois que a saída assenta (espera até wait_ms). Por padrão manda Enter junto (como digitar e apertar Enter); use enter=false para só digitar (responder a um prompt que espera tecla). Para comando demorado, aumente wait_ms ou acompanhe com terminal_read.",
-      r#"{"type":"object","properties":{"id":{"type":"string","description":"Id do terminal"},"text":{"type":"string","description":"O que digitar"},"enter":{"type":"boolean","description":"Manda Enter depois (padrão true)"},"wait_ms":{"type":"integer","description":"Quanto esperar a saída assentar, em ms (padrão 3000, até 120000)"}},"required":["id","text"]}"#),
-    d("terminal_read", "shell", false, false, "Lê as últimas linhas da saída do terminal (sem cores). Chame de novo para acompanhar; alive diz se o processo ainda está vivo.",
-      r#"{"type":"object","properties":{"id":{"type":"string","description":"Id do terminal"},"tail":{"type":"integer","description":"Quantas linhas do fim (padrão 120, máximo 2000)"}},"required":["id"]}"#),
-    d("terminal_close", "shell", true, false, "Encerra o terminal e o que ele abriu.",
-      r#"{"type":"object","properties":{"id":{"type":"string","description":"Id do terminal"}},"required":["id"]}"#),
-    d("terminal_list", "shell", false, false, "Lista os terminais desta conversa: id, nome, pasta, vivo e tempo.",
-      r#"{"type":"object","properties":{}}"#),
     d("execute_code", "code", true, true, "Executa JavaScript (assíncrono, num worker do navegador: sem Node, require, import estático nem Python) para orquestrar várias ferramentas de uma vez, sem encher o contexto com resultados intermediários. Dentro do código: `await tool('nome_da_ferramenta', {argumentos})` devolve o texto do resultado (lança erro se a ferramenta falhar); `console.log(...)` registra; `return valor` devolve o resultado final. Ex.: laços sobre arquivos, filtrar resultados, chamar várias ferramentas e resumir.",
       r#"{"type":"object","properties":{"code":{"type":"string","description":"Corpo de uma função async em JavaScript"}},"required":["code"]}"#),
     d("list_workflows", "code", false, true, "Lista os workflows salvos (scripts JS reutilizáveis em dados/workflows): nome, descrição e parâmetros. Para rodar, use run_workflow.",
@@ -554,23 +544,6 @@ fn out(r: Result<(String, Vec<String>), String>) -> ToolOut {
     }
 }
 
-/// Texto que o modelo lê de um resultado de terminal.
-fn pty_text(name: &str, v: &Value) -> String {
-    let id = v["id"].as_str().unwrap_or("");
-    let alive = if v["alive"].as_bool() == Some(true) { L!("vivo", "alive") } else { L!("terminou", "ended") };
-    match name {
-        "terminal_start" => LF!("Terminal {} aberto em {}. terminal_send escreve e já devolve o que apareceu; terminal_read relê a tela.\n{}", "Terminal {} opened in {}. terminal_send types and returns what showed up; terminal_read rereads the screen.\n{}", id, v["dir"].as_str().unwrap_or(""), v["out"].as_str().unwrap_or("")),
-        "terminal_send" => format!("[terminal {id} · {alive}]\n{}", v["out"].as_str().unwrap_or("")),
-        "terminal_close" => LF!("Terminal {} encerrado.", "Terminal {} closed.", id),
-        "terminal_read" => format!("[terminal {id} · {alive} · {} ms]\n{}", v["ms"].as_u64().unwrap_or(0), v["out"].as_str().unwrap_or("")),
-        _ => v["terminals"]
-            .as_array()
-            .map(|a| a.iter().map(|t| format!("- {} ({}) {} · {} ms", t["id"].as_str().unwrap_or(""), t["name"].as_str().unwrap_or(""), if t["alive"].as_bool() == Some(true) { L!("vivo", "alive") } else { L!("terminou", "ended") }, t["ms"].as_u64().unwrap_or(0))).collect::<Vec<_>>().join("\n"))
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| L!("Nenhum terminal aberto.", "No terminals open.").to_string()),
-    }
-}
-
 /// Executa uma ferramenta do servidor (arquivos, shell, navegador, computador ou MCP).
 pub async fn call(app: &Arc<App>, ws: PathBuf, name: &str, args: Value, allow: &[String]) -> ToolOut {
     if name == "web_search" || name == "web_fetch" {
@@ -664,19 +637,6 @@ pub async fn call(app: &Arc<App>, ws: PathBuf, name: &str, args: Value, allow: &
             _ => crate::shell::job_kill(s(&args, "id")).map(|v| serde_json::to_string_pretty(&v).unwrap_or_default()),
         };
         return out(res.map(|t| (t, vec![])));
-    }
-    if name == "terminal_start" {
-        let res = crate::pty::start(app, &ws, s(&args, "cwd"), s(&args, "name"), args.get("command").and_then(Value::as_str)).await;
-        return out(res.map(|v| (pty_text(name, &v), vec![])));
-    }
-    if matches!(name, "terminal_send" | "terminal_read" | "terminal_close" | "terminal_list") {
-        let res: Result<Value, String> = match name {
-            "terminal_send" => crate::pty::send(s(&args, "id"), s(&args, "text"), args.get("enter").and_then(Value::as_bool).unwrap_or(true), args.get("wait_ms").and_then(Value::as_u64).unwrap_or(3000)).await,
-            "terminal_read" => crate::pty::read(s(&args, "id"), args.get("tail").and_then(Value::as_u64).unwrap_or(120) as usize),
-            "terminal_close" => crate::pty::close(s(&args, "id")),
-            _ => Ok(json!({ "terminals": crate::pty::list(&crate::shell::OWNER.try_with(|o| o.clone()).unwrap_or_default()) })),
-        };
-        return out(res.map(|v| (pty_text(name, &v), vec![])));
     }
     if def(name).is_some_and(|d| d.client) {
         return out(Err(LF!("{name} é executada pela interface, não pelo servidor.", "{name} is run by the interface, not by the server.")));

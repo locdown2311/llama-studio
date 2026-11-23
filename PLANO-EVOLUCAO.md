@@ -64,11 +64,9 @@ O 1.1 e o 1.2 já foram para o `main` pelo PR do `master`; o 1.3 (`6cfd4e3`) ain
 
 ## Fase 2 — média
 
-### 2.1 Terminais persistentes (PTY) ✅ 2.107.0
-- `src/pty.rs` com `portable-pty` (ConPTY no Windows, PTY no Linux): `terminal_start`, `terminal_send` (Enter por padrão), `terminal_read` (ANSI limpo, `alive`), `terminal_close`, `terminal_list`; 12 sessões, 2.000 linhas cada.
-- **Ambientes**: pasta normal → PowerShell (Windows) ou `$SHELL`; com o Linux isolado (WSL) ligado → `wsl.exe -d <distro> -u root -e sh -c "<mount /workspace; cd; exec bash>"` (mesmo mount do `run_command`).
-- O Parar da conversa encerra os terminais (`pty::stop`); fechamento por `taskkill /T /F`.
-- Corrigido no caminho: deadlock do `job_output`/`terminal_read` (lock de `out` e `job_json`/`view` travando o mesmo mutex).
+### 2.1 Terminais persistentes (PTY) ⏭ retirado (23/11/2026)
+- Entrou na 2.107.0 (`portable-pty`, ConPTY no Windows) e saiu na 2.111.2: na prática os modelos não o usavam bem (abriam terminal para um `mkdir`) e o `run_command` + jobs de shell já cobrem comandos longos e saída incremental.
+- Se voltar: emulador de terminal (vt100) na leitura e `terminal_send` que devolve a saída nova; só para REPL/debugger de verdade.
 
 ### 2.2 LSP ⏭ pulado (decisão de 21/11/2026)
 - Motivo: exige language server instalado por linguagem e o ganho não compensa agora; o `search_files`/rg cobre a busca de texto.
