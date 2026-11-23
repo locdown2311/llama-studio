@@ -1270,7 +1270,8 @@ async function executorLoop() {
    3. Micro-habilidades (desligado por padrão): pares "falhou assim, funcionou assado" viram fatos do
       projeto; a cada 3 conversas uma revisão curta confirma ou derruba; o fato só entra no começo das
       conversas depois de visto em 3 conversas diferentes. */
-const TE_CORE = new Set(['read_file', 'list_directory', 'search_files', 'use_skill', 'search_tools', 'restore_tools', 'update_todos', 'ask_user']);
+// o básico nunca sai da lista: sem escrever, editar e rodar comandos o agente fica de mãos atadas
+const TE_CORE = new Set(['read_file', 'list_directory', 'search_files', 'use_skill', 'search_tools', 'restore_tools', 'enable_tools', 'update_todos', 'ask_user', 'write_file', 'edit_file', 'run_command']);
 const TE = { pruneMin: 10, pruneP: 10, pruneM: 2, pruneS: 5, judgeConf: 0.7, redirects: 1, reviewK: 3, confirm: 3 };
 function teOn(k) { const v = S.settings[k]; return k === 'microSkills' ? v === true : v !== false; }
 function teKey(conv) { const p = projectOf(conv); return p ? 'p:' + p.id : 'w:' + (wsOf(conv) || '').toLowerCase(); }
@@ -1316,6 +1317,9 @@ function applyPrune(conv, r) {
   r.offered = (r.tools || []).map((t) => t.function?.name).filter(Boolean);
   if (!cut.length) return r;
   const out = (r.tools || []).filter((t) => cut.includes(t.function?.name));
+  // de que grupo é cada guardada: enable_tools com o grupo traz de volta
+  conv.prunedGroups = { ...(conv.prunedGroups || {}) };
+  for (const t of out) conv.prunedGroups[t.function.name] = r.meta?.[t.function.name]?.group || '';
   r.savedTok = Math.round(JSON.stringify(out).length / 4);
   r.tools = (r.tools || []).filter((t) => !cut.includes(t.function?.name));
   const really = out.map((t) => t.function.name);

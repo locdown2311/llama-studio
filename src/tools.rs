@@ -56,8 +56,8 @@ const DEFS: &[Def] = &[
       r#"{"type":"object","properties":{"id":{"type":"string","description":"Id do job"}},"required":["id"]}"#),
     d("terminal_start", "shell", true, false, "Abre um terminal persistente (PTY) na pasta de trabalho: um shell vivo entre chamadas. Use para REPL, debugger, servidor interativo ou programas que perguntam algo. Devolve o id; escreva com terminal_send e leia com terminal_read.",
       r#"{"type":"object","properties":{"name":{"type":"string","description":"Nome curto para achar na lista"},"cwd":{"type":"string","description":"Subpasta onde abrir (padrão: raiz da pasta de trabalho)"},"command":{"type":"string","description":"Comando a rodar em vez do shell (ex.: python, node)"}}}"#),
-    d("terminal_send", "shell", true, false, "Escreve no terminal. Por padrão manda Enter junto (como digitar e apertar Enter); use enter=false para só digitar (responder a um prompt que espera tecla).",
-      r#"{"type":"object","properties":{"id":{"type":"string","description":"Id do terminal"},"text":{"type":"string","description":"O que digitar"},"enter":{"type":"boolean","description":"Manda Enter depois (padrão true)"}},"required":["id","text"]}"#),
+    d("terminal_send", "shell", true, false, "Escreve no terminal e devolve o fim da tela depois que a saída assenta (espera até wait_ms). Por padrão manda Enter junto (como digitar e apertar Enter); use enter=false para só digitar (responder a um prompt que espera tecla). Para comando demorado, aumente wait_ms ou acompanhe com terminal_read.",
+      r#"{"type":"object","properties":{"id":{"type":"string","description":"Id do terminal"},"text":{"type":"string","description":"O que digitar"},"enter":{"type":"boolean","description":"Manda Enter depois (padrão true)"},"wait_ms":{"type":"integer","description":"Quanto esperar a saída assentar, em ms (padrão 3000, até 120000)"}},"required":["id","text"]}"#),
     d("terminal_read", "shell", false, false, "Lê as últimas linhas da saída do terminal (sem cores). Chame de novo para acompanhar; alive diz se o processo ainda está vivo.",
       r#"{"type":"object","properties":{"id":{"type":"string","description":"Id do terminal"},"tail":{"type":"integer","description":"Quantas linhas do fim (padrão 120, máximo 2000)"}},"required":["id"]}"#),
     d("terminal_close", "shell", true, false, "Encerra o terminal e o que ele abriu.",
@@ -559,8 +559,8 @@ fn pty_text(name: &str, v: &Value) -> String {
     let id = v["id"].as_str().unwrap_or("");
     let alive = if v["alive"].as_bool() == Some(true) { L!("vivo", "alive") } else { L!("terminou", "ended") };
     match name {
-        "terminal_start" => LF!("Terminal {} aberto em {} (vivo). Use terminal_send e terminal_read.", "Terminal {} opened in {} (alive). Use terminal_send and terminal_read.", id, v["dir"].as_str().unwrap_or("")),
-        "terminal_send" => LF!("Enviado ao terminal {}.", "Sent to terminal {}.", id),
+        "terminal_start" => LF!("Terminal {} aberto em {}. terminal_send escreve e já devolve o que apareceu; terminal_read relê a tela.\n{}", "Terminal {} opened in {}. terminal_send types and returns what showed up; terminal_read rereads the screen.\n{}", id, v["dir"].as_str().unwrap_or(""), v["out"].as_str().unwrap_or("")),
+        "terminal_send" => format!("[terminal {id} · {alive}]\n{}", v["out"].as_str().unwrap_or("")),
         "terminal_close" => LF!("Terminal {} encerrado.", "Terminal {} closed.", id),
         "terminal_read" => format!("[terminal {id} · {alive} · {} ms]\n{}", v["ms"].as_u64().unwrap_or(0), v["out"].as_str().unwrap_or("")),
         _ => v["terminals"]
@@ -671,7 +671,7 @@ pub async fn call(app: &Arc<App>, ws: PathBuf, name: &str, args: Value, allow: &
     }
     if matches!(name, "terminal_send" | "terminal_read" | "terminal_close" | "terminal_list") {
         let res: Result<Value, String> = match name {
-            "terminal_send" => crate::pty::send(s(&args, "id"), s(&args, "text"), args.get("enter").and_then(Value::as_bool).unwrap_or(true)),
+            "terminal_send" => crate::pty::send(s(&args, "id"), s(&args, "text"), args.get("enter").and_then(Value::as_bool).unwrap_or(true), args.get("wait_ms").and_then(Value::as_u64).unwrap_or(3000)).await,
             "terminal_read" => crate::pty::read(s(&args, "id"), args.get("tail").and_then(Value::as_u64).unwrap_or(120) as usize),
             "terminal_close" => crate::pty::close(s(&args, "id")),
             _ => Ok(json!({ "terminals": crate::pty::list(&crate::shell::OWNER.try_with(|o| o.clone()).unwrap_or_default()) })),

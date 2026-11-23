@@ -41,6 +41,9 @@ function enableTools(tctx, args) {
   const haveS = new Set([...activeSel(conv).skills, ...(auto.skills || [])]);
   const added = { groups: [], mcp: [], skills: [], profiles: [], eager: [], block: [] };
   for (const g of groups) if (!haveG.has(g)) { auto.groups.push(g); added.groups.push(g); }
+  // grupo já ligado, mas com ferramentas guardadas por falta de uso neste projeto: voltam agora
+  const back = (conv.pruned || []).filter((n) => groups.includes(conv.prunedGroups?.[n]));
+  if (back.length) { conv.pruned = conv.pruned.filter((n) => !back.includes(n)); pruneUsed(conv, back); }
   for (const n of mcp) if (!haveM.has(n)) { auto.mcp.push(n); added.mcp.push(n); }
   for (const id of skills) if (!haveS.has(id)) { auto.skills.push(id); added.skills.push(id); }
   conv.auto = auto;
@@ -53,6 +56,7 @@ function enableTools(tctx, args) {
     ...added.mcp,
     ...added.skills.map((id) => S.skills.find((s) => s.id === id)?.name || id),
   ];
+  names.push(...back);
   if (!names.length) {
     const off = TOOL_GROUPS.filter((g) => !haveG.has(g));
     return { content: L('Já estava tudo ligado (ou o nome não existe). Grupos ainda desligados: {0}.', off.join(', ') || L('nenhum')), isError: false };
