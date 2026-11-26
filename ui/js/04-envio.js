@@ -17,9 +17,16 @@ function takeEditor() {
 async function send(now) {
   const busy = running(cur());
   if (busy && editorEmpty()) { stop(); return; }
-  const item = takeEditor();
+  let item = takeEditor();
   if (!item) return;
   const conv = cur() || newConv();
+  // /meta (ou /goal): comandos da meta, ou começa uma
+  const g = parseGoal(item.content);
+  if (g) {
+    if (goalCommand(conv, item.content)) return;
+    if (busy || conv.bg) { toast(L('Espere esta resposta terminar para começar uma meta.'), 'err'); return; }
+    item = goalStart(conv, g);
+  }
   if (busy) { enqueue(conv, { ...item, ...(now ? { now: true } : {}) }); return; }
   // rodando em segundo plano: guarda aqui e manda quando a tarefa terminar (não abre outra tarefa na mesma conversa)
   if (conv.bg) { (conv._bgQueue ||= []).push(item); toast(L('Vai em seguida, quando a tarefa em segundo plano terminar.')); drawBgBar(); return; }
@@ -55,7 +62,7 @@ function editorEmpty() { return !readEditor().length; }
 
 async function submit(conv, item) {
   const { content, parts, refs } = item;
-  conv.messages.push({ role: 'user', content, parts, refs, ts: Date.now(), ...(conv.plan ? { plan: true } : {}), ...(item.peer ? { peer: item.peer } : {}) });
+  conv.messages.push({ role: 'user', content, parts, refs, ts: Date.now(), ...(conv.plan ? { plan: true } : {}), ...(item.peer ? { peer: item.peer } : {}), ...(item.goal ? { goal: true } : {}) });
   if (conv.title === 'Nova conversa' || conv.title === L('Nova conversa')) {
     const plain = parts.filter((p) => p.t === 'text').map((p) => p.v).join(' ').replace(/\s+/g, ' ').trim();
     conv.title = (plain || parts.map((p) => p.name).filter(Boolean).join(', ')).slice(0, 60);

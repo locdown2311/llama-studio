@@ -769,7 +769,8 @@ async function runAgent(conv) {
   } finally {
     // parada forçada: a conversa já foi liberada (e talvez já tenha outra resposta rodando)
     if (!ac.dead) finishRun(conv, ac);
-    if (!ac.signal.aborted) followupsSoon(conv);
+    if (conv.goal?.status === 'active') goalAfterTurn(conv, ac.signal.aborted).catch(() => {});
+    else if (!ac.signal.aborted) followupsSoon(conv);
   }
 }
 
@@ -1015,6 +1016,7 @@ async function startBg(conv) {
 /** Faixa acima da caixa de texto: a conversa aberta está rodando no executor. */
 function drawBgBar() {
   drawForkBar();
+  drawGoalBar();
   let bar = $('#bgbar');
   const c = cur();
   if (!c?.bg) { bar?.remove(); return; }

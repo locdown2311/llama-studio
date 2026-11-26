@@ -115,6 +115,12 @@ O 1.1 e o 1.2 já foram para o `main` pelo PR do `master`; o 1.3 (`6cfd4e3`) ain
 - Lista em Configurações › Recursos automáticos › Erros do roteador, com "Copiar como teste" (gera a linha `['frase', ['grupo']]` para `tests/rotas/falsos.mjs`).
 - Registros em `dados/ui/rotas.json` (via store), limite de 200.
 
+## /meta (objetivo com rodadas) ✅ 2.112.0
+- `/meta <objetivo> [--conferir "cmd"] [--rodadas N]` (também `/goal`); `ui/js/13-meta.js`.
+- Fim de cada resposta: roda a conferência (run_command, só passa com código 0) e um juiz (API de segundo plano, a da conversa ou o modelo local) responde `{done, reason, next}`; se não terminou, a próxima rodada vai como mensagem do usuário marcada (`goal: true`).
+- Para: alcançada (juiz + conferência), limite de rodadas, mesmo motivo duas vezes seguidas, erro, ou Parar. `/meta parar`, `/meta continuar`.
+- Roda também no executor (segundo plano), porque é chamado no fim do `runAgent`.
+
 ## Ordem recomendada
 1. 1.4 webhook (fecha a fase 1).
 2. Loop de melhoria das skills (peça 4: propõe diff quando uma skill falha).
