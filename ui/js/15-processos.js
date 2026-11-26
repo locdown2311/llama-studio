@@ -72,10 +72,11 @@ async function renderProcsPage() {
   sec(L('Em segundo plano'), live.map((j) => {
     const c = S.convs.find((x) => x.id === j.conv);
     const quiet = j.state === 'running' && j.pat && Date.now() - j.pat > 90000;
-    return procRow(c?.goal?.status === 'active' ? 'zap' : 'cloud', j.title || c?.title || j.conv,
-      (j.state === 'queued' ? L('Na fila') : (j.progress || L('Rodando'))) + ' · ' + procAgo(Date.now() - j.created) + (quiet ? ' · ' + L('sem notícias há {0} min', Math.round((Date.now() - j.pat) / 60000)) : ''),
+    const isGoal = c?.goal?.status === 'active';
+    return procRow(isGoal ? 'zap' : 'cloud', isGoal ? c.goal.text : (j.title || c?.title || j.conv),
+      [isGoal ? (j.title || c.title) : '', j.state === 'queued' ? L('Na fila') : (j.progress || L('Rodando')), isGoal && c.todos?.length ? L('etapas {0}/{1}', c.todos.filter((x) => x.status === 'done').length, c.todos.length) : '', procAgo(Date.now() - j.created), quiet ? L('sem notícias há {0} min', Math.round((Date.now() - j.pat) / 60000)) : ''].filter(Boolean).join(' · '),
       quiet ? 'warn' : j.state,
-      [openConvBtn(j.conv), procBtn(L('Parar'), () => { const cc = S.convs.find((x) => x.id === j.conv); if (cc) bgStop(cc); else api('/api/jobs/answer', { stop: j.conv }); setTimeout(renderProcsPage, 500); })]);
+      [openConvBtn(j.conv), procBtn(isGoal ? L('Parar a meta') : L('Parar'), () => { const cc = S.convs.find((x) => x.id === j.conv); if (cc?.goal?.status === 'active') goalStopBtn(cc); else if (cc) bgStop(cc); else api('/api/jobs/answer', { stop: j.conv }); setTimeout(renderProcsPage, 500); })]);
   }), d.executor === false ? L('Nada rodando. (O executor de segundo plano não está aberto agora; ele abre sozinho quando precisa.)') : L('Nada rodando em segundo plano.'));
   if (done.length) {
     out.push(h('details.proc-done', { 'data-k': 'jobs' }, h('summary', null, L('Terminadas recentemente ({0})', done.length)),
@@ -96,10 +97,11 @@ async function renderProcsPage() {
   if (shellDone.length) out.push(h('details.proc-done', { 'data-k': 'shell' }, h('summary', null, L('Comandos terminados ({0})', shellDone.length)), h('div.proc-list', null, shellDone.map(shellRow))));
 
   // 4. metas
-  const goals = S.convs.filter((c) => c.goal && (c.goal.status === 'active' || Date.now() - (c.goal.endedAt || 0) < 86400000));
+  const shown = new Set([...S.runs.keys(), ...live.map((j) => j.conv)]);
+  const goals = S.convs.filter((c) => c.goal && (c.goal.status === 'active' ? !shown.has(c.id) : Date.now() - (c.goal.endedAt || 0) < 86400000));
   sec(L('Metas'), goals.map((c) => procRow(c.goal.status === 'done' ? 'check' : 'zap', c.goal.text, [c.title, goalState(c.goal, c), c.goal.status !== 'active' && c.goal.why ? c.goal.why : ''].filter(Boolean).join(' · '),
     c.goal.status === 'active' ? 'running' : c.goal.status === 'done' ? 'done' : 'error',
-    [openConvBtn(c.id), c.goal.status === 'active' ? procBtn(L('Parar a meta'), () => { goalStopBtn(c); setTimeout(renderProcsPage, 500); }) : null])), L('Nenhuma meta nas últimas 24 horas. Comece uma com /meta.'));
+    [openConvBtn(c.id), c.goal.status === 'active' ? procBtn(L('Parar a meta'), () => { goalStopBtn(c); setTimeout(renderProcsPage, 500); }) : null])), shown.size && S.convs.some((c) => c.goal?.status === 'active' && shown.has(c.id)) ? L('As metas rodando aparecem acima.') : L('Nenhuma meta nas últimas 24 horas. Comece uma com /meta.'));
 
   // 5. transcrições da base de conhecimento
   const mq = d.media || {};

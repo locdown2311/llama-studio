@@ -2836,4 +2836,5 @@ const I18N_EN = {
   "Nenhuma tarefa agendada ligada.": "No scheduled task turned on.",
   "artefatos": "artifacts",
   "Páginas, documentos, diagramas e códigos num painel ao lado da conversa, com versões (página Artefatos).": "Pages, documents, diagrams and code in a panel beside the conversation, with versions (Artifacts page).",
+  "As metas rodando aparecem acima.": "Running goals are shown above.",
 };
