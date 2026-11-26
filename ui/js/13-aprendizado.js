@@ -12,6 +12,8 @@ function setWsTab(tab) {
   $('#ws-notebook').hidden = tab !== 'notebook';
   if ($('#ws-artifact')) $('#ws-artifact').hidden = tab !== 'artifact';
   ws.classList.toggle('tab-artifact', tab === 'artifact');
+  // a aba Artefato só aparece quando há um artefato aberto (no painel estreito não cabem as quatro)
+  ws.classList.toggle('has-art', tab === 'artifact' || !!S.art?.data);
   if (tab === 'artifact') drawArtifactTab();
   if (tab === 'activity') drawActivity();
   if (tab === 'notebook') drawNotebook();

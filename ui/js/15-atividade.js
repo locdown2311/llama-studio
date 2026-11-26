@@ -282,5 +282,5 @@ function closeDrawers() { if (S.sideDrawer || S.wsDrawer) { S.sideDrawer = false
 function initWsTabs() {
   initScrollFollow();
   $$('.ws-tabs button').forEach((b) => b.addEventListener('click', () => setWsTab(b.dataset.tab)));
-  setWsTab(store.get('wsTab', 'files'));
+  setWsTab(store.get('wsTab', 'files') === 'artifact' ? 'files' : store.get('wsTab', 'files'));
 }
