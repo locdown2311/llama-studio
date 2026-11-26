@@ -339,7 +339,9 @@ async function updateTodos(conv, args, signal) {
   const done = conv.todos.filter((t) => t.status === 'done').length;
   const now = conv.todos.find((t) => t.status === 'in_progress');
   // plano novo: pergunta se pode seguir antes de começar a executar
-  if (isNew && conv.todos.length > 1 && S.settings.confirmPlan !== false) {
+  // sem ninguém olhando (meta, segundo plano) não há quem aprove: segue direto em vez de travar esperando
+  const unattended = EXECUTOR || conv.goal?.status === 'active';
+  if (isNew && conv.todos.length > 1 && S.settings.confirmPlan !== false && !unattended) {
     conv._planWait = true; conv.todosOpen = true;
     if (conv.id === S.curId) drawTodos();
     if (conv.id !== S.curId) toast(L('"{0}" montou um plano e espera você aprovar', conv.title));
