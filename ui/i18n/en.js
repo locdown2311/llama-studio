@@ -2767,4 +2767,10 @@ const I18N_EN = {
   "Meta · {0}": "Goal · {0}",
   "Parar a meta": "Stop the goal",
   "Espere esta resposta terminar para começar uma meta.": "Wait for this answer to finish before starting a goal.",
+  "Você trabalha sozinho, em rodadas, até chegar lá: ninguém está olhando, então não pergunte; decida e siga. Comece montando um plano de etapas com update_todos e mantenha-o atualizado a cada rodada. Faça o que for preciso, confira o resultado e diga no fim o que falta, se faltar algo. O studio confere e, se não estiver pronto, pede a próxima rodada.": "You work on your own, in rounds, until you get there: nobody is watching, so do not ask; decide and go on. Start by making a plan of steps with update_todos and keep it updated every round. Do whatever is needed, check the result and say at the end what is missing, if anything. The studio checks and, if it is not done, asks for the next round.",
+  "Três rodadas seguidas sem avanço: {0}": "Three rounds in a row without progress: {0}",
+  "PLANO DO AGENTE:\n{0}\n\n": "AGENT PLAN:\n{0}\n\n",
+  "etapas {0}/{1}": "steps {0}/{1}",
+  "Parando a meta...": "Stopping the goal...",
+  "Meta, rodada {0}/{1}": "Goal, round {0}/{1}",
 };

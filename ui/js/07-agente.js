@@ -769,7 +769,8 @@ async function runAgent(conv) {
   } finally {
     // parada forçada: a conversa já foi liberada (e talvez já tenha outra resposta rodando)
     if (!ac.dead) finishRun(conv, ac);
-    if (conv.goal?.status === 'active') goalAfterTurn(conv, ac.signal.aborted).catch(() => {});
+    // meta: nesta tela, a próxima rodada vem daqui; no executor, quem encadeia é o executorRun
+    if (conv.goal?.status === 'active') { if (!EXECUTOR) goalContinue(conv, ac.signal.aborted).catch(() => {}); }
     else if (!ac.signal.aborted) followupsSoon(conv);
   }
 }
@@ -1022,7 +1023,7 @@ function drawBgBar() {
   if (!c?.bg) { bar?.remove(); return; }
   if (!bar) { bar = h('div.bgbar#bgbar'); $('.composer-wrap')?.prepend(bar); }
   bar.innerHTML = '';
-  const where = window.__hubTarget === 'pc' ? L('no seu PC') : L('na nuvem');
+  const where = window.__hubTarget === 'pc' || (!HUB && !S.info.cloud) ? L('no seu PC') : L('na nuvem');
   // na fila há um tempo e o executor não dá sinal: oferece rodar aqui
   const stuck = c.bg.state === 'queued' && Date.now() - (c.bg.at || 0) > 20000 && BG.executor === false;
   const j = BG.jobs.get(c.id);
@@ -1187,7 +1188,7 @@ function execTick() {
     for (const [cid, run] of EXEC.running) {
       const c = S.convs.find((x) => x.id === cid);
       if (!c) continue;
-      const t = bgStatus(c);
+      const t = (c.goal?.status === 'active' ? L('Meta, rodada {0}/{1}', c.goal.round + 1, c.goal.max) + ' · ' : '') + bgStatus(c);
       if (t !== run.prog || Date.now() - (run.progAt || 0) > 15000) {
         run.prog = t; run.progAt = Date.now();
         api('/api/jobs/progress', { job: run.job.id, text: t }).catch(() => {});
@@ -1229,7 +1230,18 @@ async function executorRun(job) {
   saveConvsNow(true);
   execTick();
   let ok = true, note = '';
-  try { await runAgent(conv); } catch (e) { ok = false; note = String(e?.message || e); }
+  try {
+    await runAgent(conv);
+    // meta: as rodadas seguem na mesma tarefa até alcançar, parar ou bater o limite
+    while (!run.stopped && conv.goal?.status === 'active') {
+      const next = await goalAfterTurn(conv, false);
+      if (!next || run.stopped) break;
+      conv.messages.push({ role: 'user', content: next.content, parts: next.parts, refs: [], ts: Date.now(), goal: true });
+      saveConvsNow(true);
+      await runAgent(conv);
+    }
+    if (run.stopped && conv.goal?.status === 'active') goalEnd(conv, 'stopped', L('Parada por você.'));
+  } catch (e) { ok = false; note = String(e?.message || e); }
   EXEC.running.delete(conv.id);
   const last = [...conv.messages].reverse().find((m) => m.role === 'assistant');
   if (last?.error) { ok = false; note = note || String(last.error); }

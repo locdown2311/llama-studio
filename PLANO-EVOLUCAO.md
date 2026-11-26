@@ -119,7 +119,7 @@ O 1.1 e o 1.2 já foram para o `main` pelo PR do `master`; o 1.3 (`6cfd4e3`) ain
 - `/meta <objetivo> [--conferir "cmd"] [--rodadas N]` (também `/goal`); `ui/js/13-meta.js`.
 - Fim de cada resposta: roda a conferência (run_command, só passa com código 0) e um juiz (API de segundo plano, a da conversa ou o modelo local) responde `{done, reason, next}`; se não terminou, a próxima rodada vai como mensagem do usuário marcada (`goal: true`).
 - Para: alcançada (juiz + conferência), limite de rodadas, mesmo motivo duas vezes seguidas, erro, ou Parar. `/meta parar`, `/meta continuar`.
-- Roda também no executor (segundo plano), porque é chamado no fim do `runAgent`.
+- Roda em segundo plano por padrão (2.112.1): o `executorRun` encadeia as rodadas na mesma tarefa (o executor não recarrega no meio); o agente monta um plano com `update_todos` e o juiz vê o plano; progresso na faixa ("Meta, rodada 3/30 · Pesquisando na web"). `--aqui` roda na tela. Limite padrão 30; sem avanço = 3 rodadas com o mesmo motivo.
 
 ## Ordem recomendada
 1. 1.4 webhook (fecha a fase 1).

@@ -71,7 +71,8 @@ async function submit(conv, item) {
   if (autoLevelOf(conv) !== 'desligado') await autoRoute(conv, conv.messages[conv.messages.length - 1]);
   saveConvs(); renderConvList();
   if (conv.id === S.curId) { renderChatTitle(); renderMessages(false); updatePickers(); }
-  if (bgMode() && !item.noBg) { await startBg(conv); return; }
+  // segundo plano: no celular por padrão, e sempre na meta (roda sozinha, mesmo com o app fechado)
+  if ((bgMode() || item.bg) && !item.noBg && !EXECUTOR) { await startBg(conv); return; }
   await runAgent(conv);
 }
 
