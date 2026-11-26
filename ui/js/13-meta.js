@@ -28,8 +28,8 @@ function goalCommand(conv, raw) {
   if (!g) return false;
   const word = g.text.toLowerCase();
   if (!g.text) {
-    if (conv?.goal) toast(L('Meta: {0} · {1}', conv.goal.text, goalState(conv.goal)));
-    else toast(L('Use /meta seguido do objetivo. Ex.: /meta todos os testes passando --conferir "npm test"'));
+    if (conv?.goal?.status === 'active') toast(L('Meta: {0} · {1}', conv.goal.text, goalState(conv.goal, conv)));
+    else goalDialog();
     return true;
   }
   if (['parar', 'stop', 'cancelar'].includes(word)) { if (conv?.goal) goalStopBtn(conv); return true; }
@@ -153,8 +153,40 @@ function goalEnd(conv, status, why) {
 /** "/meta" no menu da barra: entra como comando (o usuário completa o objetivo). */
 function goalItems(f) {
   if (f && !'meta'.startsWith(f) && !'goal'.startsWith(f)) return [];
-  const text = '/meta ';
-  return [{ kind: 'prompt', id: 'meta', name: L('Meta: trabalhar até alcançar um objetivo'), desc: L('/meta <objetivo> [--conferir "comando"] [--rodadas N]'), prompt: { id: 'meta', title: 'meta', text } }];
+  return [{ kind: 'prompt', id: 'meta', name: L('Meta: trabalhar até alcançar um objetivo'), desc: L('O agente trabalha sozinho, em rodadas, até chegar lá'), prompt: { id: 'meta', title: 'meta', text: '', goalForm: true } }];
+}
+
+/** A janela para começar uma meta (o mesmo que /meta com os argumentos, sem decorar a sintaxe). */
+function goalDialog() {
+  const conv0 = cur();
+  const goal = h('textarea.textarea', { rows: 4, placeholder: L('Ex.: Deixar o site responsivo no celular e sem erros no console') });
+  const check = h('input.input', { placeholder: L('Ex.: npm test   (opcional)'), autocomplete: 'off', spellcheck: false });
+  const rounds = h('input.input', { type: 'number', min: 1, max: 100, value: S.settings.goalMax || GOAL_MAX, style: { maxWidth: '110px' } });
+  const here = h('input', { type: 'checkbox' });
+  let m;
+  const go = async () => {
+    const text = goal.value.trim();
+    if (!text) { goal.focus(); toast(L('Escreva o objetivo.'), 'err'); return; }
+    const conv = cur() || newConv();
+    if (running(conv) || conv.bg) { toast(L('Espere esta resposta terminar para começar uma meta.'), 'err'); return; }
+    m.close();
+    const item = goalStart(conv, { text, check: check.value.trim(), here: here.checked, max: Math.max(1, Math.min(100, Number(rounds.value) || GOAL_MAX)) });
+    await submit(conv, item);
+  };
+  goal.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); go(); } });
+  m = modal({
+    title: L('Nova meta'),
+    body: h('div.form', null,
+      h('p.muted.small', { style: { margin: '0 0 4px' } }, L('O agente trabalha sozinho, em rodadas: monta um plano, faz, confere e continua até alcançar o objetivo. Roda em segundo plano (dá para fechar o app) e avisa quando terminar.')),
+      h('div.field', null, h('label', null, L('Objetivo')), goal, h('small', null, L('Quanto mais concreto, melhor: diga como saber que está pronto.'))),
+      h('div.field', null, h('label', null, L('Comando de conferência')), check, h('small', null, L('Opcional. Roda no fim de cada rodada na pasta da conversa; a meta só termina quando ele passar (código 0). Ex.: npm test, cargo build, pytest.'))),
+      h('div.row', null,
+        h('div.field', null, h('label', null, L('Máximo de rodadas')), rounds),
+        h('label.kb-on', { style: { alignSelf: 'flex-end', paddingBottom: '8px' } }, here, h('span', null, L('Rodar nesta tela (em vez de segundo plano)')))),
+      conv0 && !running(conv0) && conv0.messages.length ? h('small.muted', null, L('Começa nesta conversa, com o que ela já tem.')) : null),
+    foot: [h('button.btn', { onclick: () => m.close() }, L('Cancelar')), h('button.btn.primary', { onclick: go }, ic('play'), L('Começar'))],
+  });
+  setTimeout(() => goal.focus(), 50);
 }
 
 /** A faixa da meta, acima da caixa de mensagem. */

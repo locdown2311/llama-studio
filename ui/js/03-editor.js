@@ -803,6 +803,7 @@ function promptVars(text) {
 
 async function usePrompt(p) {
   if (p.plugin) return usePluginCommand(p.plugin);
+  if (p.goalForm) return goalDialog();
   const vars = promptVars(p.text);
   let text = p.text;
   if (vars.length) {
