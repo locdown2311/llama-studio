@@ -479,7 +479,7 @@ document.addEventListener('click', (e) => {
 });
 
 /* ============================================================ estado */
-const TOOL_GROUPS = ['read', 'write', 'edit', 'shell', 'code', 'web', 'browser', 'computer', 'history', 'toolsearch', 'explore', 'ask', 'todo', 'notebook', 'interface', 'video', 'kb', 'peers', 'memory', 'schedule'];
+const TOOL_GROUPS = ['read', 'write', 'edit', 'shell', 'code', 'web', 'browser', 'computer', 'history', 'toolsearch', 'explore', 'ask', 'todo', 'notebook', 'interface', 'video', 'kb', 'peers', 'memory', 'schedule', 'artifact'];
 const CONV_SAVED = new Map(); // id -> JSON da última versão gravada
 const DEFAULT_SETTINGS = { systemPrompt: '', temperature: '', topP: '', maxTokens: '', maxSteps: 40, approval: 'writes', auditor: false, auditMax: 'baixo', auditMcp: false, auditPolicy: '', theme: 'light', showThinking: true, vision: 'auto', explorerSteps: 20, maxConcurrentExplorers: 0, autoCompact: true, compactAt: 75, compactMode: 'meio', lazyLoad: true, autoRoute: true, autoLevel: 'equilibrado', autoSkill: 'ask', projMap: false, projSummary: false, tools: Object.fromEntries(TOOL_GROUPS.map((g) => [g, g !== 'interface'])) };
 const S = {
@@ -610,6 +610,8 @@ function setView(v) {
   if (v === 'tools') renderToolsPage();
   if (v === 'server') renderServerPage();
   if (v === 'calendar') renderCalendar();
+  if (v === 'artifacts') renderArtifactsPage();
+  if (v === 'procs') renderProcsPage();
   if (v === 'videos') renderVideos();
   if (v === 'chat') { renderConvList(); setTimeout(() => focusEditor(), 20); }
 }

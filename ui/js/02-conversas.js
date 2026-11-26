@@ -3233,6 +3233,7 @@ const TOOL_ICON = {
   ask_user: "chat",
   search_knowledge: "book",
   memory: "bookmark",
+  artifact: "layers",
   schedule: "clock",
   list_chats: "chat",
   send_to_chat: "chat",
@@ -4065,6 +4066,8 @@ function renderTool(tc, res, live) {
   // página HTML/SVG que o agente escreveu: a prévia aparece logo abaixo (só na última vez que mexeu no arquivo)
   const pvPath = prevToolPath(name, args, res);
   if (pvPath && prevIsLastTouch(cur(), tc.id, pvPath)) el.append(prevToolCard(tc, pvPath, cur()));
+  // artefato criado ou atualizado: um cartão que abre no painel
+  if (name === "artifact" && res?.data?.artifact) el.append(artCard(res.data.artifact));
 
   return el;
 }

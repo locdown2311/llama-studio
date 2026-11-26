@@ -27,7 +27,7 @@ function renderSettings() {
 
   // ferramentas
   const groupsBySec = {};
-  for (const g of ['web', 'browser', 'computer', 'read', 'edit', 'write', 'shell', 'code', 'history', 'toolsearch', 'explore', 'ask', 'peers', 'schedule', 'todo', 'notebook', 'interface']) (groupsBySec[TOOL_INFO[g].sec] ||= []).push(g);
+  for (const g of ['web', 'browser', 'computer', 'read', 'edit', 'write', 'shell', 'code', 'history', 'toolsearch', 'explore', 'ask', 'artifact', 'peers', 'schedule', 'todo', 'notebook', 'interface']) (groupsBySec[TOOL_INFO[g].sec] ||= []).push(g);
   const toolGrid = h('div.tgrid', null, Object.values(groupsBySec).flat().map((g) => sw(TOOL_INFO[g].title, TOOL_INFO[g].desc, S.settings.tools[g], (v) => { S.settings.tools[g] = v; store.set('settings', S.settings); saveKit(); updatePickers(); saved(); })));
 
   section('model', L('Modelo'), 'cpu', L('Como o modelo responde em todas as conversas.'),
@@ -969,4 +969,4 @@ function workflowsPage() {
   draw();
   return [h('div.page-actions', null, h('button.btn.primary', { type: 'button', onclick: () => editWorkflow(null) }, ic('plus'), L('Novo workflow'))), list,
     h('small.muted', null, L('O corpo roda no mesmo worker do execute_code: `await tool(nome, args)`, `console.log` e `return`. Só JavaScript (sem Node/Python). O modelo cria e edita com save_workflow.'))];
-}
+}

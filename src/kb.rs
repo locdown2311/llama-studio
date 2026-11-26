@@ -231,7 +231,7 @@ fn transcribe_file(root: &Path, src: &Path) -> Result<String, String> {
 {}", LF!("Transcrição de {name}", "Transcript of {name}"), lines.join("\n")))
 }
 
-fn media_status() -> Value {
+pub fn media_status() -> Value {
     let q = media_q().lock().unwrap_or_else(|e| e.into_inner());
     json!({ "queued": q.jobs.len(), "current": Path::new(&q.current).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default() })
 }

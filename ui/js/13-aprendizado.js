@@ -10,6 +10,9 @@ function setWsTab(tab) {
   $$('.ws-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
   $('#ws-activity').hidden = tab !== 'activity';
   $('#ws-notebook').hidden = tab !== 'notebook';
+  if ($('#ws-artifact')) $('#ws-artifact').hidden = tab !== 'artifact';
+  ws.classList.toggle('tab-artifact', tab === 'artifact');
+  if (tab === 'artifact') drawArtifactTab();
   if (tab === 'activity') drawActivity();
   if (tab === 'notebook') drawNotebook();
 }

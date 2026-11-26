@@ -33,6 +33,8 @@
       <button class="nav-item" data-view="tools"></button>
       <button class="nav-item" data-view="server"></button>
       <button class="nav-item" data-view="calendar"></button>
+      <button class="nav-item" data-view="artifacts"></button>
+      <button class="nav-item" data-view="procs"></button>
       <button class="nav-item" data-view="videos" hidden></button>
       <button class="nav-item" data-view="settings"></button>
     </nav>
@@ -128,6 +130,7 @@
           <button role="tab" data-tab="files">Arquivos</button>
           <button role="tab" data-tab="activity">Atividade</button>
           <button role="tab" data-tab="notebook">Caderno</button>
+          <button role="tab" data-tab="artifact">Artefato</button>
         </div>
         <div class="ws-actions">
           <button class="icon-btn sm" id="ws-refresh" title="Atualizar" aria-label="Atualizar"></button>
@@ -142,6 +145,7 @@
       <div class="ws-preview" id="ws-preview"></div>
       <div class="ws-activity" id="ws-activity" hidden></div>
       <div class="ws-activity" id="ws-notebook" hidden></div>
+      <div class="ws-activity ws-artifact" id="ws-artifact" hidden></div>
     </aside>
   </section>
 
@@ -287,6 +291,9 @@
   <section class="view" id="view-videos">
     <div id="vid-body" class="vid-app"></div>
   </section>
+  <section class="view" id="view-artifacts"><div class="page"></div></section>
+  <section class="view" id="view-procs"><div class="page"></div></section>
+
   <section class="view" id="view-calendar">
     <div class="page">
       <header class="page-head">
@@ -342,6 +349,7 @@
 <script src="/js/09-arquivos.js"></script>
 <script src="/js/09-previa.js"></script>
 <script src="/js/10-agenda.js"></script>
+<script src="/js/10-artefatos.js"></script>
 <script src="/js/10-memoria.js"></script>
 <script src="/js/10-plugins.js"></script>
 <script src="/js/10-projetos.js"></script>
@@ -354,6 +362,7 @@
 <script src="/js/15-atividade.js"></script>
 <script src="/js/15-videos.js"></script>
 <script src="/js/15-comparar.js"></script>
+<script src="/js/15-processos.js"></script>
 <script src="/js/16-inicio.js"></script>
 </body>
 </html>

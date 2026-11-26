@@ -28,6 +28,7 @@ mod locate;
 mod engines;
 mod hf;
 mod agenda;
+mod artefatos;
 mod jobs;
 mod kb;
 mod kbfontes;

@@ -223,6 +223,7 @@ fn job_json(j: &Job) -> Value {
     let lines = j.out.lock().unwrap().len();
     json!({
         "id": j.id,
+        "owner": j.owner,
         "cmd": j.cmd.chars().take(200).collect::<String>(),
         "dir": j.dir.to_string_lossy(),
         "state": job_state(j),

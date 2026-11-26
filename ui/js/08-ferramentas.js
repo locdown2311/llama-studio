@@ -19,6 +19,7 @@ const TOOL_INFO = {
   interface: { sec: L('Interface'), title: L('Personalizar a interface'), short: 'interface', desc: L('Temas, cores, fontes e layout do studio, pedidos ao modelo.') },
   video: { sec: L('Vídeo'), title: L('Edição de vídeo'), short: L('vídeo'), desc: L('Só nas conversas de um projeto de vídeo: editar gravações (cortes, layouts, legendas), ver quadros, gerar legendas e criar cenas animadas em equipe.') },
   peers: { sec: L('Planejamento'), title: L('Conversar com as outras conversas do projeto'), short: L('outras conversas'), desc: L('Nas conversas de um projeto: listar as outras e mandar um pedido para uma delas, que responde com o contexto dela (até 10 min de espera).') },
+  artifact: { sec: L('Planejamento'), title: L('Artefatos'), short: L('artefatos'), desc: L('Páginas, documentos, diagramas e códigos num painel ao lado da conversa, com versões (página Artefatos).') },
   schedule: { sec: L('Planejamento'), title: L('Agendar tarefas'), short: L('agendar'), desc: L('Criar, listar e apagar tarefas que rodam sozinhas num horário (ex.: "todo dia às 8h, me mande um resumo das notícias").') },
   memory: { sec: L('Planejamento'), title: L('Memória'), short: L('memória'), desc: L('Guardar e esquecer fatos sobre você e o projeto entre conversas (Configurações → Memória).') },
   kb: { sec: L('Busca'), title: L('Base de conhecimento do projeto'), short: L('base de conhecimento'), desc: L('Liga em cada projeto (Configurar projeto): o modelo procura nos documentos escolhidos.') },

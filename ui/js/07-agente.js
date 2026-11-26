@@ -688,6 +688,7 @@ async function runAgent(conv) {
         if (ac.dead) return;
         tmsg.ms = performance.now() - ts;
         tmsg.content = r.content; tmsg.isError = r.isError; if (r.data) tmsg.data = r.data; tmsg.status = r.isError ? 'error' : 'ok';
+        if (r.data?.artifact) artAfterTool(conv, tmsg);
         if (r.images?.length) { tmsg._images = r.images; images.push({ name: tc.function.name, images: r.images }); }
         if (tc.function.name === 'search_tools' || tc.function.name === 'restore_tools' || tc.function.name === 'enable_tools') refetch = true;
         // skill carregada: fica marcada na conversa e as ferramentas dela entram no próximo passo

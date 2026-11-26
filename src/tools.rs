@@ -109,6 +109,8 @@ const DEFS: &[Def] = &[
       r#"{"type":"object","properties":{"questions":{"type":"array","minItems":1,"maxItems":4,"description":"1 a 4 perguntas","items":{"type":"object","properties":{"question":{"type":"string","description":"A pergunta completa, clara, terminando com ?"},"header":{"type":"string","description":"Rótulo curto (até 12 letras): Abordagem, Formato, Escopo..."},"options":{"type":"array","minItems":2,"maxItems":4,"items":{"type":"object","properties":{"label":{"type":"string","description":"A escolha, em 1 a 5 palavras. Na recomendada, termine com (Recomendado) e ponha primeiro"},"description":{"type":"string","description":"O que acontece se escolher esta (uma linha)"}},"required":["label"]}}},"required":["question","options"]}}},"required":["questions"]}"#),
     d("search_knowledge", "kb", false, true, "Procura na base de conhecimento do projeto (documentos, PDFs, manuais, anotações e código das fontes que o usuário escolheu) e devolve os trechos mais relevantes, com o arquivo e a linha. Busca por palavras (sem acento, aceita variações): use os termos que estariam no documento, não a pergunta inteira. Faça 2 ou 3 buscas com palavras diferentes se a primeira não achar. Para ler mais de um documento achado, use read_file com o caminho e a linha.",
       r#"{"type":"object","properties":{"query":{"type":"string","description":"Palavras-chave do que procurar (ex.: \"prazo entrega multa contrato\")"},"k":{"type":"integer","description":"Quantos trechos (padrão 6, até 15)"},"path":{"type":"string","description":"Opcional: só arquivos cujo caminho contém este texto"}},"required":["query"]}"#),
+    d("artifact", "artifact", false, false, "Artefatos: entregas que ficam fora do texto da resposta, num painel ao lado da conversa e salvas com versões (página ou app HTML completo, documento Markdown, SVG, diagrama Mermaid, código). create (title, kind, content, lang para code) cria; update muda trechos (edits=[{old, new}], cada old aparecendo 1 vez); rewrite troca o conteúdo inteiro; get lê; list mostra os desta conversa. Use para o que o usuário vai ver, guardar ou reaproveitar (página, relatório, documento, diagrama, componente); para explicação curta, responda no texto.",
+      r#"{"type":"object","properties":{"action":{"type":"string","enum":["create","update","rewrite","get","list"]},"id":{"type":"string","description":"id do artefato (update, rewrite, get)"},"title":{"type":"string","description":"Título curto"},"kind":{"type":"string","enum":["html","markdown","svg","mermaid","code"],"description":"html = página completa e independente (CSS e JS no mesmo arquivo)"},"lang":{"type":"string","description":"Linguagem, para kind code (ex.: python)"},"content":{"type":"string","description":"Conteúdo inteiro (create, rewrite)"},"edits":{"type":"array","items":{"type":"object","properties":{"old":{"type":"string"},"new":{"type":"string"}},"required":["old","new"]},"description":"update: trechos a trocar"},"note":{"type":"string","description":"O que mudou nesta versão (curto)"},"version":{"type":"integer","description":"get: versão (padrão a última)"}},"required":["action"]}"#),
     d("memory", "memory", false, true, "Memória entre conversas: save guarda um fato curto e duradouro (scope global = sobre o usuário, vale em todas as conversas; project = só neste projeto; replaces = id de um item antigo a corrigir), forget esquece pelo id, list mostra o que está guardado. A memória atual já está no prompt, na seção Memória.",
       r#"{"type":"object","properties":{"action":{"type":"string","enum":["save","forget","list"]},"text":{"type":"string","description":"Para save: uma frase curta e completa (ex.: \"Prefere respostas em tópicos\")"},"scope":{"type":"string","enum":["global","project"],"description":"global (padrão) ou project"},"replaces":{"type":"string","description":"Para save: id do item antigo que este substitui"},"id":{"type":"string","description":"Para forget: id do item (ex.: m3f9a2c)"}},"required":["action"]}"#),
     d("schedule", "schedule", true, true, "Tarefas agendadas: create agenda um pedido que roda sozinho, em segundo plano, com o agente completo (kind daily = todo dia em time; weekly = nos days em time; hours = a cada every horas; once = uma vez em at, horário local \"AAAA-MM-DD HH:MM\"); list mostra as tarefas; delete apaga pelo id. Escreva o prompt completo e autossuficiente: ele roda sem esta conversa.",
@@ -452,6 +454,13 @@ pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[Strin
     if has("computer") {
         parts.push(L!("Computador: as ferramentas computer_* controlam a área de trabalho do usuário. Prefira computer_elements (lista numerada) a coordenadas. Confirme o resultado depois de cada ação. Se o programa tem conector MCP (x64dbg, dnspy, Unity...), use as ferramentas do conector em vez de controlar a janela dele.", "Computer: the computer_* tools control the user's desktop. Prefer computer_elements (numbered list) over coordinates. Check the result after each action. If the program has an MCP connector (x64dbg, dnspy, Unity...), use the connector's tools instead of controlling its window.").into());
     }
+    if has("artifact") {
+        parts.push(L!(
+            "Artefatos: quando o pedido é uma entrega para ver, guardar ou reaproveitar (página, app, relatório, documento, diagrama, componente), crie com artifact em vez de colar tudo na resposta; para mudar depois, use update com o mesmo id (o usuário vê as versões). Na resposta, diga em 1 ou 2 frases o que fez; o conteúdo já está no painel.",
+            "Artifacts: when the request is a deliverable to look at, keep or reuse (page, app, report, document, diagram, component), create it with artifact instead of pasting it all in the answer; to change it later, use update with the same id (the user sees the versions). In the answer, say in 1 or 2 sentences what you did; the content is already in the panel."
+        )
+        .into());
+    }
     if has("kb") {
         parts.push(L!(
             "Base de conhecimento: este projeto tem documentos indexados (search_knowledge). Antes de responder perguntas sobre o assunto do projeto, procure lá e baseie a resposta nos trechos achados, citando o arquivo (e a linha, quando houver). Se não achar, diga que não está na base em vez de inventar.",
@@ -578,6 +587,19 @@ pub async fn call(app: &Arc<App>, ws: PathBuf, name: &str, args: Value, allow: &
         let _ = std::fs::remove_file(&file);
         let res = res.map(|t| if compact_on { crate::compact::compact(&t, &crate::compact::saidas_dir(app), &command, 12000).text } else { t });
         return out(res.map(|t| (t, vec![])));
+    }
+    if name == "artifact" {
+        let conv = crate::shell::OWNER.try_with(|o| o.clone()).unwrap_or_default();
+        return match crate::artefatos::tool(app, &args, &conv) {
+            Ok((text, data)) => {
+                let mut o = out(Ok((text, vec![])));
+                if data.get("artifact").is_some() {
+                    o.data = Some(data);
+                }
+                o
+            }
+            Err(e) => out(Err(e)),
+        };
     }
     if name == "run_command" {
         let timeout = args.get("timeout").and_then(Value::as_u64).unwrap_or(120);

@@ -99,6 +99,13 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/locate", post(locate_h))
         .route("/api/remember", post(remember))
         .route("/api/stat", post(stat))
+        .route("/api/artifacts", get(art_list))
+        .route("/api/artifacts/get", get(art_get))
+        .route("/api/artifacts/delete", post(art_delete))
+        .route("/api/artifacts/rename", post(art_rename))
+        .route("/api/shell/kill", post(shell_kill))
+        .route("/api/shell/output", get(shell_output))
+        .route("/api/kb/media", get(kb_media))
         .route("/api/fork/create", post(fork_create))
         .route("/api/fork/diff", post(fork_diff))
         .route("/api/fork/apply", post(fork_apply))
@@ -1195,6 +1202,28 @@ async fn stat(State(app): S, b: Bytes) -> Res {
 async fn plugins_changed(app: &Arc<App>) -> Res {
     app.mcp.sync(&app.http, &app.mcp_file()).await;
     ok(crate::plugins::summary(&app.root))
+}
+async fn art_list(State(app): S) -> Res {
+    ok(crate::artefatos::list(&app))
+}
+async fn art_get(State(app): S, Query(qs): Q) -> Res {
+    ok(crate::artefatos::get(&app, &q(&qs, "id"), q(&qs, "v").parse().ok()).map_err(bad)?)
+}
+async fn art_delete(State(app): S, b: Bytes) -> Res {
+    ok(crate::artefatos::delete(&app, st(&body(&b), "id")).map_err(bad)?)
+}
+async fn art_rename(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    ok(crate::artefatos::rename(&app, st(&v, "id"), st(&v, "title")).map_err(bad)?)
+}
+async fn shell_kill(b: Bytes) -> Res {
+    ok(crate::shell::job_kill(st(&body(&b), "id")).map_err(bad)?)
+}
+async fn shell_output(Query(qs): Q) -> Res {
+    ok(crate::shell::job_output(q(&qs, "id"), q(&qs, "tail").parse().unwrap_or(300)).map_err(bad)?)
+}
+async fn kb_media() -> Res {
+    ok(crate::kb::media_status())
 }
 async fn fork_create(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
