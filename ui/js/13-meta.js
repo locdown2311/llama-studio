@@ -49,7 +49,7 @@ function goalCommand(conv, raw) {
 function goalState(g, conv) {
   const t = conv?.todos || [];
   const plan = t.length ? ' · ' + L('etapas {0}/{1}', t.filter((x) => x.status === 'done').length, t.length) : '';
-  return { active: goalRound(g) + plan, done: L('alcançada'), stopped: L('parada'), limit: L('limite de rodadas'), stuck: L('sem progresso') }[g.status] || g.status;
+  return { active: goalRound(g) + plan, done: L('alcançada'), stopped: L('parada'), limit: L('limite de rodadas'), stuck: L('sem progresso'), review: L('para conferir') }[g.status] || g.status;
 }
 
 /** Começa uma meta: a primeira rodada é a própria mensagem (com o objetivo dito de forma explícita). */
@@ -88,12 +88,16 @@ async function goalAfterTurn(conv, aborted) {
       } catch (e) { checkOut = { ok: false, text: e.message }; }
     }
     const verdict = await goalJudge(conv, g, checkOut);
-    g.log.push({ round: g.round + 1, done: verdict.done, reason: verdict.reason, check: checkOut ? checkOut.ok : null, t: Date.now() });
+    const sig = goalProgressSig(conv);
+    g.log.push({ round: g.round + 1, done: verdict.done, reason: verdict.reason, unclear: !!verdict.unclear, sig, check: checkOut ? checkOut.ok : null, t: Date.now() });
     if (verdict.done && (!checkOut || checkOut.ok)) { goalEnd(conv, 'done', verdict.reason); return null; }
     const prev = g.log.at(-2);
-    // sem progresso: três rodadas seguidas com o mesmo motivo
     const prev2 = g.log.at(-3);
-    if (prev && prev2 && [prev, prev2].every((x) => !x.done && x.reason === verdict.reason)) { goalEnd(conv, 'stuck', L('Três rodadas seguidas sem avanço: {0}', verdict.reason)); return null; }
+    // o juiz não conseguiu avaliar duas vezes seguidas (resposta vazia ou fora do formato): para para você conferir,
+    // sem chamar isso de "sem avanço"
+    if (verdict.unclear && prev?.unclear) { goalEnd(conv, 'review', L('o juiz não conseguiu avaliar duas vezes seguidas ({0}). Confira o resultado.', apiLabel(apiById(apiFor('background') || mainApiForChat(conv)?.id)) || L('modelo do juiz'))); return null; }
+    // sem progresso de verdade: três rodadas com o mesmo motivo E nada mudou (etapas concluídas, arquivos alterados)
+    if (prev && prev2 && !verdict.unclear && [prev, prev2].every((x) => !x.done && !x.unclear && x.reason === verdict.reason && x.sig === sig)) { goalEnd(conv, 'stuck', L('Três rodadas seguidas sem avanço: {0}', verdict.reason)); return null; }
     g.round++;
     if (g.max && g.round >= g.max) { goalEnd(conv, 'limit', L('Chegou ao limite de {0} rodadas. Falta: {1}', g.max, verdict.reason)); return null; }
     return goalNext(conv, verdict.reason, verdict.next, checkOut);
@@ -103,6 +107,13 @@ async function goalAfterTurn(conv, aborted) {
   } finally {
     delete g.checking; saveConvs(); drawGoalBar();
   }
+}
+
+/** Assinatura do progresso: etapas concluídas e arquivos alterados até agora. Mudou = houve avanço. */
+function goalProgressSig(conv) {
+  const done = (conv.todos || []).filter((t) => t.status === 'done').length;
+  const wrote = conv.messages.filter((m) => m.role === 'tool' && m.status === 'ok' && FILE_MUT.has(m.name)).length;
+  return done + '/' + (conv.todos || []).length + ':' + wrote;
 }
 
 /** O juiz: compara o objetivo com o que foi feito. Resposta curta em JSON. */
@@ -118,18 +129,24 @@ async function goalJudge(conv, g, checkOut) {
   const plan = (conv.todos || []).map((t) => `[${t.status === 'done' ? 'x' : t.status === 'doing' ? '~' : ' '}] ${t.text}`).join('\n');
   const user = L('OBJETIVO:\n{0}\n\nRODADA: {1}\n\n{2}O QUE ACONTECEU (fim da conversa):\n{3}', g.text, goalRound(g),
     (checkOut ? L('CONFERÊNCIA (`{0}`): {1}\n{2}\n\n', g.check, checkOut.ok ? L('passou') : L('falhou'), checkOut.text) : '') + (plan ? L('PLANO DO AGENTE:\n{0}\n\n', plan) : ''), recent);
-  let out = '';
   const p = apiFor('background') || mainApiForChat(conv)?.id;
-  if (p) {
-    const m = { content: '', reasoning: '', tool_calls: [] };
-    await streamApi([{ role: 'system', content: sys }, { role: 'user', content: user }], [], m, new AbortController().signal, () => {}, { _p: p, temperature: 0, max_tokens: 400, _timeout: 90000, _bg: true });
-    out = splitThink(m.content || '').text;
-  } else {
-    out = await sideAsk(conv, sys, user, { maxTokens: 300 });
+  const ask = async (extra) => {
+    if (p) {
+      // sem raciocínio e com folga: um modelo que pensa gastava os 400 tokens pensando e não escrevia o JSON
+      const m = { content: '', reasoning: '', tool_calls: [] };
+      await streamApi([{ role: 'system', content: sys + extra }, { role: 'user', content: user }], [], m, new AbortController().signal, () => {}, { _p: p, temperature: 0, max_tokens: 1500, _timeout: 120000, _bg: true, _think: 'off' });
+      const t = splitThink(m.content || '').text;
+      return /\{[\s\S]*\}/.test(t) ? t : t + '\n' + (m.reasoning || '');
+    }
+    return sideAsk(conv, sys + extra, user, { maxTokens: 800 });
+  };
+  const parse = (out) => { try { const j = JSON.parse((String(out).match(/\{[\s\S]*\}/) || [''])[0]); return typeof j.done === 'boolean' ? j : null; } catch { return null; } };
+  let j = null;
+  for (let i = 0; i < 2 && !j; i++) {
+    try { j = parse(await ask(i ? '\n\n' + L('Sua resposta anterior não veio no formato. Responda APENAS com o objeto JSON, sem texto antes ou depois.') : '')); } catch { /* tenta de novo */ }
   }
-  let j = {};
-  try { j = JSON.parse((out.match(/\{[\s\S]*\}/) || ['{}'])[0]); } catch { /* resposta torta */ }
-  return { done: j.done === true, reason: String(j.reason || (checkOut && !checkOut.ok ? L('a conferência falhou') : L('não ficou claro se terminou'))).slice(0, 300), next: String(j.next || '').slice(0, 300) };
+  if (!j) return { done: false, unclear: true, reason: checkOut && !checkOut.ok ? L('a conferência falhou') : L('o juiz não respondeu no formato esperado'), next: '' };
+  return { done: j.done === true, reason: String(j.reason || '').slice(0, 300) || L('sem motivo informado'), next: String(j.next || '').slice(0, 300) };
 }
 
 /** A próxima rodada (como mensagem do usuário marcada). */
@@ -147,7 +164,9 @@ function goalEnd(conv, status, why) {
   const g = conv.goal;
   if (!g) return;
   g.status = status; g.endedAt = Date.now(); g.why = why;
-  conv.messages.push({ role: 'notice', icon: status === 'done' ? 'check' : 'alert', goalEnd: status, content: (status === 'done' ? L('Meta alcançada em {0} rodada(s): {1}', g.round + 1, why) : L('Meta parada ({0}): {1}', goalState(g), why)) });
+  const todos = conv.todos || [];
+  const made = todos.length ? ' ' + L('Etapas concluídas: {0} de {1}.', todos.filter((t) => t.status === 'done').length, todos.length) : '';
+  conv.messages.push({ role: 'notice', icon: status === 'done' ? 'check' : 'alert', goalEnd: status, content: (status === 'done' ? L('Meta alcançada em {0} rodada(s): {1}', g.round + 1, why) : L('Meta parada ({0}): {1}', goalState(g), why)) + made });
   saveConvs(); drawGoalBar();
   if (conv.id === S.curId) scheduleRender();
   if (status === 'done') toast(L('Meta alcançada: {0}', g.text));

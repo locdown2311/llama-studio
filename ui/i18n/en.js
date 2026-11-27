@@ -2884,4 +2884,11 @@ const I18N_EN = {
   "Subagente encerrado: {0} min sem avançar (estava em: {1}, passo {2}).": "Subagent stopped: {0} min without progress (it was at: {1}, step {2}).",
   "esperando o modelo": "waiting for the model",
   "Confira o que ficou pela metade antes de seguir.": "Check what was left half done before going on.",
+  "o juiz não conseguiu avaliar duas vezes seguidas ({0}). Confira o resultado.": "the judge could not evaluate twice in a row ({0}). Check the result.",
+  "modelo do juiz": "judge model",
+  "Sua resposta anterior não veio no formato. Responda APENAS com o objeto JSON, sem texto antes ou depois.": "Your previous answer was not in the format. Reply ONLY with the JSON object, with no text before or after.",
+  "o juiz não respondeu no formato esperado": "the judge did not answer in the expected format",
+  "para conferir": "to review",
+  "Etapas concluídas: {0} de {1}.": "Steps done: {0} of {1}.",
+  "Meta: {0}": "Goal: {0}",
 };

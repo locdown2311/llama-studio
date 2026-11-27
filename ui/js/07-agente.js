@@ -1293,8 +1293,13 @@ async function executorRun(job) {
   conv.updatedAt = Date.now();
   saveConvsNow(true);
   await uiFlush();
-  const text = typeof last?.content === 'string' ? last.content : '';
-  await api('/api/jobs/done', { job: job.id, ok, title: conv.title, text, note }).catch(() => {});
+  // o aviso (notificação, celular): a última resposta com texto (não a que só chamou ferramentas) e, numa meta,
+  // como ela terminou e quantas etapas foram feitas
+  const said = [...conv.messages].reverse().find((m) => m.role === 'assistant' && typeof m.content === 'string' && splitThink(m.content).text.trim());
+  let text = said ? splitThink(said.content).text.trim() : '';
+  const gEnd = [...conv.messages].reverse().find((m) => m.role === 'notice' && m.goalEnd);
+  if (conv.goal && gEnd) text = gEnd.content + (text ? '\n\n' + text : '');
+  await api('/api/jobs/done', { job: job.id, ok, title: conv.goal ? L('Meta: {0}', conv.goal.text.slice(0, 60)) : conv.title, text, note }).catch(() => {});
 }
 
 async function executorLoop() {
