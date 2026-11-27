@@ -250,6 +250,14 @@ const LOOP_WARN = 3, LOOP_STOP = 4, ERR_WARN = 3, ERR_STOP = 5;
     (o auditor, se ligado, continua olhando o que altera algo; repetições sem resultado novo ainda encerram a vez). */
 function autonomous(conv) { return S.settings.autoUnlimited !== false && (EXECUTOR || conv?.goal?.status === 'active'); }
 const AUTO_STEPS = 100000;
+/** Que chamadas do mesmo passo podem rodar juntas: 'file' (arquivos diferentes), 'cmd' (comandos independentes) ou
+    '' (em ordem: ferramentas da interface, conectores que alteram algo, código, habilidades...). */
+function parKind(name, info, args) {
+  if (S.settings.parallelTools === false) return '';
+  if (FILE_MUT.has(name) && args?.path) return 'file';
+  if (name === 'run_command' && !args?.background) return 'cmd';
+  return '';
+}
 function stepGuard(base) {
   return { base, limit: base, cap: base * 3, seen: new Map(), errs: new Map(), warned: new Set(), lastWarn: -99, writes: 0, mark: { done: 0, writes: 0 }, stop: '',
     files: new Map(), lastWrite: -1, lastRun: -1, checked: false, preflown: false, relax: new Map(), judge: null, redirects: 0, fails: new Map() };
@@ -606,6 +614,8 @@ async function runAgent(conv) {
       const reads = [];
       const images = [];
       let refetch = false;
+      const wave = Object.assign([], { kind: '', paths: new Set() });
+      const flushWave = async () => { if (!wave.length) return; const w = wave.splice(0); wave.kind = ''; wave.paths = new Set(); await Promise.all(w); };
       // auditor numa API: as auditorias do passo saem todas juntas (não disputam slot) e o laço só espera
       // cada resultado na sua vez; no modelo local continuam uma por vez
       const preAudit = new Map();
@@ -637,6 +647,7 @@ async function runAgent(conv) {
         const hookAsk = ph?.permission === 'ask', hookAllow = ph?.permission === 'allow';
         // leituras vão para a mesma fila paralela dos exploradores; o que altera algo espera elas terminarem
         if (PARALLEL_READS.has(tc.function.name) && !needsApproval(info, conv) && !shouldAudit(info, conv) && !hookAsk) {
+          await flushWave();
           tmsg.status = 'running'; scheduleRender();
           const ts = performance.now();
           reads.push(execTool(tc.function.name, parseArgs(tc.function.arguments) ?? tc.function.arguments, info, tctx, tmsg).then((r) => {
@@ -686,9 +697,15 @@ async function runAgent(conv) {
           if (ans === 'deny') { tmsg.status = 'denied'; tmsg.isError = true; tmsg.content = L('O usuário negou a execução desta ferramenta. Pergunte como ele prefere seguir.'); scheduleRender(); continue; }
           if (ans === 'always') conv.autoApprove = true;
         }
+        // em paralelo, na medida do possível: arquivos diferentes juntos; comandos independentes juntos;
+        // trocar de tipo (arquivo -> comando) ou repetir um arquivo espera o que está rodando
+        const args0 = parseArgs(tc.function.arguments) ?? tc.function.arguments;
+        const kind = parKind(tc.function.name, info, args0);
+        const pth = kind === 'file' ? String(args0?.path || '') : '';
+        if (wave.length && (!kind || kind !== wave.kind || (pth && wave.paths.has(pth)))) await flushWave();
         tmsg.status = 'running'; scheduleRender();
         const ts = performance.now();
-        const r = await execTool(tc.function.name, parseArgs(tc.function.arguments) ?? tc.function.arguments, info, tctx, tmsg);
+        const finish = (r) => {
         if (ac.dead) return;
         tmsg.ms = performance.now() - ts;
         tmsg.content = r.content; tmsg.isError = r.isError; if (r.data) tmsg.data = r.data; tmsg.status = r.isError ? 'error' : 'ok';
@@ -712,7 +729,12 @@ async function runAgent(conv) {
           if (a?.path && wsOf(conv) === S.ws.path) markFresh(a.path);
         }
         saveConvs(); scheduleRender();
+        };
+        const pr = execTool(tc.function.name, args0, info, tctx, tmsg).catch((e) => { if (ac.signal.aborted) throw e; return { content: String(e?.message || e), isError: true }; }).then(finish);
+        if (!kind) { await pr; continue; }
+        wave.push(pr); wave.kind = kind; if (pth) wave.paths.add(pth);
       }
+      await flushWave();
       if (explores.length) {
         const done = (e, r) => { if (ac.dead) return; e.tmsg.ms = performance.now() - e.ts; e.tmsg.content = r.content; e.tmsg.isError = r.isError; if (r.data) e.tmsg.data = r.data; e.tmsg.status = r.isError ? 'error' : 'ok'; saveConvs(); scheduleRender(); };
         const run = (e, apiId) => runExplorer(e.args, tctx, e.tmsg, apiId).catch((err) => { if (ac.signal.aborted) throw err; return { content: String(err.message || err), isError: true }; }).then((r) => done(e, r));

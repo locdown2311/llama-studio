@@ -2851,4 +2851,6 @@ const I18N_EN = {
   "Você está repetindo as mesmas chamadas. Escreva agora o relatório final com o que já encontrou.": "You are repeating the same calls. Write the final report now with what you found.",
   "Modo autônomo sem limites": "Unlimited autonomous mode",
   "Em segundo plano e nas metas ninguém está olhando: sem teto de passos (do agente e dos subagentes) e sem pedir aprovação. O auditor, se ligado, continua olhando o que altera algo, e repetições sem resultado novo ainda encerram a vez.": "In the background and in goals nobody is watching: no step cap (agent and subagents) and no approval prompts. The auditor, if on, still reviews what changes things, and repetitions with no new result still end the turn.",
+  "Executar em paralelo": "Run in parallel",
+  "Quando o modelo pede várias coisas de uma vez, o studio roda juntas o que não conflita: leituras e buscas, arquivos diferentes, comandos independentes. Mudar de tipo (escrever e depois rodar) ou mexer no mesmo arquivo espera o anterior.": "When the model asks for several things at once, the studio runs together what does not conflict: reads and searches, different files, independent commands. Switching kind (write then run) or touching the same file waits for the previous one.",
 };

@@ -494,6 +494,13 @@ pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[Strin
             parts.push(m);
         }
     }
+    if has("read") || has("shell") || has("write") || has("web") {
+        parts.push(L!(
+            "Chamadas em paralelo: o que não depende de outro resultado vai todo na mesma resposta (ler vários arquivos, várias buscas, escrever arquivos diferentes, comandos independentes); o studio executa juntos. O que depende do resultado anterior fica para o passo seguinte, ou junte os comandos encadeados num só (a && b).",
+            "Parallel calls: everything that does not depend on another result goes in the same response (reading several files, several searches, writing different files, independent commands); the studio runs them together. What depends on the previous result waits for the next step, or chain the commands in one (a && b)."
+        )
+        .into());
+    }
     if has("explore") {
         parts.push(L!("Para investigações longas, delegue a subagentes com a ferramenta explore (vários em paralelo, se fizer sentido) e trabalhe com os relatórios.", "For long investigations, delegate to subagents with the explore tool (several in parallel, if it makes sense) and work with the reports.").into());
     }
