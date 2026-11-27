@@ -220,7 +220,7 @@ function renderSettings() {
     section('tests', L('Testes'), 'flask', L('Funções em teste. Podem mudar ou sair nas próximas versões.'),
       group(L('Escalar para um modelo maior'),
         sw(L('Escalar quando o modelo travar'), L('Depois de falhas seguidas de ferramenta, ou da mesma chamada falhando de novo, o studio troca o modelo carregado por um maior e ele continua a tarefa de onde parou.'), esc.on === true, (v) => putEsc({ on: v })),
-        field(L('Modelo maior'), msel, L('Carregar leva de segundos a minutos, conforme o tamanho. Não escala se outra conversa estiver usando o servidor.')),
+        field(L('Modelo maior'), msel, L('Carregar leva de segundos a minutos, conforme o tamanho. Não escala se outra conversa estiver usando o servidor, nem em segundo plano ou numa meta.')),
         h('div.row', null,
           field(L('Escalar depois de'), seg([['2', L('2 falhas')], ['3', L('3 falhas')], ['4', L('4 falhas')]], String(esc.after || 3), (v) => putEsc({ after: Number(v) }))),
           field(L('Depois da tarefa'), seg([['voltar', L('Volta ao modelo da conversa')], ['ficar', L('Fica no maior')]], esc.then || 'voltar', (v) => putEsc({ then: v })), L('Voltar troca de novo no próximo pedido.')))));

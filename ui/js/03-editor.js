@@ -363,7 +363,9 @@ function escalateCfg() { const e = S.settings.escalate || {}; return S.settings.
 /** Conta as falhas do passo; devolve o motivo quando é hora de escalar. */
 function escalateWhy(conv, msg, st) {
   const cfg = escalateCfg();
-  if (!cfg || st.done) return '';
+  // modo autônomo (segundo plano, meta): não troca o modelo sozinho — trocaria o modelo carregado de todo mundo
+  // no meio da tarefa, sem ninguém para ver; a meta já muda de rumo entre as rodadas
+  if (!cfg || st.done || (typeof autonomous === 'function' && autonomous(conv))) return '';
   for (const tc of msg.tool_calls || []) {
     const r = conv.messages.find((m) => m.role === 'tool' && m.tool_call_id === tc.id);
     if (!r || r.status === 'denied') continue;
