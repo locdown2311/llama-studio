@@ -1870,16 +1870,6 @@ function toBottom() {
   const el = $("#messages");
   el.scrollTop = el.scrollHeight;
   followBottom = true;
-  // as mensagens de cima têm altura estimada até aparecerem (content-visibility): confere no quadro seguinte
-  if (!toBottom.again) {
-    toBottom.again = true;
-    let n = 0;
-    const fix = () => {
-      if (followBottom && el.scrollHeight - el.scrollTop - el.clientHeight > 2) el.scrollTop = el.scrollHeight;
-      if (++n < 12 && followBottom) requestAnimationFrame(fix); else toBottom.again = false;
-    };
-    requestAnimationFrame(fix);
-  }
 }
 
 function initScrollFollow() {
@@ -1938,7 +1928,8 @@ function initScrollFollow() {
     () => {
       // só gestos da pessoa mudam o modo; as rolagens do próprio app não contam
 
-      if (Date.now() - userScrollAt < 800) followBottom = nearBottom();
+      // arrastando a barra de rolagem (botão pressionado) também conta, por mais que demore
+      if (pressing || Date.now() - userScrollAt < 800) followBottom = nearBottom();
     },
     { passive: true }
   );

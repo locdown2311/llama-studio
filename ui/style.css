@@ -2430,8 +2430,6 @@ details.verify.warn summary svg { color: var(--warn); }
 #ws.tab-artifact { width: clamp(320px, calc(100vw - 318px - 560px), 760px); }
 @media (max-width: 1100px) { #ws.tab-artifact { width: min(560px, 92vw); } }
 
-/* desempenho: mensagens fora da tela não são desenhadas nem medidas a cada quadro (a última, que muda, sempre é) */
-#messages > [data-start]:not(:last-child) { content-visibility: auto; contain-intrinsic-size: auto 600px; }
 
 /* subagentes: tarefa em até 3 linhas (inteira ao abrir ou na dica) e o passo atual */
 .substep .ss-name { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
