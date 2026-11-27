@@ -2319,3 +2319,15 @@ details.verify.warn summary svg { color: var(--warn); }
 .bar-btn:hover { background: var(--hover); }
 #pick-model { background: var(--hover); }
 .send, .send.stop { box-shadow: none; }
+
+/* caixa de mensagem: ajustes recolhidos num botão só */
+.bar-more { display: contents; }
+.bar-more:not(.open) .pick-wrap:not(:has(.bar-btn.on)), .bar-more:not(.open) > #pick-plan:not(.on) { display: none; }
+.more-btn { display: inline-flex; align-items: center; gap: 6px; padding: 0 9px; color: var(--text-2); }
+.more-btn svg { width: 15px; height: 15px; }
+.more-btn .more-n { min-width: 17px; height: 17px; padding: 0 5px; border-radius: 9px; background: var(--accent); color: #fff; font-size: 10.5px; font-weight: 600; display: inline-grid; place-items: center; }
+.more-btn .more-chev svg { width: 12px; height: 12px; transition: transform .15s; }
+.more-btn[aria-expanded="true"] { background: var(--hover); }
+.more-btn[aria-expanded="true"] .more-chev svg { transform: rotate(180deg); }
+.simple #more-btn { display: none !important; }
+@media (max-width: 640px) { .more-btn .more-label { display: none; } .cloud #more-btn { display: none !important; } }

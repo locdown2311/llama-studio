@@ -277,6 +277,21 @@ function updatePickers() {
   iconBtn($('#pick-mcp'), ic('plug'), nMcp ? L('Conectores: {0}', act.mcp.join(', ') || nMcp) : L('Conectores: nenhum'), nMcp > 0, nMcp, 'var(--mcp)');
   const proj = projectOf(c);
   iconBtn($('#pick-ws'), ic('folder'), proj ? L('Projeto: {0}\n{1}', proj.name, S.ws.path) : L('Espaço de trabalho: {0}', S.ws.path || '...'), !!proj, 0, '#b07a14');
+  drawMoreBtn();
+}
+
+/** "Ajustes": personalidade, plano, automático, habilidades, conectores e pasta ficam recolhidos num botão só.
+    Recolhidos, só os que estão ligados aparecem (para você ver que estão valendo). */
+function drawMoreBtn() {
+  const b = $('#more-btn'), tray = $('#bar-more');
+  if (!b || !tray) return;
+  const open = store.get('barMore', false);
+  tray.classList.toggle('open', open);
+  b.setAttribute('aria-expanded', String(open));
+  const n = tray.querySelectorAll('.bar-btn.on').length;
+  b.innerHTML = '';
+  b.append(ic('sliders'), h('span.more-label', null, L('Ajustes')), n && !open ? h('span.more-n', null, String(n)) : '', h('span.more-chev', { html: svg('down') }));
+  b.title = open ? L('Recolher os ajustes da conversa') : L('Personalidade, modo plano, recursos automáticos, habilidades, conectores e pasta');
 }
 
 function checkRow({ checked, title, desc, extra, disabled, onchange }) {

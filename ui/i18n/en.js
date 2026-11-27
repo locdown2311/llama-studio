@@ -2837,4 +2837,8 @@ const I18N_EN = {
   "artefatos": "artifacts",
   "Páginas, documentos, diagramas e códigos num painel ao lado da conversa, com versões (página Artefatos).": "Pages, documents, diagrams and code in a panel beside the conversation, with versions (Artifacts page).",
   "As metas rodando aparecem acima.": "Running goals are shown above.",
+  "Ajustes": "Settings",
+  "Recolher os ajustes da conversa": "Collapse the conversation settings",
+  "Personalidade, modo plano, recursos automáticos, habilidades, conectores e pasta": "Personality, plan mode, automatic features, skills, connectors and folder",
+  "Pergunte ou peça uma tarefa. / para comandos, @ para habilidades e arquivos": "Ask or request a task. / for commands, @ for skills and files",
 };

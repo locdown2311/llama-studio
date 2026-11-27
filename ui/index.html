@@ -68,7 +68,7 @@
         <div class="queue" id="queue" hidden></div>
         <div class="composer" id="composer">
           <div id="input" class="editor" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true"
-               data-placeholder="Pergunte algo ou peça uma tarefa. Digite @ para inserir uma habilidade ou conector, ou arraste arquivos para cá."></div>
+               data-placeholder="Pergunte ou peça uma tarefa. / para comandos, @ para habilidades e arquivos"></div>
           <div class="bar">
             <div class="pick-wrap">
               <button class="bar-btn round" id="plus-btn" title="Inserir" aria-label="Inserir"></button>
@@ -78,6 +78,8 @@
               <button class="bar-btn" id="pick-model"></button>
               <div class="popover" id="pop-model"></div>
             </div>
+            <button class="bar-btn more-btn" id="more-btn" type="button" aria-expanded="false"></button>
+            <div class="bar-more" id="bar-more">
             <div class="pick-wrap">
               <button class="bar-btn" id="pick-persona"></button>
               <div class="popover" id="pop-persona"></div>
@@ -86,10 +88,6 @@
             <div class="pick-wrap">
               <button class="bar-btn" id="pick-auto"></button>
               <div class="popover" id="pop-auto"></div>
-            </div>
-            <div class="pick-wrap">
-              <button class="bar-btn" id="pick-think"></button>
-              <div class="popover" id="pop-think"></div>
             </div>
             <div class="pick-wrap">
               <button class="bar-btn" id="pick-skills"></button>
@@ -102,6 +100,11 @@
             <div class="pick-wrap">
               <button class="bar-btn" id="pick-ws"></button>
               <div class="popover" id="pop-ws"></div>
+            </div>
+            </div>
+            <div class="pick-wrap">
+              <button class="bar-btn" id="pick-think"></button>
+              <div class="popover" id="pop-think"></div>
             </div>
             <span class="spacer"></span>
             <span class="nim-meter" id="nim-meter" hidden></span>

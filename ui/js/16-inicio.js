@@ -88,6 +88,7 @@ async function init() {
   $('#pick-think').addEventListener('click', () => togglePop('#pop-think', fillThinkPop));
   $('#pick-auto').addEventListener('click', () => togglePop('#pop-auto', fillAutoPop));
   $('#pick-plan').addEventListener('click', togglePlan);
+  $('#more-btn').addEventListener('click', () => { store.set('barMore', !store.get('barMore', false)); drawMoreBtn(); });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && running(cur()) && S.view === 'chat' && !$('#modal-root').childElementCount && !mention) stop();
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); $('#search').focus(); $('#search').select(); }
@@ -140,7 +141,7 @@ async function init() {
   if (EXECUTOR) { executorLoop(); return; }
   // no celular, um texto de exemplo curto (o longo ocupava três linhas da caixa)
   const narrow = matchMedia('(max-width: 640px)');
-  const ph = () => { const ed = $('#input'); if (ed) ed.dataset.placeholder = narrow.matches ? L('Pergunte algo ou peça uma tarefa') : L('Pergunte algo ou peça uma tarefa. Digite @ para inserir uma habilidade ou conector, ou arraste arquivos para cá.'); };
+  const ph = () => { const ed = $('#input'); if (ed) ed.dataset.placeholder = narrow.matches ? L('Pergunte algo ou peça uma tarefa') : L('Pergunte ou peça uma tarefa. / para comandos, @ para habilidades e arquivos'); };
   ph(); narrow.addEventListener('change', ph);
   focusEditor(true);
   drawBgBar();
