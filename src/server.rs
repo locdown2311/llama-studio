@@ -297,6 +297,16 @@ async fn guard(req: Request, next: Next) -> Response {
     // presa na fila de conexões do navegador, que abre no máximo 6 por endereço)
     if is_executor(&req) {
         crate::jobs::touch();
+        // andamento que o executor deixa num cookie (chega em qualquer pedido dele)
+        let prog = req.headers().get_all(header::COOKIE).iter().filter_map(|v| v.to_str().ok()).flat_map(|c| c.split(';')).find_map(|kv| kv.trim().strip_prefix("studio_prog=").map(str::to_string));
+        if let Some(b) = prog {
+            use base64::Engine;
+            if let Some(v) = base64::engine::general_purpose::STANDARD.decode(b.trim()).ok().and_then(|x| serde_json::from_slice::<serde_json::Value>(&x).ok()) {
+                for p in v.as_array().into_iter().flatten() {
+                    crate::jobs::progress(p);
+                }
+            }
+        }
     }
     let path = req.uri().path();
     // o <video> da página não manda cabeçalhos: o arquivo renderizado é só leitura

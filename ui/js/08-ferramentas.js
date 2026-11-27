@@ -552,8 +552,12 @@ async function runExplorer(args, tctx, tmsg, apiId, root = tmsg, who = '') {
     const last = step === max || loop;
     if (last) msgs.push({ role: 'user', content: loop ? L('Você está repetindo as mesmas chamadas. Escreva agora o relatório final com o que já encontrou.') : L('Limite de passos atingido. Escreva agora o relatório final com o que já encontrou.') });
     const m = { content: '', reasoning: '', tool_calls: [] };
+    tmsg.steps = step + 1; tmsg.stepAt = Date.now(); tmsg.doing = '';
     await teamStep(st, msgs, last ? [] : tools, m, tctx, tmsg);
     const calls = m.tool_calls.filter((t) => t && t.function?.name);
+    // o que este subagente está fazendo (aparece no andamento do segundo plano e em Processos)
+    tmsg.doing = calls.map((t) => { const a = parseArgs(t.function.arguments) || {}; return toolSummary(t.function.name, a) || t.function.name; }).join(', ').slice(0, 80);
+    tmsg.stepAt = Date.now();
     calls.forEach((t) => { if (!t.id) t.id = 'call_' + uid(); });
     repairCalls(calls, tools);
     const text = splitThink(m.content).text;

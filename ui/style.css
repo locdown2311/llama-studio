@@ -2432,3 +2432,8 @@ details.verify.warn summary svg { color: var(--warn); }
 
 /* desempenho: mensagens fora da tela não são desenhadas nem medidas a cada quadro (a última, que muda, sempre é) */
 #messages > [data-start]:not(:last-child) { content-visibility: auto; contain-intrinsic-size: auto 600px; }
+
+/* subagentes: tarefa em até 3 linhas (inteira ao abrir ou na dica) e o passo atual */
+.substep .ss-name { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.substep.expandable:has(+ .substeps-nested) .ss-name { -webkit-line-clamp: unset; }
+.ss-steps { flex: none; font-size: 11.5px; color: var(--muted); padding: 1px 7px; border-radius: 6px; background: var(--hover); white-space: nowrap; }

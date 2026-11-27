@@ -1198,6 +1198,17 @@ function bgStatus(conv) {
   const pend = (last.tool_calls || []).find((t) => !done.has(t.id));
   if (pend) {
     const n = pend.function?.name || '';
+    // subagentes: quantos terminaram, passos e o que o mais recente está fazendo
+    if (n === 'explore' || n === 'multi_explore') {
+      const tm = ms.find((m) => m.role === 'tool' && m.tool_call_id === pend.id);
+      const subs = tm?.subs || (tm ? [tm] : []);
+      if (subs.length) {
+        const ok = subs.filter((x) => x.status === 'ok' || x.status === 'error').length;
+        const steps = subs.reduce((a, x) => a + (x.steps || 0), 0);
+        const live = subs.filter((x) => x.status === 'running' && x.stepAt).sort((a, b) => b.stepAt - a.stepAt)[0];
+        return [n === 'multi_explore' ? L('Subagentes {0}/{1} prontos', ok, subs.length) : L('Subagente'), steps ? L('{0} passos', steps) : '', live?.doing || ''].filter(Boolean).join(' · ') + tag;
+      }
+    }
     const v = BG_VERBS[n] ? L(BG_VERBS[n]) : n.startsWith('browser') ? L('Usando o navegador') : n.includes('__') ? L('Usando o conector {0}', n.split('__')[0]) : L('Usando {0}', n);
     return v + tag;
   }
@@ -1212,15 +1223,20 @@ function execTick() {
     // conta o que está fazendo (quando muda, ou a cada 15 s como sinal de vida) e grava a conversa a cada ~4 s,
     // para quem pediu ver a resposta chegando
     EXEC.n = (EXEC.n || 0) + 1;
+    const prog = [];
     for (const [cid, run] of EXEC.running) {
       const c = S.convs.find((x) => x.id === cid);
       if (!c) continue;
       const t = (c.goal?.status === 'active' ? (c.goal.max ? L('Meta, rodada {0}/{1}', c.goal.round + 1, c.goal.max) : L('Meta, rodada {0}', c.goal.round + 1)) + ' · ' : '') + bgStatus(c);
+      prog.push({ job: run.job.id, text: t });
       if (t !== run.prog || Date.now() - (run.progAt || 0) > 15000) {
         run.prog = t; run.progAt = Date.now();
         api('/api/jobs/progress', { job: run.job.id, text: t }).catch(() => {});
       }
     }
+    // o andamento também vai num cookie: qualquer pedido do executor (subagentes, ferramentas) leva junto, mesmo
+    // quando o aviso acima fica preso na fila de conexões do navegador
+    try { document.cookie = 'studio_prog=' + btoa(unescape(encodeURIComponent(JSON.stringify(prog)))) + '; path=/; SameSite=Strict'; } catch {}
     if (EXEC.n % 3 === 0) {
       saveConvsNow();
       for (const cid of EXEC.running.keys()) {

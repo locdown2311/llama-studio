@@ -2874,4 +2874,8 @@ const I18N_EN = {
   "Teste de paralelo das APIs": "API parallelism test",
   "Cada API recebe a mesma tarefa com 5 partes independentes (ler 3 arquivos, procurar TODO no projeto, pesquisar na web). Conta quantas ela pediu já na primeira resposta; nada é executado. 5 de 5 = aproveita o paralelo ao máximo.": "Each API gets the same task with 5 independent parts (read 3 files, search TODO in the project, search the web). It counts how many it asked for already in the first response; nothing is executed. 5 of 5 = makes the most of parallelism.",
   "Testar paralelo das APIs": "Test API parallelism",
+  "Subagentes {0}/{1} prontos": "Subagents {0}/{1} done",
+  "Subagente": "Subagent",
+  "{0} passos": "{0} steps",
+  "passo {0}": "step {0}",
 };

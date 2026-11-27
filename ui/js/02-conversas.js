@@ -3717,8 +3717,9 @@ function renderTool(tc, res, live) {
           ),
         }),
 
-        h("span.ss-name", null, s.task),
+        h("span.ss-name", { title: s.task }, s.task),
         h("span.ss-sub", null, s.status === "queued" ? L("na fila") : lastStep?.summary || ""),
+        s.status === "running" && s.steps ? h("span.ss-steps", null, L("passo {0}", s.steps)) : null,
         s.runOn ? runOnChip(s) : null
       );
 
