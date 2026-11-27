@@ -2878,4 +2878,10 @@ const I18N_EN = {
   "Subagente": "Subagent",
   "{0} passos": "{0} steps",
   "passo {0}": "step {0}",
+  "Encerrar subagente parado após (min)": "Stop a stalled subagent after (min)",
+  "Sem nenhum passo novo nesse tempo (comando que não termina, API que não responde), o subagente é encerrado e entrega o que já fez. 0 = nunca.": "With no new step in that time (a command that never ends, an API that does not answer), the subagent is stopped and hands over what it did. 0 = never.",
+  "Arquivos que ele já tinha alterado: {0}.": "Files it had already changed: {0}.",
+  "Subagente encerrado: {0} min sem avançar (estava em: {1}, passo {2}).": "Subagent stopped: {0} min without progress (it was at: {1}, step {2}).",
+  "esperando o modelo": "waiting for the model",
+  "Confira o que ficou pela metade antes de seguir.": "Check what was left half done before going on.",
 };

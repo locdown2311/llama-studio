@@ -480,7 +480,29 @@ async function subGate(name, args, info, tctx, root, who) {
 /** Subagente: ciclo próprio, ferramentas de leitura (e, com files, de escrita nesses arquivos), devolve um relatório.
    apiId: força uma API externa específica (o multi_explore distribui as subtarefas entre as escolhidas).
    root: a mensagem da ferramenta que o chamou (onde aparecem os pedidos de permissão e os pontos de restauração). */
+/** Subagente com vigia: passou X minutos sem nenhum passo novo (comando que não termina, API que não responde),
+    é encerrado e entrega o que já fez, em vez de segurar o resto da tarefa. */
 async function runExplorer(args, tctx, tmsg, apiId, root = tmsg, who = '') {
+  const mins = Number(S.settings.subStallMin ?? 15);
+  if (!(mins > 0)) return runExplorerInner(args, tctx, tmsg, apiId, root, who);
+  const ac = new AbortController();
+  const onAbort = () => ac.abort();
+  tctx.signal.addEventListener('abort', onAbort, { once: true });
+  let stalled = false;
+  tmsg.stepAt = Date.now();
+  const iv = setInterval(() => { if (!stalled && Date.now() - (tmsg.stepAt || 0) > mins * 60000) { stalled = true; ac.abort(); } }, 10000);
+  let r;
+  try { r = await runExplorerInner(args, { ...tctx, signal: ac.signal }, tmsg, apiId, root, who); }
+  catch (e) { if (!stalled || tctx.signal.aborted) throw e; }
+  finally { clearInterval(iv); tctx.signal.removeEventListener('abort', onAbort); }
+  if (stalled && !tctx.signal.aborted) {
+    const wrote = tmsg.wrote?.length ? ' ' + L('Arquivos que ele já tinha alterado: {0}.', tmsg.wrote.join(', ')) : '';
+    return { content: L('Subagente encerrado: {0} min sem avançar (estava em: {1}, passo {2}).', mins, tmsg.doing || L('esperando o modelo'), tmsg.steps || 0) + wrote + ' ' + L('Confira o que ficou pela metade antes de seguir.'), isError: true };
+  }
+  return r;
+}
+
+async function runExplorerInner(args, tctx, tmsg, apiId, root = tmsg, who = '') {
   const only = ['list_directory', 'read_file', 'search_files'];
   // subagente pesquisa pelo servidor (web_search/web_fetch), sem abrir janela; o navegador só entra se a pesquisa
   // na web estiver desligada (ou se o usuário ligar "Subagentes podem abrir o navegador")
