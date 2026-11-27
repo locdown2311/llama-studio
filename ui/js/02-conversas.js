@@ -1870,6 +1870,16 @@ function toBottom() {
   const el = $("#messages");
   el.scrollTop = el.scrollHeight;
   followBottom = true;
+  // as mensagens de cima têm altura estimada até aparecerem (content-visibility): confere no quadro seguinte
+  if (!toBottom.again) {
+    toBottom.again = true;
+    let n = 0;
+    const fix = () => {
+      if (followBottom && el.scrollHeight - el.scrollTop - el.clientHeight > 2) el.scrollTop = el.scrollHeight;
+      if (++n < 12 && followBottom) requestAnimationFrame(fix); else toBottom.again = false;
+    };
+    requestAnimationFrame(fix);
+  }
 }
 
 function initScrollFollow() {
@@ -1943,14 +1953,23 @@ function scheduleRender() {
 
   rafPending = true;
 
-  requestAnimationFrame(() => {
+  // ritmo adaptável: redesenhar custa mais numa resposta longa (markdown inteiro do bloco + layout); o próximo
+  // quadro espera o bastante para o redesenho ocupar no máximo ~30% do tempo, e a tela não trava no meio do texto
+  const wait = Math.max(0, RENDER.last + RENDER.gap - performance.now());
+  const go = () => requestAnimationFrame(() => {
     rafPending = false;
+    const t0 = performance.now();
     renderMessages(true);
     updateBusy();
     syncMade();
     sendRing();
+    const cost = performance.now() - t0;
+    RENDER.last = performance.now();
+    RENDER.gap = Math.min(250, Math.max(0, cost * 2.5));
   });
+  if (wait > 4) setTimeout(go, wait); else go();
 }
+const RENDER = { last: 0, gap: 0 };
 
 const renderConvListSoon = debounce(() => renderConvList(), 300);
 
