@@ -10,10 +10,11 @@ async function init() {
     $('#set-pane').append(h('div.set-embed', { dataset: { v }, hidden: true }, page));
     sec.remove();
   }
-  const navIcons = { chat: 'chat', skills: 'sparkles', mcp: 'plug', plugins: 'puzzle', personas: 'user', tools: 'wrench', server: 'server', settings: 'gear', calendar: 'calendar', videos: 'film', artifacts: 'layers', procs: 'cpu' };
+  const navIcons = { chat: 'plus', skills: 'sparkles', mcp: 'plug', plugins: 'puzzle', personas: 'user', tools: 'wrench', server: 'server', settings: 'gear', calendar: 'calendar', videos: 'film', artifacts: 'layers', procs: 'cpu' };
   const navLabels = { chat: L('Nova conversa'), skills: L('Habilidades'), mcp: L('Conectores'), plugins: L('Plugins'), personas: L('Personalidades'), tools: L('Utilitários'), server: L('Servidor'), settings: L('Configurações'), calendar: L('Calendário'), videos: L('Vídeos'), artifacts: L('Artefatos'), procs: L('Processos') };
   $$('.nav-item').forEach((b) => {
     b.innerHTML = svg(navIcons[b.dataset.view]) + `<span>${navLabels[b.dataset.view]}</span>`;
+    b.title = navLabels[b.dataset.view]; b.setAttribute('aria-label', navLabels[b.dataset.view]);
     b.addEventListener('click', () => {
       if (b.dataset.view === 'chat') { const c = cur(); if (!c || c.messages.length) newConv(); setView('chat'); }
       else setView(b.dataset.view);

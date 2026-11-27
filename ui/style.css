@@ -2211,3 +2211,111 @@ details.verify.warn summary svg { color: var(--warn); }
 .ws-tabs button { flex: none; padding: 5px 7px; }
 .ws-actions, #ws-close { flex: none; }
 #ws:not(.has-art) .ws-tabs button[data-tab="artifact"] { display: none; }
+
+/* ================================================================ visual flat (2.114)
+   superfícies separadas por tom e linhas finas, sem sombras; destaque verde-petróleo; menu em trilho de ícones;
+   resposta do modelo sem cartão. Fica no fim para sobrepor o resto. */
+:root {
+  --bg: #ffffff; --side: #f6f7f8; --card: #ffffff; --hover: #eef0f2; --field: #f1f3f4;
+  --line: #e5e7ea; --line-2: #d5d8dd; --text: #16181b; --text-2: #454b55; --muted: #646a74;
+  --accent: #0f9d7a; --accent-2: #0b8667; --accent-soft: #e3f4ef; --accent-line: #b5e1d4; --accent-ink: #0a6f56;
+  --user-bg: #f0f2f4; --user-line: transparent;
+  --sh-1: none; --sh-2: none;
+  --sh-3: 0 12px 40px rgba(10, 14, 20, .16);
+}
+:root[data-theme="dark"] {
+  --bg: #111215; --side: #16171b; --card: #1a1c20; --hover: #22242a; --field: #1e2025;
+  --line: #25272d; --line-2: #33363d; --text: #e8e9ec; --text-2: #b8bcc5; --muted: #8f949e;
+  --accent: #19ad88; --accent-2: #22c29a; --accent-soft: #143229; --accent-line: #1f4c3f; --accent-ink: #5fd6b4;
+  --user-bg: #24262c; --user-line: transparent;
+  --sh-1: none; --sh-2: none;
+  --sh-3: 0 16px 48px rgba(0, 0, 0, .55);
+}
+
+/* botões e campos: planos */
+.btn { box-shadow: none; background: var(--field); border-color: transparent; }
+.btn:hover { background: var(--hover); }
+.btn.primary { background: var(--accent); }
+.btn.ghost { background: transparent; }
+.square-btn { box-shadow: none; border-color: transparent; background: transparent; }
+.square-btn:hover { background: var(--hover); }
+.square-btn.on { border-color: transparent; }
+.search { background: var(--field); border-color: transparent; }
+.search:focus-within { box-shadow: none; border-color: var(--accent-line); }
+.search kbd { background: transparent; border-color: var(--line-2); }
+
+/* barra lateral: trilho de ícones à esquerda, conversas ao lado */
+@media (min-width: 861px) {
+  #side { width: 318px; display: grid; grid-template-columns: 58px minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; }
+  #side .side-top { grid-column: 2; grid-row: 1; padding-left: 12px; }
+  #side .search { grid-column: 2; grid-row: 2; margin-left: 8px; }
+  #side .nav { grid-column: 1; grid-row: 1 / -1; border-bottom: 0; border-right: 1px solid var(--line); background: var(--bg); padding: 12px 0; align-items: center; gap: 4px; overflow-y: auto; }
+  #side .side-scroll { grid-column: 2; grid-row: 3; }
+  #side .server-status { grid-column: 2; grid-row: 4; }
+  .nav-item { width: 40px; height: 40px; padding: 0; justify-content: center; position: relative; flex: none; }
+  .nav-item > span:not(.nav-badge) { display: none; }
+  .nav-item svg { width: 19px; height: 19px; color: var(--muted); }
+  .nav-item:hover svg { color: var(--text); }
+  .nav-item.active svg { color: var(--accent); }
+  #nav-new { background: var(--accent); margin-bottom: 10px; }
+  #nav-new svg { color: #fff; }
+  #nav-new:hover { background: var(--accent-2); }
+  #nav-new.active { background: var(--accent); }
+  .nav-item[data-view="settings"] { margin-top: auto; }
+  .nav-badge { position: absolute; top: 3px; right: 1px; margin: 0; min-width: 16px; height: 16px; font-size: 10px; padding: 0 4px; }
+}
+@media (max-width: 1280px) and (min-width: 861px) { #side { width: 300px; } }
+.conv { border: 0; }
+.conv.active { background: var(--hover); color: var(--text); border: 0; }
+.conv .run-dot { background: var(--accent); }
+.server-status { background: var(--field); border-color: transparent; }
+.dot.ok, .dot.err { box-shadow: none; }
+
+/* cabeçalho da conversa */
+.chat-head { background: transparent; padding-top: 12px; padding-bottom: 10px; }
+.chat-title { font-size: 15.5px; }
+.hchip { border-color: transparent; background: var(--field); }
+
+/* mensagens: a do usuário num balão sem borda; a do modelo como texto corrido */
+.bubble { border: 0; background: var(--user-bg); border-radius: 12px; padding: 10px 15px; }
+.ai-card { background: transparent; border: 0; box-shadow: none; padding: 0 2px; border-radius: 0; }
+.ai-avatar { width: 22px; height: 22px; border-radius: 6px; background: var(--accent); border: 0; color: #fff; font-size: 11px; }
+.ai-name { font-size: 13px; }
+.ai-foot { border-top: 0; padding-top: 0; margin-top: 10px; }
+.chip { background: transparent; border-color: transparent; color: var(--muted); }
+.chip:hover { background: var(--hover); color: var(--text); }
+.msg-ai .chips { opacity: .75; }
+.msg-ai:hover .chips { opacity: 1; }
+.md :not(pre) > code { border: 0; background: var(--field); }
+.code { border: 0; background: var(--field); }
+.code-head { background: transparent; border-bottom-color: var(--line); }
+
+/* ferramentas: linha discreta em vez de caixa */
+.tool-card { background: transparent; border-color: transparent; }
+.tool-head { min-height: 32px; padding: 4px 8px; border-radius: 8px; }
+.tool-ico { background: transparent; }
+.tool.s-ok::before, .tool.s-error::before, .tool.s-denied::before, .tool.s-approval::before { box-shadow: none; }
+.tool.s-approval .tool-card { box-shadow: none; background: var(--warn-soft); }
+.art-card { box-shadow: none; background: var(--side); }
+
+/* caixa de mensagem */
+.composer { background: var(--field); border-color: transparent; box-shadow: none; border-radius: 14px; }
+.composer:focus-within { border-color: var(--accent-line); box-shadow: none; }
+
+/* painel lateral: abas sublinhadas, pasta sem cartão */
+.ws-head { padding-top: 10px; border-bottom: 1px solid var(--line); }
+.ws-tabs { gap: 14px; }
+.ws-tabs button { border-radius: 0; padding: 8px 1px 9px; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.ws-tabs button:hover { background: none; }
+.ws-tabs button.on { background: none; box-shadow: none; border-bottom-color: var(--accent); }
+.ws-path { background: transparent; border-color: transparent; box-shadow: none; margin-top: 8px; }
+.ws-path:hover { background: var(--hover); border-color: transparent; }
+
+/* páginas, cartões e janelas */
+.modal { border-color: var(--line); }
+.proc-list, .art-tile, .art-body { background: var(--card); }
+.proc-n, .nav-badge { background: var(--accent); color: #fff; }
+.bar-btn { border-color: transparent; background: transparent; box-shadow: none; }
+.bar-btn:hover { background: var(--hover); }
+#pick-model { background: var(--hover); }
+.send, .send.stop { box-shadow: none; }
