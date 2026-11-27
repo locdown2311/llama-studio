@@ -2331,3 +2331,49 @@ details.verify.warn summary svg { color: var(--warn); }
 .more-btn[aria-expanded="true"] .more-chev svg { transform: rotate(180deg); }
 .simple #more-btn { display: none !important; }
 @media (max-width: 640px) { .more-btn .more-label { display: none; } .cloud #more-btn { display: none !important; } }
+
+/* ================================================================ páginas no visual flat (2.114.2)
+   cartões viram blocos de tom (sem borda nem sombra); campos com fundo próprio; as Configurações saem da caixa */
+:root { --surface: #f5f6f7; --input: #ffffff; }
+:root[data-theme="dark"] { --surface: #17191d; --input: #1f2126; }
+
+.page { padding-top: 28px; }
+.page-head h1 { font-size: 22px; font-weight: 600; letter-spacing: -.01em; }
+.lead { color: var(--muted); font-size: 13.5px; }
+
+/* configurações: menu à esquerda separado por uma linha, sem a caixa em volta */
+.set-layout.card-form { background: transparent; border: 0; border-radius: 0; padding: 0; box-shadow: none; gap: 36px; grid-template-columns: 210px minmax(0, 1fr); }
+.set-nav { border-right: 1px solid var(--line); padding-right: 14px; top: 0; }
+.set-nav button.on, .set-nav .on { background: var(--hover); color: var(--text); }
+.set-group { border-top-color: var(--line); }
+
+/* blocos */
+.card-form, .skill, .preset, .srv, .srv-card, .tcard, .api-card, .dirrow, .set-choice, .set-hit, .plug-item, .starter,
+.cal-day, .eng, .mdl, .web-card, .stools-card, .team-row, .nb-card, .onb-step, .queue, .todos, .act-stats > div,
+.proc-list, .art-tile, .art-body, .art-card, .ws-preview, .hf-search, .share-part, .ab-col, .tl-node, .chg, .audit, .result-text {
+  background: var(--surface); border-color: transparent; box-shadow: none;
+}
+.skill:hover, .preset:hover, .tcard:hover, .api-card.closed:hover, .set-hit:hover, .plug-item:hover, .starter:hover, .art-tile:hover, .art-card:hover, .cal-day:hover {
+  background: var(--hover); border-color: transparent; box-shadow: none;
+}
+.skill.on { border-color: transparent; box-shadow: inset 0 0 0 1.5px var(--accent); }
+.set-choice:has(input:checked) { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.empty-card, .import-zone { background: transparent; border-color: var(--line-2); }
+.srv details, .srv-log { border-top-color: var(--line); }
+.proc-row, .tl-node { border-top-color: var(--line); }
+.cal-day.today, .cal-day.on { box-shadow: inset 0 0 0 1.5px var(--accent); }
+
+/* campos */
+.input, .textarea, .select, .set-search, .conv input { background: var(--input); border-color: var(--line); }
+.input:focus, .textarea:focus, .select:focus { box-shadow: none; border-color: var(--accent); }
+.check { background: var(--input); }
+.seg { background: var(--surface); }
+.seg button.on { box-shadow: none; background: var(--hover); }
+.tag, .tag-chip { background: var(--hover); border-color: transparent; }
+
+/* janelas e menus flutuantes: um tom acima do fundo, borda fina */
+.modal { background: var(--side); }
+.modal-foot { background: transparent; }
+.popover, .fmenu { background: var(--side); border-color: var(--line); }
+.modal-back, #scrim { backdrop-filter: none; }
+.toast { box-shadow: none; }
