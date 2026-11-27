@@ -2246,12 +2246,13 @@ details.verify.warn summary svg { color: var(--warn); }
 
 /* barra lateral: trilho de ícones à esquerda, conversas ao lado */
 @media (min-width: 861px) {
-  #side { width: 318px; display: grid; grid-template-columns: 58px minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; }
+  #side { width: 318px; display: grid; grid-template-columns: 58px minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto auto; }
+  #side .update-badge { grid-column: 2; grid-row: 4; margin: 0 8px 6px; width: auto; }
   #side .side-top { grid-column: 2; grid-row: 1; padding-left: 12px; }
   #side .search { grid-column: 2; grid-row: 2; margin-left: 8px; }
   #side .nav { grid-column: 1; grid-row: 1 / -1; border-bottom: 0; border-right: 1px solid var(--line); background: var(--bg); padding: 12px 0; align-items: center; gap: 4px; overflow-y: auto; }
   #side .side-scroll { grid-column: 2; grid-row: 3; }
-  #side .server-status { grid-column: 2; grid-row: 4; }
+  #side .server-status { grid-column: 2; grid-row: 5; }
   .nav-item { width: 40px; height: 40px; padding: 0; justify-content: center; position: relative; flex: none; }
   .nav-item > span:not(.nav-badge) { display: none; }
   .nav-item svg { width: 19px; height: 19px; color: var(--muted); }
