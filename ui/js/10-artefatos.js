@@ -47,7 +47,12 @@ function artFileName(d) {
   return (d.meta.title || 'artefato').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 80) + '.' + ext;
 }
 
-function artDownload(d) {
+async function artDownload(d) {
+  // no app do PC o WebView ignora o download de blob: o servidor grava em Downloads e abre a pasta
+  if (!S.info?.cloud && !HUB) {
+    try { const r = await api('/api/download', { name: artFileName(d), text: d.content }); toast(L('Salvo em {0}', r.path)); return; }
+    catch (e) { toast(e.message, 'err'); return; }
+  }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([d.content], { type: 'text/plain' }));
   a.download = artFileName(d);

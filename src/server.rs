@@ -103,6 +103,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/artifacts/get", get(art_get))
         .route("/api/artifacts/delete", post(art_delete))
         .route("/api/artifacts/rename", post(art_rename))
+        .route("/api/download", post(download_save))
         .route("/api/shell/kill", post(shell_kill))
         .route("/api/shell/output", get(shell_output))
         .route("/api/kb/media", get(kb_media))
@@ -1935,6 +1936,31 @@ async fn arr_undo(State(app): S, b: Bytes) -> Res {
 async fn share_collect(State(app): S, b: Bytes) -> Res {
     let v = body(&b);
     ok(crate::share::collect(&app, &strs(&v, "parts"), &strs(&v, "skills")))
+}
+
+/// "Baixar" no app: o WebView não salva blobs, então o servidor grava em Downloads (nome sem repetir) e mostra no
+/// Explorer.
+async fn download_save(State(app): S, b: Bytes) -> Res {
+    let v = body(&b);
+    let dir = dirs_home().map(|h| h.join("Downloads")).filter(|d| d.is_dir()).unwrap_or_else(|| app.root.clone());
+    let raw: String = st(&v, "name").chars().map(|c| if "\\/:*?\"<>|".contains(c) || c.is_control() { '_' } else { c }).collect();
+    let raw = raw.trim().trim_matches('.').to_string();
+    let raw = if raw.is_empty() { "arquivo.txt".to_string() } else { raw };
+    let (stem, ext) = match raw.rfind('.') {
+        Some(i) if i > 0 => (raw[..i].chars().take(100).collect::<String>(), raw[i..].to_string()),
+        _ => (raw.chars().take(100).collect::<String>(), String::new()),
+    };
+    let mut path = dir.join(format!("{stem}{ext}"));
+    let mut i = 2;
+    while path.exists() {
+        path = dir.join(format!("{stem} ({i}){ext}"));
+        i += 1;
+    }
+    std::fs::write(&path, st(&v, "text")).map_err(|e| bad(e.to_string()))?;
+    if v.get("reveal").and_then(Value::as_bool).unwrap_or(true) {
+        app::reveal(&path, true);
+    }
+    ok(json!({"path": path}))
 }
 
 /// Grava o pacote em Downloads (ou na pasta pedida) e devolve o caminho.

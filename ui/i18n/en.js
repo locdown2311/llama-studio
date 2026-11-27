@@ -2891,4 +2891,5 @@ const I18N_EN = {
   "para conferir": "to review",
   "Etapas concluídas: {0} de {1}.": "Steps done: {0} of {1}.",
   "Meta: {0}": "Goal: {0}",
+  "Salvo em {0}": "Saved to {0}",
 };
