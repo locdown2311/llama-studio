@@ -118,6 +118,11 @@ async function init() {
   const wantConv = new URLSearchParams(location.search).get('c');
   if (wantConv && S.convs.some((c) => c.id === wantConv)) S.curId = wantConv;
   if (S.convs.length && !cur()) S.curId = S.convs[0].id;
+  // conversas que ficaram vazias há mais de uma hora saem da lista (menos a aberta)
+  if (!EXECUTOR) {
+    const old = S.convs.filter((c) => c.id !== S.curId && !c.messages?.length && !c.bg && !c.goal && Date.now() - (c.createdAt || 0) > 3600000);
+    if (old.length) { S.convs = S.convs.filter((c) => !old.includes(c)); saveConvs(); }
+  }
   renderConvList();
   renderChat();
   renderTree();

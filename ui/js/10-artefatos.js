@@ -37,7 +37,7 @@ async function openArtifact(id, v, { quiet } = {}) {
       modal({ title: d.meta.title, wide: true, body: h('div.art-modal', null, artBody(d)) });
       return;
     }
-    if (!quiet) { if (MQ_WS.matches) S.wsDrawer = true; else store.set('wsHidden', false); applyLayout(); }
+    if (!quiet) { if (MQ_WS.matches) S.wsDrawer = true; else { store.set('wsHidden', false); document.body.classList.add('ws-force'); S._wsForceId = S.curId; } applyLayout(); }
     setWsTab('artifact');
   } catch (e) { toast(e.message, 'err'); }
 }

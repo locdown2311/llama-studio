@@ -166,6 +166,7 @@ function newConv(projectId) {
     saveProjects();
   }
 
+  dropIfEmpty();
   S.convs.unshift(c);
 
   S.curId = c.id;
@@ -182,8 +183,16 @@ function newConv(projectId) {
   return c;
 }
 
+/** Conversa que nunca recebeu mensagem: some quando você sai dela (não acumula "Nova conversa" na lista). */
+function dropIfEmpty(keepId) {
+  const c = S.convs.find((x) => x.id === S.curId);
+  if (!c || c.id === keepId || c.messages.length || S.runs.has(c.id) || c.bg || c.goal) return;
+  S.convs = S.convs.filter((x) => x !== c);
+}
+
 function selectConv(id) {
   if (S.sideDrawer) toggleSide(false);
+  dropIfEmpty(id);
 
   setTimeout(() => {
     const c = cur();
@@ -1951,6 +1960,12 @@ function renderChat() {
   renderMessages(false);
   renderComposer();
 
+  // conversa vazia (tela inicial): o painel da direita só aparece se você pedir
+  const empty = !cur()?.messages?.length;
+  if (S._wsForceId !== S.curId) document.body.classList.remove('ws-force');
+  document.body.classList.toggle('conv-empty', empty);
+  if (typeof applyLayout === 'function') applyLayout();
+
   // painel da direita acompanha a conversa e o projeto atuais
 
   if (S.wsTab === "notebook" && S.nbShown !== (cur() ? nbKey(cur()) : null))
@@ -2282,9 +2297,15 @@ function fmtStamp(t) {
 
   const p = (n) => String(n).padStart(2, "0");
 
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(
-    d.getHours()
-  )}:${p(d.getMinutes())}`;
+  const hm = `${p(d.getHours())}:${p(d.getMinutes())}`;
+  // hoje: só a hora; ontem/amanhã por extenso; no mesmo ano sem o ano
+  const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(d) - day(new Date())) / 86400000);
+  if (diff === 0) return hm;
+  if (diff === -1) return L("ontem {0}", hm);
+  if (diff === 1) return L("amanhã {0}", hm);
+  if (d.getFullYear() === new Date().getFullYear()) return `${p(d.getDate())}/${p(d.getMonth() + 1)} ${hm}`;
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${hm}`;
 }
 
 /** Quanto falta para a primeira palavra: o llama-server conta o prompt lido (return_progress). */
@@ -3013,23 +3034,9 @@ function renderAI(b, conv, isLast) {
   )
     card.append(h("div.muted", null, L("Execução interrompida.")));
 
-  if (!live && toolCount) {
-    const parts = [
-      h(
-        "span",
-        null,
-        L("Este turno executou "),
-        h(
-          "b",
-          null,
-          L(
-            "{0} {1} de ferramenta",
-            toolCount,
-            toolCount === 1 ? L("chamada") : L("chamadas")
-          )
-        )
-      ),
-    ];
+  // o rastro de ferramentas já mostra cada chamada: o rodapé só aparece quando arquivos mudaram
+  if (!live && toolCount && writes) {
+    const parts = [];
 
     if (reads)
       parts.push(

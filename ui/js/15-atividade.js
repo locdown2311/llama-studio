@@ -265,13 +265,18 @@ function applyLayout() {
   const narrow = MQ_WS.matches;
   const hid = narrow ? !S.wsDrawer : store.get('wsHidden', false);
   $('#ws').classList.toggle('hidden', hid);
-  $('#toggle-ws').classList.toggle('on', !hid);
+  const autoHid = !narrow && document.body.classList.contains('conv-empty') && !document.body.classList.contains('ws-force');
+  $('#toggle-ws').classList.toggle('on', !hid && !autoHid);
   if (!MQ_SIDE.matches) S.sideDrawer = false;
   document.body.classList.toggle('side-open', S.sideDrawer);
   document.body.classList.toggle('ws-drawer', narrow && S.wsDrawer);
   $('#scrim').hidden = !((narrow && S.wsDrawer) || S.sideDrawer);
 }
 function toggleWs() {
+  // na tela inicial o painel fica escondido; o botão mostra só nesta conversa, sem mudar a preferência
+  if (!MQ_WS.matches && document.body.classList.contains('conv-empty') && !store.get('wsHidden', false) && !document.body.classList.contains('ws-force')) {
+    document.body.classList.add('ws-force'); S._wsForceId = S.curId; applyLayout(); return;
+  }
   if (MQ_WS.matches) S.wsDrawer = !S.wsDrawer;
   else store.set('wsHidden', !store.get('wsHidden', false));
   applyLayout();

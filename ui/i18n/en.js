@@ -2841,4 +2841,6 @@ const I18N_EN = {
   "Recolher os ajustes da conversa": "Collapse the conversation settings",
   "Personalidade, modo plano, recursos automáticos, habilidades, conectores e pasta": "Personality, plan mode, automatic features, skills, connectors and folder",
   "Pergunte ou peça uma tarefa. / para comandos, @ para habilidades e arquivos": "Ask or request a task. / for commands, @ for skills and files",
+  "ontem {0}": "yesterday {0}",
+  "amanhã {0}": "tomorrow {0}",
 };

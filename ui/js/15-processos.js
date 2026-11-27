@@ -138,3 +138,9 @@ setInterval(() => {
   if (EXECUTOR || document.hidden || S.view === 'procs') return;
   procsLoad().then(drawProcsBadge).catch(() => {});
 }, 6000);
+
+// descrições longas das opções ficam em 2 linhas; o texto inteiro aparece na dica ao passar o mouse
+document.addEventListener('mouseover', (e) => {
+  const d = e.target.closest?.('.tc-desc');
+  if (d && !d.title && d.scrollHeight > d.clientHeight + 2) d.title = d.textContent;
+});

@@ -36,7 +36,7 @@ function renderToolsPage() {
     const i = h('input', { type: 'checkbox', checked: S.info[key] !== false, onchange: async () => {
       try { await api('/api/config', { [key]: i.checked }); S.info[key] = i.checked; } catch (e) { toast(e.message, 'err'); i.checked = !i.checked; }
     } });
-    return h('label.tcard.wrap', null, h('span.tc-main', null, h('span.tc-title', null, title), h('span.tc-desc', null, desc)), h('span.switch', null, i, h('span')));
+    return h('label.tcard.wrap', { title: desc }, h('span.tc-main', null, h('span.tc-title', null, title), h('span.tc-desc', null, desc)), h('span.switch', null, i, h('span')));
   };
   box.append(
     opt('compactOutput', L('Enxugar saídas de ferramentas'), L('Antes de ir para o modelo, tira cores e barras de progresso, junta linhas repetidas e, se passar de ~12 mil caracteres, mantém começo e fim. A saída inteira fica salva para o modelo consultar se precisar.')),
