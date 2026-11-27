@@ -7,19 +7,22 @@
    tarefa (executorRun) e conta o progresso na faixa. --aqui roda nesta tela. */
 'use strict';
 
-const GOAL_MAX = 30;
+const GOAL_MAX = 0; // 0 = sem limite de rodadas (para quando o juiz diz pronto, quando empaca ou quando você para)
+/** "rodada 3 de 10" ou só "rodada 3" (sem limite). */
+function goalClamp(n) { n = Math.round(Number(n)); return Number.isFinite(n) && n > 0 ? Math.min(1000, n) : 0; }
+function goalRound(g) { return g.max ? L('rodada {0} de {1}', g.round + 1, g.max) : L('rodada {0}', g.round + 1); }
 
 /** "/meta ..." ou "/goal ...": devolve { text, check, max } ou null (não é um comando de meta). */
 function parseGoal(raw) {
   const m = String(raw || '').trim().match(/^\/(?:goal|meta)(?:\s+([\s\S]*))?$/i);
   if (!m) return null;
   let text = (m[1] || '').trim();
-  let check = '', max = 0;
+  let check = '', max = null;
   text = text.replace(/--(?:conferir|check)\s+("([^"]+)"|'([^']+)'|(\S+))/i, (_, a, b, c, d) => { check = b || c || d || ''; return ''; });
   text = text.replace(/--(?:rodadas|max|rounds)\s+(\d+)/i, (_, n) => { max = Number(n); return ''; });
   let here = false;
   text = text.replace(/--(?:aqui|here)\b/i, () => { here = true; return ''; });
-  return { text: text.trim(), check: check.trim(), here, max: Math.max(1, Math.min(100, max || S.settings.goalMax || GOAL_MAX)) };
+  return { text: text.trim(), check: check.trim(), here, max: goalClamp(max !== null ? max : (S.settings.goalMax ?? GOAL_MAX)) };
 }
 
 /** Comandos sobre a meta atual: "/meta" (mostra), "/meta parar", "/meta continuar". true se tratou. */
@@ -35,7 +38,7 @@ function goalCommand(conv, raw) {
   if (['parar', 'stop', 'cancelar'].includes(word)) { if (conv?.goal) goalStopBtn(conv); return true; }
   if (['continuar', 'continue', 'retomar'].includes(word)) {
     if (conv?.goal && !running(conv) && !conv.bg) {
-      conv.goal.status = 'active'; conv.goal.round = Math.min(conv.goal.round, conv.goal.max - 1); saveConvs(); drawGoalBar();
+      conv.goal.status = 'active'; if (conv.goal.max) conv.goal.round = Math.min(conv.goal.round, conv.goal.max - 1); saveConvs(); drawGoalBar();
       submit(conv, { ...goalNext(conv, L('Retomada por você.'), ''), noBg: false, bg: true });
     }
     return true;
@@ -46,7 +49,7 @@ function goalCommand(conv, raw) {
 function goalState(g, conv) {
   const t = conv?.todos || [];
   const plan = t.length ? ' · ' + L('etapas {0}/{1}', t.filter((x) => x.status === 'done').length, t.length) : '';
-  return { active: L('rodada {0} de {1}', g.round + 1, g.max) + plan, done: L('alcançada'), stopped: L('parada'), limit: L('limite de rodadas'), stuck: L('sem progresso') }[g.status] || g.status;
+  return { active: goalRound(g) + plan, done: L('alcançada'), stopped: L('parada'), limit: L('limite de rodadas'), stuck: L('sem progresso') }[g.status] || g.status;
 }
 
 /** Começa uma meta: a primeira rodada é a própria mensagem (com o objetivo dito de forma explícita). */
@@ -92,7 +95,7 @@ async function goalAfterTurn(conv, aborted) {
     const prev2 = g.log.at(-3);
     if (prev && prev2 && [prev, prev2].every((x) => !x.done && x.reason === verdict.reason)) { goalEnd(conv, 'stuck', L('Três rodadas seguidas sem avanço: {0}', verdict.reason)); return null; }
     g.round++;
-    if (g.round >= g.max) { goalEnd(conv, 'limit', L('Chegou ao limite de {0} rodadas. Falta: {1}', g.max, verdict.reason)); return null; }
+    if (g.max && g.round >= g.max) { goalEnd(conv, 'limit', L('Chegou ao limite de {0} rodadas. Falta: {1}', g.max, verdict.reason)); return null; }
     return goalNext(conv, verdict.reason, verdict.next, checkOut);
   } catch (e) {
     goalEnd(conv, 'stopped', L('Não consegui conferir a meta: {0}', e.message));
@@ -113,7 +116,7 @@ async function goalJudge(conv, g, checkOut) {
   }).filter(Boolean).join('\n');
   const sys = L('Você é o juiz de uma meta. Diga se o OBJETIVO já foi alcançado, olhando o que o assistente fez e o resultado da conferência (se houver). Seja exigente: só "done": true se o objetivo inteiro estiver cumprido e verificado, não só planejado ou prometido. Responda só com JSON: {"done": true|false, "reason": "o que falta (ou por que está pronto), em uma frase", "next": "o próximo passo concreto, em uma frase"}');
   const plan = (conv.todos || []).map((t) => `[${t.status === 'done' ? 'x' : t.status === 'doing' ? '~' : ' '}] ${t.text}`).join('\n');
-  const user = L('OBJETIVO:\n{0}\n\nRODADA: {1} de {2}\n\n{3}O QUE ACONTECEU (fim da conversa):\n{4}', g.text, g.round + 1, g.max,
+  const user = L('OBJETIVO:\n{0}\n\nRODADA: {1}\n\n{2}O QUE ACONTECEU (fim da conversa):\n{3}', g.text, goalRound(g),
     (checkOut ? L('CONFERÊNCIA (`{0}`): {1}\n{2}\n\n', g.check, checkOut.ok ? L('passou') : L('falhou'), checkOut.text) : '') + (plan ? L('PLANO DO AGENTE:\n{0}\n\n', plan) : ''), recent);
   let out = '';
   const p = apiFor('background') || mainApiForChat(conv)?.id;
@@ -132,7 +135,7 @@ async function goalJudge(conv, g, checkOut) {
 /** A próxima rodada (como mensagem do usuário marcada). */
 function goalNext(conv, reason, next, checkOut) {
   const g = conv.goal;
-  const text = L('(Meta, rodada {0} de {1}) Ainda não está pronto: {2}', g.round + 1, g.max, reason)
+  const text = L('(Meta, {0}) Ainda não está pronto: {1}', goalRound(g), reason)
     + (next ? '\n' + L('Próximo passo sugerido: {0}', next) : '')
     + (checkOut && !checkOut.ok ? '\n\n' + L('Saída da conferência `{0}`:\n{1}', g.check, checkOut.text) : '')
     + '\n\n' + L('Continue melhorando até alcançar o objetivo: {0}', g.text);
@@ -161,7 +164,7 @@ function goalDialog() {
   const conv0 = cur();
   const goal = h('textarea.textarea', { rows: 4, placeholder: L('Ex.: Deixar o site responsivo no celular e sem erros no console') });
   const check = h('input.input', { placeholder: L('Ex.: npm test   (opcional)'), autocomplete: 'off', spellcheck: false });
-  const rounds = h('input.input', { type: 'number', min: 1, max: 100, value: S.settings.goalMax || GOAL_MAX, style: { maxWidth: '110px' } });
+  const rounds = h('input.input', { type: 'number', min: 0, max: 1000, value: S.settings.goalMax ?? GOAL_MAX, style: { maxWidth: '110px' } });
   const here = h('input', { type: 'checkbox' });
   let m;
   const go = async () => {
@@ -170,7 +173,7 @@ function goalDialog() {
     const conv = cur() || newConv();
     if (running(conv) || conv.bg) { toast(L('Espere esta resposta terminar para começar uma meta.'), 'err'); return; }
     m.close();
-    const item = goalStart(conv, { text, check: check.value.trim(), here: here.checked, max: Math.max(1, Math.min(100, Number(rounds.value) || GOAL_MAX)) });
+    const item = goalStart(conv, { text, check: check.value.trim(), here: here.checked, max: goalClamp(rounds.value === '' ? GOAL_MAX : Number(rounds.value)) });
     await submit(conv, item);
   };
   goal.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); go(); } });
@@ -181,7 +184,7 @@ function goalDialog() {
       h('div.field', null, h('label', null, L('Objetivo')), goal, h('small', null, L('Quanto mais concreto, melhor: diga como saber que está pronto.'))),
       h('div.field', null, h('label', null, L('Comando de conferência')), check, h('small', null, L('Opcional. Roda no fim de cada rodada na pasta da conversa; a meta só termina quando ele passar (código 0). Ex.: npm test, cargo build, pytest.'))),
       h('div.row', null,
-        h('div.field', null, h('label', null, L('Máximo de rodadas')), rounds),
+        h('div.field', null, h('label', null, L('Máximo de rodadas')), rounds, h('small', null, L('0 = sem limite'))),
         h('label.kb-on', { style: { alignSelf: 'flex-end', paddingBottom: '8px' } }, here, h('span', null, L('Rodar nesta tela (em vez de segundo plano)')))),
       conv0 && !running(conv0) && conv0.messages.length ? h('small.muted', null, L('Começa nesta conversa, com o que ela já tem.')) : null),
     foot: [h('button.btn', { onclick: () => m.close() }, L('Cancelar')), h('button.btn.primary', { onclick: go }, ic('play'), L('Começar'))],

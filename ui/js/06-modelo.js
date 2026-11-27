@@ -433,6 +433,7 @@ async function streamRaw(messages, tools, msg, signal, onDelta, extra = {}) {
 function needsApproval(info, conv) {
   const mode = S.settings.approval;
   if (mode === 'never' || conv.autoApprove) return false;
+  if (typeof autonomous === 'function' && autonomous(conv)) return false;
   if (mode === 'all') return true;
   // conectores também: o que altera algo (pela anotação do servidor ou pelo nome: write_, delete_,
   // Execute..., Set...) pede confirmação, a não ser que você confie no conector

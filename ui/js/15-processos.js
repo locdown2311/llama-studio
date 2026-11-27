@@ -62,7 +62,7 @@ async function renderProcsPage() {
   // 1. respostas nesta tela
   sec(L('Respondendo nesta tela'), [...S.runs.keys()].map((id) => {
     const c = S.convs.find((x) => x.id === id);
-    return procRow('chat', c?.title || id, (c?.goal?.status === 'active' ? L('Meta, rodada {0}/{1}', c.goal.round + 1, c.goal.max) + ' · ' : '') + (c ? bgStatus(c) : ''), 'running',
+    return procRow('chat', c?.title || id, (c?.goal?.status === 'active' ? (c.goal.max ? L('Meta, rodada {0}/{1}', c.goal.round + 1, c.goal.max) : L('Meta, rodada {0}', c.goal.round + 1)) + ' · ' : '') + (c ? bgStatus(c) : ''), 'running',
       [openConvBtn(id), procBtn(L('Parar'), () => { S.runs.get(id)?.abort(); setTimeout(renderProcsPage, 300); })]);
   }), L('Nenhuma resposta rodando aqui.'));
 

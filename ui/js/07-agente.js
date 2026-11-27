@@ -246,6 +246,10 @@ const CONCISE_NOTE = L('Seja direto e econômico: responda só o que foi pedido,
    devolvendo o mesmo resultado, ou o mesmo erro de novo) avisa o modelo e, se ele insistir, para;
    e, quando a tarefa está andando (lista de tarefas avança, arquivos são alterados), o limite estica. */
 const LOOP_WARN = 3, LOOP_STOP = 4, ERR_WARN = 3, ERR_STOP = 5;
+/** Modo autônomo: segundo plano ou meta ativa. Ninguém está olhando: sem teto de passos e sem esperar aprovação
+    (o auditor, se ligado, continua olhando o que altera algo; repetições sem resultado novo ainda encerram a vez). */
+function autonomous(conv) { return S.settings.autoUnlimited !== false && (EXECUTOR || conv?.goal?.status === 'active'); }
+const AUTO_STEPS = 100000;
 function stepGuard(base) {
   return { base, limit: base, cap: base * 3, seen: new Map(), errs: new Map(), warned: new Set(), lastWarn: -99, writes: 0, mark: { done: 0, writes: 0 }, stop: '',
     files: new Map(), lastWrite: -1, lastRun: -1, checked: false, preflown: false, relax: new Map(), judge: null, redirects: 0, fails: new Map() };
@@ -496,7 +500,7 @@ async function runAgent(conv) {
     ].filter(Boolean).join('\n\n');
     conv._sys = system; // a comparação A/B usa o mesmo prompt de sistema
     conv.ctxParts = ctxBreakdown(system, ctx.text, catalogSys, tools, meta, conv);
-    const g = stepGuard(Math.max(1, Number(S.settings.maxSteps) || 40));
+    const g = stepGuard(autonomous(conv) ? AUTO_STEPS : Math.max(1, Number(S.settings.maxSteps) || 40));
     const lastAsk = [...conv.messages].reverse().find((m) => m.role === 'user' && !m.hidden);
     const planTurn = !!lastAsk?.plan;
     tctx.plan = planTurn;
@@ -1189,7 +1193,7 @@ function execTick() {
     for (const [cid, run] of EXEC.running) {
       const c = S.convs.find((x) => x.id === cid);
       if (!c) continue;
-      const t = (c.goal?.status === 'active' ? L('Meta, rodada {0}/{1}', c.goal.round + 1, c.goal.max) + ' · ' : '') + bgStatus(c);
+      const t = (c.goal?.status === 'active' ? (c.goal.max ? L('Meta, rodada {0}/{1}', c.goal.round + 1, c.goal.max) : L('Meta, rodada {0}', c.goal.round + 1)) + ' · ' : '') + bgStatus(c);
       if (t !== run.prog || Date.now() - (run.progAt || 0) > 15000) {
         run.prog = t; run.progAt = Date.now();
         api('/api/jobs/progress', { job: run.job.id, text: t }).catch(() => {});

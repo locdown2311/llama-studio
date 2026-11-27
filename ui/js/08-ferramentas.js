@@ -544,11 +544,13 @@ async function runExplorer(args, tctx, tmsg, apiId, root = tmsg, who = '') {
     if (!r.isError) { (tmsg.wrote ||= []).includes(a.path) || tmsg.wrote.push(a.path); if (tctx.ws === S.ws.path) markFresh(a.path); }
     return r;
   };
-  const max = Math.max(3, Number(S.settings.explorerSteps) || 20);
+  const max = typeof autonomous === 'function' && autonomous(tctx.conv) ? AUTO_STEPS : Math.max(3, Number(S.settings.explorerSteps) || 20);
+  const seen = new Map(); // mesma chamada com os mesmos argumentos repetida: hora de fechar o relatório
+  let loop = false;
   for (let step = 0; step <= max; step++) {
     if (tctx.signal.aborted) return { content: 'Cancelado.', isError: true };
-    const last = step === max;
-    if (last) msgs.push({ role: 'user', content: L('Limite de passos atingido. Escreva agora o relatório final com o que já encontrou.') });
+    const last = step === max || loop;
+    if (last) msgs.push({ role: 'user', content: loop ? L('Você está repetindo as mesmas chamadas. Escreva agora o relatório final com o que já encontrou.') : L('Limite de passos atingido. Escreva agora o relatório final com o que já encontrou.') });
     const m = { content: '', reasoning: '', tool_calls: [] };
     await teamStep(st, msgs, last ? [] : tools, m, tctx, tmsg);
     const calls = m.tool_calls.filter((t) => t && t.function?.name);
@@ -561,6 +563,7 @@ async function runExplorer(args, tctx, tmsg, apiId, root = tmsg, who = '') {
       return { content: (text.trim() || L('O subagente terminou sem relatório.')) + wrote, isError: false };
     }
     msgs.push({ role: 'assistant', content: text, tool_calls: calls.map((t) => ({ id: t.id, type: 'function', function: { name: t.function.name, arguments: validArgs(t.function.arguments, () => {}) } })) });
+    for (const t of calls) { const k = t.function.name + ':' + t.function.arguments; seen.set(k, (seen.get(k) || 0) + 1); if (seen.get(k) >= 4) loop = true; }
     // leituras do mesmo passo rodam juntas; o navegador (uma página só) e as escritas vão em ordem
     const results = new Array(calls.length);
     const pend = [];

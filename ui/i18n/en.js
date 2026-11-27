@@ -2843,4 +2843,12 @@ const I18N_EN = {
   "Pergunte ou peça uma tarefa. / para comandos, @ para habilidades e arquivos": "Ask or request a task. / for commands, @ for skills and files",
   "ontem {0}": "yesterday {0}",
   "amanhã {0}": "tomorrow {0}",
+  "rodada {0}": "round {0}",
+  "OBJETIVO:\n{0}\n\nRODADA: {1}\n\n{2}O QUE ACONTECEU (fim da conversa):\n{3}": "GOAL:\n{0}\n\nROUND: {1}\n\n{2}WHAT HAPPENED (end of the conversation):\n{3}",
+  "(Meta, {0}) Ainda não está pronto: {1}": "(Goal, {0}) Not done yet: {1}",
+  "0 = sem limite": "0 = no limit",
+  "Meta, rodada {0}": "Goal, round {0}",
+  "Você está repetindo as mesmas chamadas. Escreva agora o relatório final com o que já encontrou.": "You are repeating the same calls. Write the final report now with what you found.",
+  "Modo autônomo sem limites": "Unlimited autonomous mode",
+  "Em segundo plano e nas metas ninguém está olhando: sem teto de passos (do agente e dos subagentes) e sem pedir aprovação. O auditor, se ligado, continua olhando o que altera algo, e repetições sem resultado novo ainda encerram a vez.": "In the background and in goals nobody is watching: no step cap (agent and subagents) and no approval prompts. The auditor, if on, still reviews what changes things, and repetitions with no new result still end the turn.",
 };
