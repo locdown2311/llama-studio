@@ -261,11 +261,18 @@ function modelStats() {
     for (const m of c.messages || []) {
       if (m.role === 'assistant') {
         const v = m.via || (c.modelId ? (convModel(c)?.name || c.modelId) : L('modelo local'));
-        const s = st.get(v) || { by: v, resp: 0, calls: 0, errs: 0, empty: 0, loops: 0, cut: 0, ms: 0, msN: 0, ttft: 0, ttftN: 0 };
+        const s = st.get(v) || { by: v, resp: 0, calls: 0, errs: 0, empty: 0, loops: 0, cut: 0, ms: 0, msN: 0, ttft: 0, ttftN: 0, steps: 0, multi: 0, ops: 0 };
         st.set(v, s);
         s.resp++;
         const calls = (m.tool_calls || []).filter((t) => t.function?.name);
         s.calls += calls.length;
+        // paralelo: passos com ferramenta, quantos pediram 2+ coisas de uma vez, e operações (um lote de leitura conta cada arquivo)
+        if (calls.length) {
+          s.steps++;
+          const ops = calls.reduce((n, t) => { const a = t.function.name === 'read_file' ? parseArgs(t.function.arguments) : null; return n + (Array.isArray(a?.paths) && !a.path ? Math.max(1, a.paths.length) : 1); }, 0);
+          s.ops += ops;
+          if (ops > 1) s.multi++;
+        }
         for (const t of calls) by.set(t.id, s);
         const text = typeof m.content === 'string' ? splitThink(m.content).text : '';
         if (!text.trim() && !calls.length && !m.looped) s.empty++;
@@ -289,19 +296,81 @@ function showModelStats() {
   const sec = (ms, n) => (n ? fmtMs(ms / n) : '—');
   const best = rows.filter((r) => r.calls >= 20).sort((a, b) => a.errs / a.calls - b.errs / b.calls)[0];
   const m = modal({
-    title: L('Desempenho dos modelos'),
+    title: L('Desempenho dos modelos'), wide: true,
     body: h('div', null,
       rows.length ? h('div.mstats-wrap', null, h('table.ab-table.mstats', null,
-        h('tr', null, [L('Modelo'), L('Respostas'), L('Chamadas'), L('Erros'), L('Vazias'), L('Repetição'), L('Cortadas'), L('Tempo médio'), L('1º sinal')].map((t) => h('th', null, t))),
+        h('tr', null, [[L('Modelo')], [L('Respostas')], [L('Chamadas')], [L('Por passo'), L('Média de operações por passo que usou ferramenta (um lote de leitura conta cada arquivo). Perto de 1 = faz uma coisa por vez.')], [L('Juntas'), L('Passos em que pediu 2 ou mais coisas de uma vez, que o studio executa em paralelo.')], [L('Erros')], [L('Vazias')], [L('Repetição')], [L('Cortadas')], [L('Tempo médio')], [L('1º sinal')]].map(([t, tip]) => h('th', tip ? { title: tip } : null, t))),
         rows.map((r) => h('tr', r === best ? { class: 'best' } : null,
           h('td', { title: r.by }, r.by), h('td', null, String(r.resp)), h('td', null, String(r.calls)),
+          h('td', { class: r.steps >= 10 && r.ops / r.steps < 1.15 ? 'bad' : '' }, r.steps ? (r.ops / r.steps).toFixed(1) : '—'), h('td', null, pct(r.multi, r.steps)),
           h('td', { class: r.calls >= 10 && r.errs / r.calls > 0.08 ? 'bad' : '' }, pct(r.errs, r.calls)),
           h('td', null, String(r.empty)), h('td', { class: r.loops ? 'bad' : '' }, String(r.loops)), h('td', { class: r.cut ? 'bad' : '' }, String(r.cut)),
           h('td', null, sec(r.ms, r.msN)), h('td', null, sec(r.ttft, r.ttftN))))))
         : h('p.muted', null, L('Ainda não há respostas suficientes para comparar.')),
-      h('small.muted', null, L('Erros = chamadas de ferramenta que falharam (sem contar cancelamentos e permissões negadas). Destacado: o que menos erra entre os que fizeram 20+ chamadas. O 1º sinal só existe nas respostas desta versão em diante.'))),
-    foot: [h('button.btn', { onclick: () => { m.close(); openSettings('economy'); } }, ic('dollar'), L('Economia e aprendizado')), h('span.spacer'), h('button.btn', { onclick: () => m.close() }, L('Fechar'))],
+      h('small.muted', null, L('Erros = chamadas de ferramenta que falharam (sem contar cancelamentos e permissões negadas). Destacado: o que menos erra entre os que fizeram 20+ chamadas. O 1º sinal só existe nas respostas desta versão em diante.')),
+      h('small.muted', { style: { display: 'block', marginTop: '6px' } }, L('Por passo e Juntas mostram quanto cada modelo aproveita o paralelo: quem fica perto de 1,0 e 0% faz uma coisa por vez e demora mais nas tarefas longas.'))),
+    foot: [h('button.btn', { onclick: () => { m.close(); openSettings('economy'); } }, ic('dollar'), L('Economia e aprendizado')), h('button.btn', { onclick: () => { m.close(); runParTest(); } }, ic('zap'), L('Testar paralelo das APIs')), h('span.spacer'), h('button.btn', { onclick: () => m.close() }, L('Fechar'))],
   });
 }
 
 /* o analisador de falhas virou a economia de tokens (07-agente.js): aprende sozinho por projeto */
+
+/* ============================================================ teste de paralelo das APIs */
+// Mesma tarefa para cada API pronta, com 5 partes independentes (3 leituras, 1 busca no projeto, 1 na web).
+// Só a primeira resposta conta: quantas dessas partes o modelo pediu de uma vez. Nada é executado.
+const PAR_TOOLS = [
+  { type: 'function', function: { name: 'read_file', description: 'Lê um arquivo de texto. Para ler vários de uma vez, passe paths (lista).', parameters: { type: 'object', properties: { path: { type: 'string' }, paths: { type: 'array', items: { type: 'string' } } } } } },
+  { type: 'function', function: { name: 'search_files', description: 'Procura arquivos pelo nome e, opcionalmente, por conteúdo (regex).', parameters: { type: 'object', properties: { name: { type: 'string' }, content: { type: 'string' }, path: { type: 'string' } } } } },
+  { type: 'function', function: { name: 'web_search', description: 'Pesquisa na web.', parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } } },
+];
+const PAR_SYSTEM = () => L('Você é um assistente de programação com ferramentas. Chamadas em paralelo: o que não depende de outro resultado vai todo na mesma resposta (ler vários arquivos — ou read_file com paths —, várias buscas); o studio executa juntos. O que depende do resultado anterior fica para o passo seguinte.');
+const PAR_TASK = () => L('Quero um resumo do projeto. Leia README.md, package.json e src/main.js, procure "TODO" nos arquivos .js e pesquise na web qual é a versão LTS mais recente do Node.js.');
+
+async function parTestOne(api, signal) {
+  const m = { content: '', reasoning: '', tool_calls: [] };
+  const t0 = performance.now();
+  try {
+    await streamApi([{ role: 'system', content: PAR_SYSTEM() }, { role: 'user', content: PAR_TASK() }], PAR_TOOLS, m, signal, null, { _p: api.id, max_tokens: 1500, _timeout: 90000 });
+  } catch (e) { return { api, err: e.message || String(e) }; }
+  const calls = (m.tool_calls || []).filter((t) => t.function?.name);
+  const seen = new Set(); let batch = false;
+  for (const t of calls) {
+    const a = parseArgs(t.function.arguments) || {};
+    if (t.function.name === 'read_file') {
+      const ps = Array.isArray(a.paths) && a.paths.length ? a.paths : [a.path];
+      if (ps.length > 1) batch = true;
+      for (const p of ps) { const f = String(p || '').toLowerCase(); for (const k of ['readme', 'package.json', 'main.js']) if (f.includes(k)) seen.add(k); }
+    } else if (t.function.name === 'search_files' && /todo/i.test(JSON.stringify(a))) seen.add('todo');
+    else if (t.function.name === 'web_search') seen.add('web');
+  }
+  return { api, ops: seen.size, calls: calls.length, batch, ms: performance.now() - t0, text: !calls.length ? splitThink(m.content || '').text.slice(0, 120) : '' };
+}
+
+async function runParTest() {
+  const apis = (S.info?.apis || []).filter((a) => a.ready);
+  if (!apis.length) { toast(L('Nenhuma API externa pronta para testar.'), 'err'); return; }
+  const ac = new AbortController();
+  const rows = new Map(apis.map((a) => [a.id, null]));
+  const table = h('div.mstats-wrap');
+  const draw = () => {
+    table.innerHTML = '';
+    const list = [...rows.entries()].map(([id, r]) => ({ id, r, a: apis.find((x) => x.id === id) }));
+    list.sort((x, y) => (y.r?.ops ?? -1) - (x.r?.ops ?? -1) || (x.r?.ms ?? 1e9) - (y.r?.ms ?? 1e9));
+    table.append(h('table.ab-table.mstats', null,
+      h('tr', null, [L('API'), L('Partes no 1º passo'), L('Chamadas'), L('Lote de leitura'), L('Tempo')].map((t) => h('th', null, t))),
+      list.map(({ a, r }, i) => h('tr', r && !r.err && i === 0 && r.ops > 1 ? { class: 'best' } : null,
+        h('td', { title: apiLabel(a) }, apiLabel(a)),
+        !r ? h('td', { colspan: 4, class: 'muted' }, L('testando...'))
+          : r.err ? h('td', { colspan: 4, class: 'bad' }, r.err)
+            : [h('td', { class: r.ops <= 1 ? 'bad' : '' }, L('{0} de 5', r.ops) + (r.text ? ' · ' + L('respondeu sem ferramenta') : '')), h('td', null, String(r.calls)), h('td', null, r.batch ? L('sim') : L('não')), h('td', null, fmtMs(r.ms))]))));
+  };
+  draw();
+  const m = modal({
+    title: L('Teste de paralelo das APIs'), wide: true,
+    body: h('div', null,
+      h('p.muted.small', null, L('Cada API recebe a mesma tarefa com 5 partes independentes (ler 3 arquivos, procurar TODO no projeto, pesquisar na web). Conta quantas ela pediu já na primeira resposta; nada é executado. 5 de 5 = aproveita o paralelo ao máximo.')),
+      table),
+    foot: [h('span.spacer'), h('button.btn', { onclick: () => { ac.abort(); m.close(); } }, L('Fechar'))],
+  });
+  await Promise.all(apis.map((a) => parTestOne(a, ac.signal).then((r) => { rows.set(a.id, r); draw(); })));
+}

@@ -3289,6 +3289,8 @@ function toolSummary(name, args) {
       .join(" ");
 
   if (!args) return "";
+  if (name === "read_file" && Array.isArray(args.paths) && args.paths.length && !args.path)
+    return args.paths.length === 1 ? args.paths[0] : L("{0} arquivos: {1}", args.paths.length, args.paths.map((p) => String(p).split(/[\\/]/).pop()).join(", "));
 
   const pick =
     args.task ||

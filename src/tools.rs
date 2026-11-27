@@ -33,8 +33,8 @@ const DEFS: &[Def] = &[
       r#"{"type":"object","properties":{"path":{"type":"string","description":"Caminho da pasta"}},"required":["path"]}"#),
     d("analyze_image", "read", false, false, "Olha uma imagem do projeto e responde sobre ela (captura de tela, foto, diagrama, print de erro). Quem olha é um modelo com visão, numa fila com troca automática se um falhar; você recebe o texto. Use sempre que precisar saber o que tem numa imagem.",
       r#"{"type":"object","properties":{"path":{"type":"string","description":"Imagem: caminho no projeto (ou absoluto) de png, jpg, gif, webp ou bmp"},"question":{"type":"string","description":"O que você quer saber (ex.: \"que erro aparece?\", \"transcreva o código\", \"onde está o botão Salvar?\"). Vazio = descrição completa"}},"required":["path"]}"#),
-    d("read_file", "read", false, false, "Lê um arquivo de texto. Arquivo grande sem offset/limit volta como sumário (seções, títulos, funções) com números de linha: depois leia só os trechos que precisar com offset/limit.",
-      r#"{"type":"object","properties":{"path":{"type":"string"},"offset":{"type":"integer","description":"Linha inicial (1 = primeira)"},"limit":{"type":"integer","description":"Quantidade máxima de linhas"}},"required":["path"]}"#),
+    d("read_file", "read", false, false, "Lê um arquivo de texto. Arquivo grande sem offset/limit volta como sumário (seções, títulos, funções) com números de linha: depois leia só os trechos que precisar com offset/limit. Para ler vários arquivos de uma vez, passe paths (lista) em vez de path.",
+      r#"{"type":"object","properties":{"path":{"type":"string"},"paths":{"type":"array","items":{"type":"string"},"description":"Vários arquivos de uma vez (até 12), em vez de path"},"offset":{"type":"integer","description":"Linha inicial (1 = primeira)"},"limit":{"type":"integer","description":"Quantidade máxima de linhas"}}}"#),
     d("search_files", "read", false, false, "Procura arquivos pelo nome (aceita * como curinga) e, opcionalmente, por conteúdo (expressão regular). Devolve caminhos relativos e, na busca por conteúdo, as linhas encontradas com o número. path pode ser um arquivo: procura só nele.",
       r#"{"type":"object","properties":{"name":{"type":"string","description":"Parte do nome ou padrão, ex.: *.py"},"content":{"type":"string","description":"Regex para procurar dentro dos arquivos"},"path":{"type":"string","description":"Pasta (ou arquivo) onde procurar (padrão: raiz)"}}}"#),
     d("write_file", "write", true, false, "Cria ou substitui um arquivo dentro da pasta de trabalho com o conteúdo informado. Cria as pastas que faltarem. Para mudar parte de um arquivo que já existe, use edit_file (gasta bem menos).",
@@ -496,8 +496,8 @@ pub fn build_context(app: &App, ws: &Path, skill_ids: &[String], groups: &[Strin
     }
     if has("read") || has("shell") || has("write") || has("web") {
         parts.push(L!(
-            "Chamadas em paralelo: o que não depende de outro resultado vai todo na mesma resposta (ler vários arquivos, várias buscas, escrever arquivos diferentes, comandos independentes); o studio executa juntos. O que depende do resultado anterior fica para o passo seguinte, ou junte os comandos encadeados num só (a && b).",
-            "Parallel calls: everything that does not depend on another result goes in the same response (reading several files, several searches, writing different files, independent commands); the studio runs them together. What depends on the previous result waits for the next step, or chain the commands in one (a && b)."
+            "Chamadas em paralelo: o que não depende de outro resultado vai todo na mesma resposta (ler vários arquivos — ou read_file com paths —, várias buscas, escrever arquivos diferentes, comandos independentes); o studio executa juntos. O que depende do resultado anterior fica para o passo seguinte, ou junte os comandos encadeados num só (a && b).",
+            "Parallel calls: everything that does not depend on another result goes in the same response (reading several files — or read_file with paths —, several searches, writing different files, independent commands); the studio runs them together. What depends on the previous result waits for the next step, or chain the commands in one (a && b)."
         )
         .into());
     }
@@ -1145,7 +1145,24 @@ fn run_builtin(app: &App, ws: &Path, name: &str, a: &Value, allow: &[PathBuf]) -
             Ok(format!("{}\n{}", dir.display(), if lines.is_empty() { L!("(vazia)", "(empty)").into() } else { lines.join("\n") }))
         }
         "read_file" => {
-            let file = resolve_read(app, ws, s(a, "path"), allow)?;
+            // lote: vários arquivos numa chamada só (cada um com seu cabeçalho; um erro não derruba os outros)
+            let many: Vec<String> = a.get("paths").and_then(Value::as_array).map(|v| v.iter().filter_map(|x| x.as_str().map(str::to_string)).filter(|x| !x.trim().is_empty()).collect()).unwrap_or_default();
+            if !many.is_empty() && s(a, "path").is_empty() || many.len() > 1 {
+                if many.len() > 12 {
+                    return Err(LF!("Até 12 arquivos por chamada (vieram {}). Divida em mais chamadas na mesma resposta.", "Up to 12 files per call ({} given). Split into more calls in the same response.", many.len()));
+                }
+                let mut out = Vec::new();
+                for p in &many {
+                    let one = run_builtin(app, ws, "read_file", &json!({"path": p}), allow);
+                    out.push(match one {
+                        Ok(t) => format!("===== {p} =====\n{t}"),
+                        Err(x) => format!("===== {p} =====\n{}: {x}", L!("Erro", "Error")),
+                    });
+                }
+                return Ok(out.join("\n\n"));
+            }
+            let path = if s(a, "path").is_empty() { many.first().cloned().unwrap_or_default() } else { s(a, "path").to_string() };
+            let file = resolve_read(app, ws, &path, allow)?;
             let md = std::fs::metadata(&file).map_err(e)?;
             if md.is_dir() {
                 let mut al = allow.to_vec();
